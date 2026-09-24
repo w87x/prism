@@ -368,15 +368,22 @@ func (s *Server) registerMemory() {
 		return out, nil
 	})
 	rpc(s, "memory.entity_graph", func(ctx context.Context, r struct {
-		BankID int64 `json:"bank_id"`
-		Limit  int   `json:"limit"`
+		BankID  int64 `json:"bank_id"`
+		History bool  `json:"history"`
+		Limit   int   `json:"limit"`
 	}) (*memory.EntityGraphResult, error) {
-		return a.Memory.EntityGraph(ctx, r.BankID, r.Limit)
+		return a.Memory.EntityGraph(ctx, r.BankID, r.History, r.Limit)
 	})
 	rpc(s, "memory.entity_facts", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) ([]memory.Fact, error) {
 		return a.Memory.EntityFacts(ctx, r.ID)
+	})
+	rpc(s, "memory.entity_link_history", func(ctx context.Context, r struct {
+		A int64 `json:"a"`
+		B int64 `json:"b"`
+	}) ([]memory.EntityLinkState, error) {
+		return a.Memory.EntityLinkHistory(ctx, r.A, r.B)
 	})
 	rpc(s, "memory.full_graph", func(ctx context.Context, r struct {
 		BankID  int64 `json:"bank_id"`

@@ -44,7 +44,7 @@ func TestExtractEntitiesBuildsGraphAndIsIdempotent(t *testing.T) {
 		t.Fatalf("first pass: %+v", res)
 	}
 
-	g, err := s.EntityGraph(ctx, bank.ID, 0)
+	g, err := s.EntityGraph(ctx, bank.ID, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestExtractEntitiesBuildsGraphAndIsIdempotent(t *testing.T) {
 	if _, err := s.ExtractEntities(ctx, bank.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	g2, err := s.EntityGraph(ctx, bank.ID, 0)
+	g2, err := s.EntityGraph(ctx, bank.ID, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,5 +138,116 @@ func TestEntitiesDueWaitsForEnoughNewFacts(t *testing.T) {
 	}
 	if rs, _ := s.EntitiesDue(ctx, 4, 2); len(rs) != 0 || calls != 1 {
 		t.Fatalf("the watermark must stop an immediate re-run: %+v calls=%d", rs, calls)
+	}
+}
+
+// A relation between the same pair of entities changes over time (not merely re-observed): the old state is
+// archived with its validity window closed, the new one starts a fresh one, and history keeps both.
+func TestLinkEntitiesArchivesChangedRelation(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	bank, err := s.BankBySpec(ctx, "user", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := s.upsertEntity(ctx, bank.ID, "Danil", "person", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acme, _, err := s.upsertEntity(ctx, bank.ID, "Acme", "organization", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkEntities(ctx, user, acme, "semantic", "works at", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := s.EntityGraph(ctx, bank.ID, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Edges) != 1 || g.Edges[0].Label != "works at" || g.Edges[0].Retired {
+		t.Fatalf("edges = %+v", g.Edges)
+	}
+
+	// same relation re-observed: strengthens in place, no history row, still current.
+	if err := s.linkEntities(ctx, user, acme, "semantic", "works at", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+	hist, err := s.EntityLinkHistory(ctx, user, acme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != 1 {
+		t.Fatalf("re-observing the same relation must not fork history: %+v", hist)
+	}
+
+	// the label on the same pair changes: the old state is archived, a new window starts.
+	if err := s.linkEntities(ctx, user, acme, "semantic", "used to work at", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+	g2, err := s.EntityGraph(ctx, bank.ID, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g2.Edges) != 1 || g2.Edges[0].Label != "used to work at" {
+		t.Fatalf("live edge should now read the new label: %+v", g2.Edges)
+	}
+	hist2, err := s.EntityLinkHistory(ctx, user, acme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist2) != 2 || hist2[0].Label != "works at" || hist2[0].ValidTo == nil || hist2[1].Label != "used to work at" || hist2[1].ValidTo != nil {
+		t.Fatalf("history should keep both states with the first one closed: %+v", hist2)
+	}
+}
+
+// A new employer for the same person invalidates the old "works at" edge even though it is a different pair
+// of entities (Danil→Acme vs Danil→Globex) — an exclusive semantic relation only holds for one counterpart
+// at a time.
+func TestLinkEntitiesInvalidatesExclusiveRelationAcrossPairs(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	bank, err := s.BankBySpec(ctx, "user", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, _ := s.upsertEntity(ctx, bank.ID, "Danil", "person", 0)
+	acme, _, _ := s.upsertEntity(ctx, bank.ID, "Acme", "organization", 0)
+	globex, _, _ := s.upsertEntity(ctx, bank.ID, "Globex", "organization", 0)
+
+	if err := s.linkEntities(ctx, user, acme, "semantic", "works at", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkEntities(ctx, user, globex, "semantic", "works at", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := s.EntityGraph(ctx, bank.ID, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Edges) != 1 || g.Edges[0].Label != "works at" {
+		t.Fatalf("only the Globex edge should still be current: %+v", g.Edges)
+	}
+
+	gh, err := s.EntityGraph(ctx, bank.ID, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gh.Edges) != 2 {
+		t.Fatalf("with history, both the retired Acme edge and the current Globex edge must show: %+v", gh.Edges)
+	}
+	var sawRetired bool
+	for _, e := range gh.Edges {
+		if e.Retired {
+			sawRetired = true
+			if e.InvalidatedBy != "contradicted" {
+				t.Fatalf("retired edge invalidated_by = %q, want contradicted", e.InvalidatedBy)
+			}
+		}
+	}
+	if !sawRetired {
+		t.Fatalf("expected one retired edge: %+v", gh.Edges)
 	}
 }
