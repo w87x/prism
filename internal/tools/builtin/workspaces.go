@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,9 +32,18 @@ type Workspace struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	Stat      string    `json:"stat"` // changed files vs base (open workspaces)
+
+	VerifyStatus string     `json:"verify_status"` // "" (never) | pass | fail | none (no commands known)
+	VerifyOutput string     `json:"verify_output"`
+	VerifiedAt   *time.Time `json:"verified_at"`
+	Stale        bool       `json:"stale"` // changed since it was verified
+	ReviewTaskID *int64     `json:"review_task_id"`
+	Review       string     `json:"review"`  // the reviewer's report, once it has finished
+	Verdict      string     `json:"verdict"` // approve | approve with fixes | reject | ""
+	verifyHash   string
 }
 
-const wsCols = `id,repo,path,branch,base,agent,task_id,status,created_at`
+const wsCols = `id,repo,path,branch,base,agent,task_id,status,created_at,verify_status,verify_output,verify_hash,verified_at,review_task_id`
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -50,7 +61,7 @@ func slug(s string) string {
 func getWorkspace(ctx context.Context, db *pgxpool.Pool, id int64) (Workspace, error) {
 	var w Workspace
 	err := db.QueryRow(ctx, `SELECT `+wsCols+` FROM code_workspaces WHERE id=$1`, id).
-		Scan(&w.ID, &w.Repo, &w.Path, &w.Branch, &w.Base, &w.Agent, &w.TaskID, &w.Status, &w.CreatedAt)
+		Scan(&w.ID, &w.Repo, &w.Path, &w.Branch, &w.Base, &w.Agent, &w.TaskID, &w.Status, &w.CreatedAt, &w.VerifyStatus, &w.VerifyOutput, &w.verifyHash, &w.VerifiedAt, &w.ReviewTaskID)
 	if err != nil {
 		return w, fmt.Errorf("workspace #%d does not exist", id)
 	}
@@ -66,7 +77,7 @@ func Workspaces(ctx context.Context, db *pgxpool.Pool) ([]Workspace, error) {
 	out := []Workspace{}
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Repo, &w.Path, &w.Branch, &w.Base, &w.Agent, &w.TaskID, &w.Status, &w.CreatedAt); err != nil {
+		if err := rows.Scan(&w.ID, &w.Repo, &w.Path, &w.Branch, &w.Base, &w.Agent, &w.TaskID, &w.Status, &w.CreatedAt, &w.VerifyStatus, &w.VerifyOutput, &w.verifyHash, &w.VerifiedAt, &w.ReviewTaskID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -74,6 +85,18 @@ func Workspaces(ctx context.Context, db *pgxpool.Pool) ([]Workspace, error) {
 	}
 	rows.Close()
 	for i := range out {
+		if w := &out[i]; w.ReviewTaskID != nil {
+			var status, result string
+			if db.QueryRow(ctx, `SELECT status, COALESCE(result,'') FROM tasks WHERE id=$1`, *w.ReviewTaskID).Scan(&status, &result) == nil {
+				w.Review, w.Verdict = result, verdictOf(result)
+				if status != "done" && status != "partial" {
+					w.Review = "(review " + status + ")"
+				}
+			}
+		}
+		if out[i].VerifyStatus != "" && out[i].Status == "open" {
+			out[i].Stale = out[i].verifyHash != workspaceHash(ctx, out[i])
+		}
 		if out[i].Status == "open" {
 			if _, err := os.Stat(out[i].Path); err == nil {
 				_, _ = runGit(ctx, out[i].Path, 30*time.Second, "", "add", "-A")
@@ -280,8 +303,181 @@ func registerWorkspaces(reg *tools.Registry, d Deps) {
 				if err != nil {
 					return "", err
 				}
-				return WorkspaceDiff(ctx, d.DB, a.ID, a.StatOnly)
+				diff, err := WorkspaceDiff(ctx, d.DB, a.ID, a.StatOnly)
+				if err != nil {
+					return diff, err
+				}
+				w, _ := getWorkspace(ctx, d.DB, a.ID)
+				line := "Checks: not run yet — run workspace_verify before you report done.\n\n"
+				if w.VerifyStatus != "" {
+					line = fmt.Sprintf("Checks: %s (%s)", w.VerifyStatus, w.VerifiedAt.Format("15:04"))
+					if w.verifyHash != workspaceHash(ctx, w) {
+						line += " — but the code changed since; run workspace_verify again"
+					}
+					line += "\n\n"
+				}
+				return line + diff, nil
+			},
+		},
+		&tools.Tool{
+			Name: "workspace_verify", Category: "git", Risk: tools.RiskExec,
+			Description: "Run the repository's build, lint and test commands inside a workspace and get pass/fail with the failing output. The commands come from the project's saved settings or from scanning it. Call it after your changes and before reporting done; if it fails, fix the cause and run it again. The result is shown to the user next to the diff.",
+			Params:      tools.Obj("id", tools.Int("id", "workspace id")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					ID int64 `json:"id"`
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				status, report, err := VerifyWorkspace(ctx, d.DB, a.ID)
+				if err != nil {
+					return "", err
+				}
+				return strings.ToUpper(status) + "\n" + report, nil
 			},
 		},
 	)
+}
+
+var verdictRe = regexp.MustCompile(`(?i)verdict:?\s*\**\s*(approve with fixes|approve|reject)`)
+
+// verdictOf reads the reviewer's one-line verdict from its report.
+func verdictOf(report string) string {
+	m := verdictRe.FindAllStringSubmatch(report, -1)
+	if len(m) == 0 {
+		return ""
+	}
+	return strings.ToLower(m[len(m)-1][1])
+}
+
+// workspaceHash identifies the current state of a workspace's content (HEAD plus uncommitted changes), so a
+// verification can be recognised as out of date once the code changes again.
+func workspaceHash(ctx context.Context, w Workspace) string {
+	head, _ := runGit(ctx, w.Path, 20*time.Second, "", "rev-parse", "HEAD")
+	_, _ = runGit(ctx, w.Path, 20*time.Second, "", "add", "-A")
+	diff, _ := runGit(ctx, w.Path, 30*time.Second, "", "diff", "--cached", "--no-color", "HEAD")
+	sum := sha1.Sum([]byte(strings.TrimSpace(head) + "\n" + diff))
+	return hex.EncodeToString(sum[:])
+}
+
+// CodeCommands are the build, test and lint commands checks run for a repository.
+type CodeCommands struct {
+	Repo  string `json:"repo"`
+	Build string `json:"build"`
+	Test  string `json:"test"`
+	Lint  string `json:"lint"`
+	// Detected are what scanning the repository suggests, shown as placeholders.
+	DetectedBuild string `json:"detected_build"`
+	DetectedTest  string `json:"detected_test"`
+	DetectedLint  string `json:"detected_lint"`
+}
+
+func first(v []string) string {
+	if len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// Commands returns the saved commands of a repository together with what scanning it suggests.
+func Commands(ctx context.Context, db *pgxpool.Pool, repo string) (CodeCommands, error) {
+	c := CodeCommands{Repo: repo}
+	_ = db.QueryRow(ctx, `SELECT build_cmd,test_cmd,lint_cmd FROM code_projects WHERE repo=$1`, repo).Scan(&c.Build, &c.Test, &c.Lint)
+	if st, err := os.Stat(repo); err == nil && st.IsDir() {
+		rs := scanRepo(ctx, repo)
+		c.DetectedBuild, c.DetectedTest, c.DetectedLint = first(rs.Build), first(rs.Test), first(rs.Lint)
+	}
+	return c, nil
+}
+
+func SetCommands(ctx context.Context, db *pgxpool.Pool, c CodeCommands) error {
+	_, err := db.Exec(ctx, `INSERT INTO code_projects(repo,build_cmd,test_cmd,lint_cmd) VALUES($1,$2,$3,$4)
+		ON CONFLICT (repo) DO UPDATE SET build_cmd=$2, test_cmd=$3, lint_cmd=$4, updated_at=now()`,
+		c.Repo, strings.TrimSpace(c.Build), strings.TrimSpace(c.Test), strings.TrimSpace(c.Lint))
+	return err
+}
+
+func tailLines(s string, n int) string {
+	ls := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(ls) > n {
+		ls = append([]string{fmt.Sprintf("…(%d earlier lines)", len(ls)-n)}, ls[len(ls)-n:]...)
+	}
+	return strings.Join(ls, "\n")
+}
+
+// VerifyWorkspace runs the repository's build, lint and test commands inside the workspace and records the
+// outcome. The commands are the ones saved for the repository, or what scanning it suggests — never something an
+// agent makes up on the spot.
+func VerifyWorkspace(ctx context.Context, db *pgxpool.Pool, id int64) (status, report string, err error) {
+	w, err := getWorkspace(ctx, db, id)
+	if err != nil || w.Status != "open" {
+		return "", "", fmt.Errorf("workspace #%d is not open", id)
+	}
+	c, _ := Commands(ctx, db, w.Repo)
+	steps := []struct{ name, cmd string }{{"build", firstNonEmpty2(c.Build, c.DetectedBuild)}, {"lint", firstNonEmpty2(c.Lint, c.DetectedLint)}, {"test", firstNonEmpty2(c.Test, c.DetectedTest)}}
+	var sb strings.Builder
+	status = "pass"
+	ran := 0
+	for _, st := range steps {
+		if st.cmd == "" {
+			continue
+		}
+		ran++
+		start := time.Now()
+		out, rerr := runCmd(ctx, 10*time.Minute, w.Path, "sh", "-c", st.cmd)
+		failed := rerr != nil || strings.Contains(out, "\n[exit status ") || strings.HasPrefix(out, "[exit status ") || strings.Contains(out, "[timed out after")
+		mark := "✓"
+		if failed {
+			mark, status = "✗", "fail"
+		}
+		fmt.Fprintf(&sb, "%s %s: %s (%s)\n", mark, st.name, st.cmd, time.Since(start).Round(100*time.Millisecond))
+		if failed {
+			sb.WriteString(tailLines(out, 40) + "\n")
+			break // the later steps would only bury the first problem
+		}
+	}
+	if ran == 0 {
+		status = "none"
+		sb.WriteString("No build, lint or test command is known for this repository. Set them in Library → Code → Checks (or add a Makefile / go.mod / package.json the scan can read).\n")
+	}
+	report = strings.TrimSpace(sb.String())
+	_, err = db.Exec(ctx, `UPDATE code_workspaces SET verify_status=$2, verify_output=$3, verify_hash=$4, verified_at=now() WHERE id=$1`, id, status, report, workspaceHash(ctx, w))
+	return status, report, err
+}
+
+func firstNonEmpty2(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return strings.TrimSpace(a)
+	}
+	return b
+}
+
+// OpenWorkspacesOfTask lists the still-open workspaces a task created.
+func OpenWorkspacesOfTask(ctx context.Context, db *pgxpool.Pool, taskID int64) ([]Workspace, error) {
+	rows, err := db.Query(ctx, `SELECT id FROM code_workspaces WHERE task_id=$1 AND status='open' AND review_task_id IS NULL ORDER BY id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	var out []Workspace
+	for _, id := range ids {
+		if w, err := getWorkspace(ctx, db, id); err == nil {
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
+
+// SetWorkspaceReview links a workspace to the review task that judges it.
+func SetWorkspaceReview(ctx context.Context, db *pgxpool.Pool, id, taskID int64) error {
+	_, err := db.Exec(ctx, `UPDATE code_workspaces SET review_task_id=$2 WHERE id=$1`, id, taskID)
+	return err
 }

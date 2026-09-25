@@ -61,7 +61,7 @@
   let ret = $state({ logs_days: 14, tasks_days: 30, task_statuses: ['done', 'failed', 'cancelled'] });
   const retStatuses = ['done', 'failed', 'cancelled', 'partial'];
   const toggleRetStatus = (s, on) => { const cur = new Set(ret.task_statuses || []); on ? cur.add(s) : cur.delete(s); ret.task_statuses = [...cur]; };
-  let gr = $state({ tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
+  let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
   let nf = $state({ cron: { show: true, external: false }, intent: { show: true, external: true }, ask: { show: true, external: false }, error: { show: true, external: true }, proposal: { show: true, external: true } });
   let cleaning = $state(false);
   async function cleanNow() {
@@ -441,6 +441,7 @@
           <div class="two"><Field label="Extra budget" hint="% added to the agent's own limit"><NumberInput bind:value={gr.autonomous_boost_pct} min={0} max={200} step={10} unit="%" /></Field>
             <Field label="Hard cap (iterations)"><NumberInput bind:value={gr.autonomous_max_iterations} min={10} max={200} step={10} /></Field></div>
           <div class="sm mute">When a run uses its whole budget or is stopped as a loop, PRISM analyses it (what was achieved, why it stalled), rewrites the instruction and runs it once more in a fresh session. If that fails too, a delegated task ends as failed with the analysis so the parent agent tells you; a top-level task stays "partial" for your review.</div>
+          <Switch checked={!gr.code_review_off} label="when a coding task finishes: run the project's checks and have Reviewer judge the diff (shown in Library → Code)" onchange={(v) => (gr.code_review_off = !v)} />
           <Switch checked={!gr.auto_retry_off} label="analyse and retry stalled tasks once" onchange={(v) => (gr.auto_retry_off = !v)} />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>

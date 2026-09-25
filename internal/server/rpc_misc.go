@@ -139,6 +139,20 @@ func (s *Server) registerMisc() {
 	}) (string, error) {
 		return builtin.WorkspaceDiff(ctx, a.DB.Pool, r.ID, false)
 	})
+	rpc(s, "workspaces.verify", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (string, error) {
+		st, rep, err := builtin.VerifyWorkspace(ctx, a.DB.Pool, r.ID)
+		return st + "\n" + rep, err
+	})
+	rpc(s, "workspaces.commands", func(ctx context.Context, r struct {
+		Repo string `json:"repo"`
+	}) (builtin.CodeCommands, error) {
+		return builtin.Commands(ctx, a.DB.Pool, r.Repo)
+	})
+	rpc(s, "workspaces.set_commands", func(ctx context.Context, r builtin.CodeCommands) (bool, error) {
+		return true, builtin.SetCommands(ctx, a.DB.Pool, r)
+	})
 	rpc(s, "workspaces.apply", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (string, error) {

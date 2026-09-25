@@ -157,6 +157,8 @@ type Guardrails struct {
 	// AutoRetryOff stops the engine from analysing a run that exhausted its budget and retrying it once with a
 	// rewritten instruction (see agent/recover.go).
 	AutoRetryOff bool `json:"auto_retry_off"`
+	// CodeReviewOff stops finished coding tasks from being verified and reviewed automatically (see app.reviewWorkspaces).
+	CodeReviewOff bool `json:"code_review_off"`
 }
 
 func DefaultGuardrails() Guardrails {

@@ -19,6 +19,7 @@
   import Segmented from '../lib/ui/Segmented.svelte';
   import MemoryGraph from '../lib/MemoryGraph.svelte';
   import { nearEnd } from '../lib/nearend.js';
+  import Provenance from '../lib/Provenance.svelte';
 
   let banks = $state([]);
   let facts = $state([]);
@@ -109,6 +110,23 @@
   }
   $effect(() => { if (S.learnFile) { const n = S.learnFile; S.learnFile = null; untrack(() => { learnOpen = true; loadLearn().then(() => inspect(n)); }); } });
   async function jobAction(j, m) { await call(m, { id: j.id }); loadLearn(); }
+  // ── time view: what memory believed at a date, and what changed day by day ──
+  let timeOpen = $state(false);
+  let tv = $state({ mode: 'asof', at: new Date().toISOString().slice(0, 10), q: '', days: 30 });
+  let tvFacts = $state([]);
+  let tvDays = $state([]);
+  let tvBusy = $state(false);
+  async function loadTime() {
+    tvBusy = true;
+    if (tv.mode === 'asof') {
+      const end = new Date(tv.at + 'T23:59:59');
+      tvFacts = (await call('memory.at', { at: end.toISOString(), bank_id: bank, q: tv.q, limit: 300 }, { quiet: true })) || [];
+    } else {
+      tvDays = (await call('memory.timeline', { days: Number(tv.days) || 30, bank_id: bank }, { quiet: true })) || [];
+    }
+    tvBusy = false;
+  }
+  $effect(() => { if (timeOpen) { tv.mode; tv.at; tv.days; bank; untrack(loadTime); } });
   let healthOpen = $state(false);
   let activityOpen = $state(false);
   let act = $state({ status: { step: '', last_at: 0, next_at: 0 }, events: [] });
@@ -284,11 +302,21 @@
   const cur = $derived(banks.find((x) => x.id === bank));
   const movable = $derived(cur && (cur.kind === 'project' || cur.kind === 'domain'));
   let mergeOpen = $state(false);
-  let mg = $state({ into: 0, name: '' });
-  const mergeTargets = $derived([{ value: 0, label: '— a new bank —' }, ...banks.filter((b) => cur && b.kind === cur.kind && b.id !== cur.id).map((b) => ({ value: b.id, label: b.name }))]);
+  let mg = $state({ sel: {}, into: 0, name: '' });
+  let merging = $state(false);
+  const mergeCands = $derived(banks.filter((b) => cur && b.kind === cur.kind));
+  const mergeSources = $derived(mergeCands.filter((b) => mg.sel[b.id] && b.id !== mg.into));
+  const mergeTargets = $derived([{ value: 0, label: '— a new bank —' }, ...mergeCands.map((b) => ({ value: b.id, label: `${b.name} (${b.facts})` }))]);
+  const mergeMoves = $derived(mergeSources.reduce((a, b) => a + b.facts, 0));
+  const mergeTarget = $derived(mergeCands.find((b) => b.id === mg.into));
+  function openMerge() { mg = { sel: { [bank]: true }, into: 0, name: '' }; mergeOpen = true; }
   async function doMerge() {
-    const r = await call('memory.bank_merge', { sources: [bank], into: mg.into || 0, name: mg.name });
-    if (r) { toast(`${r.moved} facts moved into ${r.bank.name}${r.dropped ? `, ${r.dropped} duplicates collapsed` : ''}`); mergeOpen = false; bank = r.bank.id; loadBanks(); loadFacts(); }
+    const names = mergeSources.map((b) => b.name).join(', ');
+    merging = true;
+    toast(`Merging ${mergeSources.length} bank${mergeSources.length === 1 ? '' : 's'} (${names})…`);
+    const r = await call('memory.bank_merge', { sources: mergeSources.map((b) => b.id), into: mg.into || 0, name: mg.name });
+    merging = false;
+    if (r) { toast(`${r.moved} facts moved into ${r.bank.name}${r.dropped ? `, ${r.dropped} duplicates collapsed` : ''} — you can undo it from the bank panel (↶ Undo merge)`); mergeOpen = false; bank = r.bank.id; loadBanks(); loadFacts(); }
   }
   let splitOpen = $state(false);
   let sp = $state({ name: '', description: '', ids: [], groups: [], facts: [], busy: false });
@@ -326,6 +354,7 @@
     <Segmented size="sm" bind:value={view} options={[{ value: 'list', label: 'list' }, { value: 'graph', label: 'graph' }]} />
     <Segmented size="sm" bind:value={kind} options={[{ value: '', label: 'all' }, { value: 'fact', label: 'facts' }, { value: 'conclusion', label: 'conclusions' }]} />
     <span class="grow"></span>
+    <Button size="sm" variant="ghost" title="What memory believed on a given date, and what changed day by day" onclick={() => { timeOpen = true; }}>Time</Button>
     <Button size="sm" variant="ghost" title="How each memory job is doing and how healthy each bank is" onclick={() => { healthOpen = true; loadActivity(); loadHealth(); }}>Health</Button>
     <button type="button" class="act" title="What memory maintenance is doing — click for the activity log" onclick={() => { activityOpen = true; loadActivity(); }}><Led state={act.status.step ? 'ok' : 'off'} size={7} /> {act.status.step ? act.status.step + '…' : act.status.last_at ? 'idle · last pass ' + ago(new Date(act.status.last_at * 1000).toISOString()) : 'idle'}</button>
     {#if stats}<span class="sm dim nowrap"><Led state={stats.embedding ? 'ok' : 'off'} size={7} /> embeddings {stats.embedding ? 'on' : 'off'} · {stats.facts} facts · {stats.raw} raw</span>{/if}
@@ -356,7 +385,7 @@
         {#if ops.length}<Button size="sm" variant="ghost" block title="{ops[0].summary}" onclick={undoOp}>↶ Undo {ops[0].kind}</Button>{/if}
         {#if curHealth}<div class="sm mute" title="Reflection and analysis only use trusted facts (confidence 50%+). Facts learned from the web stay unverified until a second site confirms them.">{curHealth.usable} trusted{curHealth.unverified ? ` · ${curHealth.unverified} unverified` : ''} · {curHealth.conclusions} conclusions · {curHealth.insights} insights · {curHealth.fresh_reflect} new since reflect · {curHealth.fresh_analyze} since analysis</div>{#if curHealth.card}<div class="sm pre" title="profile card kept by deep analysis">{curHealth.card}</div>{/if}{/if}
         {#if cur}<Button size="sm" block title="Have an agent check what this bank holds on the web and add what it finds" onclick={() => research({ bank_id: cur.id, label: labelOf(cur.id) })}>Research this bank</Button>{/if}
-        {#if movable}<div class="two"><Button size="sm" block title="Move every fact of this bank into another one" onclick={() => { mg = { into: 0, name: '' }; mergeOpen = true; }}><Icon name="merge" size={11} /> Merge</Button><Button size="sm" block title="Move some facts into a new bank" onclick={openSplit}><Icon name="split" size={11} /> Split</Button></div>{/if}
+        {#if movable}<div class="two"><Button size="sm" block title="Move every fact of this bank into another one" onclick={openMerge}><Icon name="merge" size={11} /> Merge…</Button><Button size="sm" block title="Move some facts into a new bank" onclick={openSplit}><Icon name="split" size={11} /> Split</Button></div>{/if}
         {#if cur && cur.kind !== 'user'}<Button size="sm" variant="danger" block onclick={() => delBank(cur)}>Delete bank</Button>{/if}
       </div>
     </Panel>
@@ -404,6 +433,7 @@
 <Modal bind:open={editOpen} title="{edit?.kind === 'conclusion' ? 'Conclusion' : 'Fact'} #{edit?.id} · {edit?.bank}" width={720}>
   {#if edit}
     <Field label="Text" hint={edit.kind === 'conclusion' ? '' : 'changing this preserves the old wording in history and flags any conclusion built on it for review'}><Textarea bind:value={edit.text} rows={4} mono={false} /></Field>
+    <Provenance id={edit.id} onopen={openId} />
     <div class="row wrap gap-12">
       <Field label="Tags"><Tags bind:value={edit.tags} /></Field>
       <Field label="Rank" hint="usage-weighted; decays when unused (unless pinned)"><NumberInput bind:value={edit.rank} min={0.05} max={5} step={0.25} /></Field>
@@ -460,11 +490,21 @@
   {#snippet footer()}<Button variant="ghost" onclick={() => (bankOpen = false)}>Cancel</Button><Button variant="primary" disabled={!nb.name.trim()} onclick={createBank}>Create</Button>{/snippet}
 </Modal>
 
-<Modal bind:open={mergeOpen} title="Merge {cur?.name}" width={500}>
-  <div class="sm mute">Every fact of <b class="hi">{cur?.kind}:{cur?.name}</b> moves into the target and this bank is removed. Fact history, links and ranks are kept; identical facts collapse into one.</div>
-  <Field label="Merge into"><Select bind:value={mg.into} options={mergeTargets} searchable /></Field>
+<Modal bind:open={mergeOpen} title="Merge {cur?.kind} banks" width={560}>
+  <div class="sm mute">Tick every bank that is really the same topic. Their facts move into the target; identical facts collapse into one, and each fact keeps its history, links and rank. Only the emptied banks are removed.</div>
+  <div class="mgl">
+    {#each mergeCands as b (b.id)}
+      <label class="mgrow"><Checkbox checked={!!mg.sel[b.id]} onchange={(v) => (mg.sel[b.id] = v)} /> <span class="grow">{b.name}</span><span class="sm mute">{b.facts} facts</span>{#if b.id === mg.into}<Badge tone="accent">target</Badge>{/if}</label>
+    {/each}
+  </div>
+  <Field label="Merge into" hint="one of the banks above (its facts stay), another one, or a new bank"><Select bind:value={mg.into} options={mergeTargets} searchable /></Field>
   {#if !mg.into}<Field label="New bank name"><Input bind:value={mg.name} /></Field>{/if}
-  {#snippet footer()}<Button variant="ghost" onclick={() => (mergeOpen = false)}>Cancel</Button><Button variant="primary" disabled={!mg.into && !mg.name.trim()} onclick={doMerge}>Merge</Button>{/snippet}
+  <div class="mghint">
+    {#if mergeSources.length}
+      <b>{mergeMoves}</b> fact{mergeMoves === 1 ? '' : 's'} from {mergeSources.map((b) => b.name).join(', ')} will move into <b>{mergeTarget ? mergeTarget.name + ' (' + mergeTarget.facts + ' facts)' : mg.name.trim() || 'the new bank'}</b>. It runs in a moment and can be undone right after (↶ Undo merge in the bank panel).
+    {:else}<span class="mute">tick at least one bank to move</span>{/if}
+  </div>
+  {#snippet footer()}<Button variant="ghost" onclick={() => (mergeOpen = false)}>Cancel</Button><Button variant="primary" loading={merging} disabled={!mergeSources.length || (!mg.into && !mg.name.trim())} onclick={doMerge}>Merge {mergeSources.length || ''} bank{mergeSources.length === 1 ? '' : 's'}</Button>{/snippet}
 </Modal>
 
 <Modal bind:open={splitOpen} title="Split {cur?.name}" width={680}>
@@ -531,6 +571,33 @@
     </div>
   {:else}<div class="sm mute">nothing learned from documents yet</div>{/each}
   {#snippet footer()}<Button variant="ghost" onclick={() => (learnOpen = false)}>Close</Button>{/snippet}
+</Modal>
+
+<Modal bind:open={timeOpen} title="Memory over time{bank ? ' · ' + labelOf(bank) : ''}" width={900}>
+  <div class="row"><Segmented size="sm" bind:value={tv.mode} options={[{ value: 'asof', label: 'as of a date' }, { value: 'timeline', label: 'what changed' }]} />
+    {#if tv.mode === 'asof'}<input type="date" class="ans" style="width:auto" bind:value={tv.at} max={new Date().toISOString().slice(0, 10)} /><Input size="sm" bind:value={tv.q} placeholder="filter…" onenter={loadTime} />
+    {:else}<span class="sm mute">last</span><NumberInput bind:value={tv.days} min={1} max={730} step={7} unit="days" />{/if}
+    {#if tvBusy}<span class="sm mute">loading…</span>{/if}</div>
+  {#if tv.mode === 'asof'}
+    <div class="sm mute">What memory held on {tv.at}: {tvFacts.length} fact{tvFacts.length === 1 ? '' : 's'}{tvFacts.length >= 300 ? ' (first 300)' : ''}. Facts marked “since retired” were dropped or replaced later.</div>
+    <table class="t"><thead><tr><th>Fact</th><th>Bank</th><th>Since</th><th>Later</th></tr></thead><tbody>
+      {#each tvFacts as f (f.id)}
+        <tr class="click" onclick={() => { timeOpen = false; openFact(f); }}><td class="pre">{f.text}{#if f.kind === 'conclusion'} <Badge tone="accent">conclusion</Badge>{/if}</td><td class="sm">{f.bank}</td><td class="sm" data-sort={f.valid_from}>{stamp(f.valid_from)}</td>
+          <td class="sm">{#if f.valid_to}<Badge tone="mute" title={stamp(f.valid_to)}>since retired</Badge>{:else}<span class="mute">still true</span>{/if}</td></tr>
+      {:else}<tr><td colspan="4" class="mute">memory held nothing on that date</td></tr>{/each}
+    </tbody></table>
+  {:else}
+    {#each tvDays as d (d.day)}
+      <div class="rvrow">
+        <div class="row"><b>{d.day}</b>{#if d.added}<Badge tone="ok">+{d.added} learned</Badge>{/if}{#if d.corrected}<Badge tone="accent">{d.corrected} corrected</Badge>{/if}{#if d.retired}<Badge tone="mute">{d.retired} retired</Badge>{/if}</div>
+        {#each d.samples as it (it.kind + it.id)}
+          <button type="button" class="ltx" onclick={() => { timeOpen = false; openId(it.id); }}><span class="mute sm">{it.kind === 'added' ? '+' : it.kind === 'corrected' ? '~' : '−'}</span> {it.text} <span class="mute sm">{it.bank}</span></button>
+        {/each}
+        {#if d.added + d.corrected + d.retired > d.samples.length}<div class="sm mute">…and {d.added + d.corrected + d.retired - d.samples.length} more</div>{/if}
+      </div>
+    {:else}<div class="sm mute">nothing changed in that period</div>{/each}
+  {/if}
+  {#snippet footer()}<Button variant="ghost" onclick={() => (timeOpen = false)}>Close</Button>{/snippet}
 </Modal>
 
 <Modal bind:open={healthOpen} title="Memory health" width={900}>
@@ -673,6 +740,9 @@
   .lrow :global(.bar), .lrow > :global(div) { flex: none; width: 44px; }
   .ltx { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ltx:hover { color: var(--fg-hi); text-decoration: underline; }
+  .mgl { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; max-height: 240px; overflow: auto; border: 1px solid var(--line); padding: 4px 6px; }
+  .mgrow { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .mghint { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); background: var(--bg-1); font-size: 12px; }
   .frow2 { display: flex; align-items: center; gap: 8px; }
   .frow2 .ltx { flex: 1; min-width: 0; }
   .ltx.on { color: var(--accent, var(--fg)); font-weight: 700; }

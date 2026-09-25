@@ -21,7 +21,24 @@
   let wsDiff = $state(null); // { ws, text }
   let wsBusy = $state(0);
   const loadWs = async () => (wss = (await call('workspaces.list', {}, { quiet: true })) || []);
-  $effect(() => { if (tab === 'code') loadWs(); });
+  $effect(() => { if (tab === 'code') loadWs(); return listen('workspaces.update', loadWs); });
+  let cmds = $state(null); // { repo, build, test, lint, detected_* } being edited
+  async function openCmds(w) { cmds = await call('workspaces.commands', { repo: w.repo }); }
+  async function saveCmds() { if (await call('workspaces.set_commands', { repo: cmds.repo, build: cmds.build, test: cmds.test, lint: cmds.lint })) { toast('Saved'); cmds = null; } }
+  async function runChecks(w) {
+    wsBusy = w.id;
+    const r = await call('workspaces.verify', { id: w.id });
+    wsBusy = 0;
+    if (r !== undefined) { toast(String(r).split('\n')[0] === 'pass' ? 'Checks passed' : String(r).split('\n')[0] === 'fail' ? 'Checks failed' : 'No checks configured', String(r).startsWith('pass') ? 'ok' : 'err'); loadWs(); if (wsDiff?.ws.id === w.id) viewDiff(w); }
+  }
+  const checkTone = (w) => (w.verify_status === 'pass' ? (w.stale ? 'warn' : 'ok') : w.verify_status === 'fail' ? 'err' : 'mute');
+  const verdictTone = (v) => (v === 'approve' ? 'ok' : v === 'reject' ? 'err' : 'warn');
+  // applying something unchecked, failing or rejected asks first
+  async function applyChecked(w) {
+    const why = w.verdict === 'reject' ? 'The reviewer rejected it.' : w.verify_status === 'fail' ? 'Its checks fail.' : w.stale ? 'It changed since its checks ran.' : !w.verify_status ? 'Its checks were never run.' : '';
+    if (why && !(await confirmBox({ title: 'Apply anyway?', text: why + ' Apply it to your checkout anyway?', ok: 'Apply anyway', danger: true }))) return;
+    wsAct(w, 'workspaces.apply', 'Applied');
+  }
   async function viewDiff(w) { const text = await call('workspaces.diff', { id: w.id }); if (text !== undefined) wsDiff = { ws: w, text }; }
   async function wsAct(w, m, msg) {
     if (m === 'workspaces.discard' && !(await confirmBox({ title: 'Discard workspace', text: `Throw away ${w.branch} and everything the agent changed in it?`, ok: 'Discard', danger: true }))) return;
@@ -163,19 +180,23 @@
     <div class="bar"><span class="sm mute">When an agent works on a repository it does so in an isolated copy (git worktree) on its own branch — your checkout is never touched. Review what it changed here, then apply it as staged changes, keep the branch, or discard it.</span><span class="grow"></span><Button size="sm" variant="ghost" onclick={loadWs}><Icon name="refresh" size={11} /> Refresh</Button></div>
     <Panel flush grow>
       <div class="scroll"><table class="t">
-        <thead><tr><th>Workspace</th><th>Repository</th><th>Agent</th><th>Status</th><th>Changes</th><th style="width:260px"></th></tr></thead>
+        <thead><tr><th>Workspace</th><th>Repository</th><th>Agent</th><th>Status</th><th>Checks</th><th>Review</th><th>Changes</th><th style="width:300px"></th></tr></thead>
         <tbody>
           {#each wss as w (w.id)}
             <tr><td><span class="mono">{w.branch}</span><div class="sm mute">{ago(w.created_at)}</div></td><td class="sm">{w.repo}</td><td>{w.agent}{#if w.task_id} <span class="sm mute">task #{w.task_id}</span>{/if}</td>
               <td><Badge tone={w.status === 'open' ? 'accent' : w.status === 'applied' ? 'ok' : w.status === 'kept' ? 'warn' : 'mute'}>{w.status}</Badge></td>
+              <td>{#if w.verify_status}<Badge tone={checkTone(w)} title={w.verify_output}>{w.verify_status}{w.stale ? ' · stale' : ''}</Badge>{:else if w.status === 'open'}<span class="mute sm">not run</span>{/if}</td>
+              <td>{#if w.verdict}<Badge tone={verdictTone(w.verdict)} title={w.review}>{w.verdict}</Badge>{:else if w.review_task_id}<span class="mute sm">reviewing…</span>{/if}</td>
               <td class="sm pre">{(w.stat || '').split('\n').slice(-1)[0]}</td>
               <td class="end">{#if w.status === 'open' || w.status === 'kept'}
                 <Button size="sm" variant="ghost" onclick={() => viewDiff(w)}>Diff</Button>
-                <Button size="sm" variant="accent" loading={wsBusy === w.id} title="Bring the changes into your checkout as staged changes (needs a clean checkout)" onclick={() => wsAct(w, 'workspaces.apply', 'Applied')}>Apply</Button>
+                {#if w.status === 'open'}<Button size="sm" variant="ghost" loading={wsBusy === w.id} title="Run the project's build, lint and test commands in this workspace" onclick={() => runChecks(w)}>Run checks</Button>{/if}
+                <Button size="sm" variant="ghost" title="Which commands the checks run for this repository" onclick={() => openCmds(w)}>Commands…</Button>
+                <Button size="sm" variant="accent" loading={wsBusy === w.id} title="Bring the changes into your checkout as staged changes (needs a clean checkout)" onclick={() => applyChecked(w)}>Apply</Button>
                 {#if w.status === 'open'}<Button size="sm" variant="ghost" title="Commit and keep the branch in the repository; merge it yourself" onclick={() => wsAct(w, 'workspaces.keep', 'Kept')}>Keep branch</Button>{/if}
                 <Button size="sm" variant="ghost" onclick={() => wsAct(w, 'workspaces.discard', 'Discarded')}>Discard</Button>
               {/if}</td></tr>
-          {:else}<tr><td colspan="6" class="mute">no coding workspaces yet — ask an agent to work on a repository (it opens one with workspace_open)</td></tr>{/each}
+          {:else}<tr><td colspan="8" class="mute">no coding workspaces yet — ask an agent to work on a repository (it opens one with workspace_open)</td></tr>{/each}
         </tbody>
       </table></div>
     </Panel>
@@ -307,21 +328,37 @@
   {#snippet footer()}<Button variant="ghost" onclick={() => (mapView = null)}>Close</Button>{/snippet}
 </Modal>
 
+<Modal open={!!cmds} title="Checks for {cmds?.repo?.split('/').pop()}" width={560} onclose={() => (cmds = null)}>
+  {#if cmds}
+    <div class="sm mute">These commands run inside a workspace (build, then lint, then test; the first failure stops it). Leave a field empty to use what PRISM found in the repository (shown as the hint).</div>
+    <Field label="Build"><Input bind:value={cmds.build} mono placeholder={cmds.detected_build || 'none found'} /></Field>
+    <Field label="Lint"><Input bind:value={cmds.lint} mono placeholder={cmds.detected_lint || 'none found'} /></Field>
+    <Field label="Test"><Input bind:value={cmds.test} mono placeholder={cmds.detected_test || 'none found'} /></Field>
+  {/if}
+  {#snippet footer()}<Button variant="ghost" onclick={() => (cmds = null)}>Cancel</Button><Button variant="primary" onclick={saveCmds}>Save</Button>{/snippet}
+</Modal>
+
 <Modal open={!!wsDiff} title="Changes in {wsDiff?.ws?.branch}" width={980} onclose={() => (wsDiff = null)}>
   {#if wsDiff}
+    {#if wsDiff.ws.verify_status}<div class="chk"><Badge tone={checkTone(wsDiff.ws)}>checks: {wsDiff.ws.verify_status}{wsDiff.ws.stale ? ' · stale' : ''}</Badge><pre class="patch small">{wsDiff.ws.verify_output}</pre></div>{/if}
+    {#if wsDiff.ws.review}<div class="chk"><Badge tone={verdictTone(wsDiff.ws.verdict)}>review: {wsDiff.ws.verdict || 'in progress'}</Badge><pre class="patch small wrap">{wsDiff.ws.review}</pre></div>{/if}
     <pre class="patch">{#each wsDiff.text.split('\n') as l}<span class={diffClass(l)}>{l}
 </span>{/each}</pre>
   {/if}
   {#snippet footer()}
     {#if wsDiff}<Button variant="ghost" onclick={() => wsAct(wsDiff.ws, 'workspaces.discard', 'Discarded')}>Discard</Button>
     {#if wsDiff.ws.status === 'open'}<Button variant="ghost" onclick={() => wsAct(wsDiff.ws, 'workspaces.keep', 'Kept')}>Keep branch</Button>{/if}
-    <Button variant="accent" onclick={() => wsAct(wsDiff.ws, 'workspaces.apply', 'Applied')}>Apply to my checkout</Button>{/if}
+    {#if wsDiff.ws.status === 'open'}<Button variant="ghost" onclick={() => runChecks(wsDiff.ws)}>Run checks</Button>{/if}
+    <Button variant="accent" onclick={() => applyChecked(wsDiff.ws)}>Apply to my checkout</Button>{/if}
     <Button variant="primary" onclick={() => (wsDiff = null)}>Close</Button>
   {/snippet}
 </Modal>
 
 <style>
   .patch { margin: 0; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 62vh; white-space: pre; }
+  .chk { margin-bottom: 8px; }
+  .patch.small { max-height: 160px; margin-top: 4px; }
+  .patch.wrap { white-space: pre-wrap; }
   .patch .da { color: var(--ok); } .patch .dd { color: var(--err); } .patch .dh { color: var(--accent); } .patch .dm { color: var(--fg-mute); }
   .drop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px dashed var(--line-3); background: var(--bg-1); padding: 8px 12px; color: var(--fg-dim); flex: none; }
   .drop.over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-hi); }

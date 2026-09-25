@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"prism/internal/settings"
+	"prism/internal/tasks"
 	"prism/internal/testutil"
 	"prism/internal/tools"
 	"prism/internal/tools/builtin"
@@ -37,5 +39,24 @@ func TestCodingProfilesUseRealTools(t *testing.T) {
 	}
 	if !IsWellKnown("coder") || IsWellKnown("Stranger") {
 		t.Fatal("IsWellKnown")
+	}
+}
+
+// The task-finished hook fires for a task that ended done, and only then.
+func TestOnTaskDoneFiresForFinishedTasks(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Quick", Soul: "You are Quick.", Enabled: true, MaxIterations: 6}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []tasks.Task
+	h.e.OnTaskDone = func(_ context.Context, tk tasks.Task) { got = append(got, tk) }
+	h.fake.Handler = func(map[string]any, int) testutil.Reply { return testutil.Reply{Content: "all done"} }
+	sess, _ := h.e.Sessions.Create(ctx, p.Name, "task", "", 0)
+	task, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: p.Name, Input: "do it", SessionID: &sess.ID}, true)
+	h.e.RunTask(ctx, task, TaskOpts{})
+	if len(got) != 1 || got[0].ID != task.ID || got[0].Status != tasks.Done {
+		t.Fatalf("hook calls = %+v", got)
 	}
 }

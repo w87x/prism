@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	"prism/internal/memory"
 	"prism/internal/settings"
@@ -297,6 +298,30 @@ func (s *Server) registerMemory() {
 		Useful bool  `json:"useful"`
 	}) (bool, error) {
 		return true, a.Memory.Feedback(ctx, r.ID, r.Useful)
+	})
+	rpc(s, "memory.provenance", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (*memory.Provenance, error) {
+		return a.Memory.Provenance(ctx, r.ID)
+	})
+	// time view: what memory believed at a date, and what changed day by day
+	rpc(s, "memory.at", func(ctx context.Context, r struct {
+		At     time.Time `json:"at"`
+		BankID int64     `json:"bank_id"`
+		Q      string    `json:"q"`
+		Limit  int       `json:"limit"`
+		Offset int       `json:"offset"`
+	}) ([]memory.Fact, error) {
+		return a.Memory.FactsAt(ctx, r.At, r.BankID, r.Q, r.Limit, r.Offset)
+	})
+	rpc(s, "memory.timeline", func(ctx context.Context, r struct {
+		Days   int   `json:"days"`
+		BankID int64 `json:"bank_id"`
+	}) ([]memory.TimelineDay, error) {
+		if r.Days <= 0 || r.Days > 730 {
+			r.Days = 30
+		}
+		return a.Memory.Timeline(ctx, time.Now().AddDate(0, 0, -r.Days), r.BankID)
 	})
 	rpc(s, "memory.digest_now", func(ctx context.Context, _ none) (bool, error) {
 		return a.MemoryDigest(ctx, settings.Load(ctx, a.Settings, settings.KeyMemory, settings.Memory{}), true)

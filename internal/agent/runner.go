@@ -73,6 +73,8 @@ type Engine struct {
 	asks    map[int64]*pendingAsk
 	cancels map[int64]context.CancelFunc // task id → cancel
 	Sinks   []NoticeSink
+	// OnTaskDone, when set, is called after a task finished successfully (used to review coding workspaces).
+	OnTaskDone func(ctx context.Context, t tasks.Task)
 }
 
 func NewEngine(d Deps) *Engine {

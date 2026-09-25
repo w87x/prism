@@ -321,3 +321,62 @@ func TestUsedFactIDsAreReadFromToolOutput(t *testing.T) {
 		t.Fatalf("model output: %v", got)
 	}
 }
+
+func TestProvenanceAndTimeView(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	old := store(t, s, StoreReq{Bank: "user", Text: "User lives in Munich", Source: "user"})
+	if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET created_at=now()-interval '20 days', valid_from=now()-interval '20 days' WHERE id=$1`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	// the user corrects it ten days ago: a new wording replaces the old one
+	txt := "User lives in Berlin"
+	nf, err := s.UpdateFact(ctx, old.ID, &txt, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=now()-interval '10 days' WHERE id=$1`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET created_at=now()-interval '10 days', valid_from=now()-interval '10 days' WHERE id=$1`, nf.ID); err != nil {
+		t.Fatal(err)
+	}
+	web := store(t, s, StoreReq{Bank: "user", Text: "The AMD AI 395 launches in Q4 2026", Confidence: 0.4, Origin: "a.example", Source: "agent:Scout (tainted)"})
+
+	p, err := s.Provenance(ctx, nf.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.History) != 2 || p.History[0].Text != "User lives in Munich" || !p.History[1].Current || p.Channel != "you" {
+		t.Fatalf("history = %+v channel=%q", p.History, p.Channel)
+	}
+	w, _ := s.Provenance(ctx, web.ID)
+	if w.Channel != "web" || len(w.Sites) != 1 || !strings.Contains(w.Origin, "Scout") || !strings.Contains(w.Origin, "a.example") {
+		t.Fatalf("web provenance: %+v", w)
+	}
+
+	// as of 15 days ago: the Munich wording; as of 5 days ago: the Berlin one; the web fact did not exist yet
+	at15, _ := s.FactsAt(ctx, time.Now().AddDate(0, 0, -15), 0, "", 50, 0)
+	if len(at15) != 1 || at15[0].Text != "User lives in Munich" || at15[0].ValidTo == nil {
+		t.Fatalf("15 days ago: %+v", at15)
+	}
+	at5, _ := s.FactsAt(ctx, time.Now().AddDate(0, 0, -5), 0, "", 50, 0)
+	if len(at5) != 1 || at5[0].Text != "User lives in Berlin" {
+		t.Fatalf("5 days ago: %+v", at5)
+	}
+	if now, _ := s.FactsAt(ctx, time.Now().Add(time.Minute), 0, "berlin", 50, 0); len(now) != 1 {
+		t.Fatalf("now with a search: %+v", now)
+	}
+	tl, err := s.Timeline(ctx, time.Now().AddDate(0, 0, -30), 0)
+	if err != nil || len(tl) < 3 {
+		t.Fatalf("timeline: %+v err=%v", tl, err)
+	}
+	var corrected, added int
+	for _, d := range tl {
+		corrected += d.Corrected
+		added += d.Added
+	}
+	if corrected != 1 || added != 3 {
+		t.Fatalf("timeline counts: corrected %d added %d in %+v", corrected, added, tl)
+	}
+}

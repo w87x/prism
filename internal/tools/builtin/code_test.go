@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"prism/internal/tools"
 )
 
 func TestApplyEditsIsPreciseAndAllOrNothing(t *testing.T) {
@@ -325,5 +327,113 @@ func TestRepoScanFindsCommandsAndLayout(t *testing.T) {
 	}
 	if strings.Contains(all, "secret") {
 		t.Fatal("remote credentials must never reach memory")
+	}
+}
+
+// Checks run in the workspace with the repository's own commands; the result is remembered, goes stale when the
+// code changes, and saved commands override what the scan suggests.
+func TestWorkspaceVerifyRunsTheProjectChecks(t *testing.T) {
+	reg, deps, _, _ := setup(t)
+	ctx := context.Background()
+	repo := filepath.Join(deps.DataDir, "work", "checked")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "Makefile"), []byte("test:\n\t@test -f ok.flag || (echo 'FAIL: ok.flag missing'; exit 1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "Makefile")
+	mustGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+	if _, err := run(t, reg, "workspace_open", map[string]any{"repo": repo}); err != nil {
+		t.Fatal(err)
+	}
+	wt := func() string { ws, _ := Workspaces(ctx, deps.DB); return ws[0].Path }()
+
+	if out, _ := run(t, reg, "workspace_diff", map[string]any{"id": 1}); !strings.Contains(out, "not run yet") {
+		t.Fatalf("diff before verify: %q", out)
+	}
+	st, rep, err := VerifyWorkspace(ctx, deps.DB, 1)
+	if err != nil || st != "fail" || !strings.Contains(rep, "✗ test: make test") || !strings.Contains(rep, "ok.flag missing") {
+		t.Fatalf("failing check: %s %q %v", st, rep, err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "ok.flag"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, reg, "workspace_verify", map[string]any{"id": 1}); err != nil || !strings.HasPrefix(out, "PASS") || !strings.Contains(out, "✓ test") {
+		t.Fatalf("passing check: %q %v", out, err)
+	}
+	if out, _ := run(t, reg, "workspace_diff", map[string]any{"id": 1}); !strings.Contains(out, "Checks: pass") || strings.Contains(out, "changed since") {
+		t.Fatalf("diff after verify: %q", out)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "more.txt"), []byte("later change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ws, _ := Workspaces(ctx, deps.DB); !ws[0].Stale || ws[0].VerifyStatus != "pass" {
+		t.Fatalf("a changed workspace must show its verification as stale: %+v", ws[0])
+	}
+	// a saved command replaces the scanned one
+	wsList, _ := Workspaces(ctx, deps.DB)
+	repo = wsList[0].Repo // the canonical repository path the app itself uses
+	if err := SetCommands(ctx, deps.DB, CodeCommands{Repo: repo, Test: "echo custom-test-ran"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, rep, _ := VerifyWorkspace(ctx, deps.DB, 1); st != "pass" || !strings.Contains(rep, "echo custom-test-ran") {
+		t.Fatalf("saved command: %s %q", st, rep)
+	}
+	if c, _ := Commands(ctx, deps.DB, repo); c.Test != "echo custom-test-ran" || c.DetectedTest != "make test" {
+		t.Fatalf("commands = %+v", c)
+	}
+}
+
+func TestVerdictIsReadFromAReviewReport(t *testing.T) {
+	for in, want := range map[string]string{
+		"Findings...\n\nVERDICT: approve with fixes": "approve with fixes",
+		"blah\nVerdict: **reject**\n":                "reject",
+		"Verdict: approve":                           "approve",
+		"no verdict here":                            "",
+	} {
+		if got := verdictOf(in); got != want {
+			t.Errorf("verdictOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A workspace opened by a task is found by that task's id until a review is linked; the reviewer's verdict is
+// then read from the review task's result.
+func TestWorkspaceReviewLinkAndVerdict(t *testing.T) {
+	reg, deps, _, _ := setup(t)
+	ctx := context.Background()
+	repo := filepath.Join(deps.DataDir, "work", "rv")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+	tool, _ := reg.Get("workspace_open")
+	if _, err := tool.Run(ctx, &tools.Env{Agent: "Coder", TaskID: 77}, []byte(`{"repo":"`+repo+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := OpenWorkspacesOfTask(ctx, deps.DB, 77)
+	if err != nil || len(ws) != 1 {
+		t.Fatalf("open workspaces of task 77: %+v %v", ws, err)
+	}
+	var rid int64
+	if err := deps.DB.QueryRow(ctx, `INSERT INTO tasks(from_kind,to_agent,title,input,status,result,root_id) VALUES('user','Reviewer','Review','x','done','Findings: none.\nVERDICT: approve with fixes',0) RETURNING id`).Scan(&rid); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetWorkspaceReview(ctx, deps.DB, ws[0].ID, rid); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := OpenWorkspacesOfTask(ctx, deps.DB, 77); len(again) != 0 {
+		t.Fatal("a reviewed workspace must not be reviewed again")
+	}
+	all, _ := Workspaces(ctx, deps.DB)
+	if all[0].Verdict != "approve with fixes" || !strings.Contains(all[0].Review, "Findings") {
+		t.Fatalf("review = %q / %q", all[0].Verdict, all[0].Review)
 	}
 }

@@ -706,6 +706,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
 	}
 	out, _ := e.Tasks.Get(ctx, t.ID)
+	if e.OnTaskDone != nil && out.Status == tasks.Done {
+		e.OnTaskDone(ctx, out)
+	}
 	// autonomous top-level tasks report back to the user unless the agent stays silent
 	if t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system") && res.NeedsInput == "" {
 		txt := strings.TrimSpace(res.Text)

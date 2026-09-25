@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -154,6 +156,7 @@ func (a *App) build(ctx context.Context) error {
 
 	a.Engine = agent.NewEngine(agent.Deps{DB: a.DB.Pool, LLM: a.LLM, Tools: a.Tools, Profiles: a.Profiles, Sessions: a.Sessions,
 		Tasks: a.Tasks, Memory: a.Memory, TaskSum: a.TaskSum, Settings: a.Settings, Emit: a.Emit, DefaultBanks: a.defaultBanks})
+	a.Engine.OnTaskDone = a.reviewWorkspaces
 
 	// tools
 	memory.RegisterTools(a.Tools, a.Memory, a.defaultBanks)
@@ -335,6 +338,49 @@ func (a *App) HarvestBookmarks(ctx context.Context) (int, error) {
 		_, err := a.Engine.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "bookmark harvest", ToAgent: "Atlas", Title: title, Input: input})
 		return err
 	})
+}
+
+// reviewWorkspaces runs when a task finished: for each coding workspace it opened that has changes, the checks are
+// run (if the agent did not) and the Reviewer is asked to judge the diff. The verdict shows up next to the workspace
+// in Library → Code. It runs in the background so the finishing task is not held up.
+func (a *App) reviewWorkspaces(ctx context.Context, t tasks.Task) {
+	if t.ToAgent == "Reviewer" || settings.Load(ctx, a.Settings, settings.KeyGuardrails, settings.DefaultGuardrails()).CodeReviewOff {
+		return
+	}
+	ws, err := builtin.OpenWorkspacesOfTask(ctx, a.DB.Pool, t.ID)
+	if err != nil || len(ws) == 0 {
+		return
+	}
+	go func() {
+		bg, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		for _, w := range ws {
+			diff, err := builtin.WorkspaceDiff(bg, a.DB.Pool, w.ID, true)
+			if err != nil || strings.HasPrefix(diff, "(no changes") {
+				continue
+			}
+			if w.VerifyStatus == "" {
+				if _, _, err := builtin.VerifyWorkspace(bg, a.DB.Pool, w.ID); err != nil {
+					a.Logf("warn", "code", "checks of workspace #%d failed to run: %v", w.ID, err)
+				}
+			}
+			cur, _ := builtin.Workspaces(bg, a.DB.Pool)
+			checks := "not run"
+			for _, c := range cur {
+				if c.ID == w.ID && c.VerifyStatus != "" {
+					checks = c.VerifyStatus + "\n" + c.VerifyOutput
+				}
+			}
+			input := fmt.Sprintf("Review workspace #%d (%s, branch %s), work done by %s for this request:\n%s\n\nStart with workspace_diff(id=%d). The project checks reported: %s\n\nFollow your review method and finish with the single line VERDICT: approve, VERDICT: approve with fixes, or VERDICT: reject.", w.ID, filepath.Base(w.Repo), w.Branch, t.ToAgent, trimText(t.Input, 600), w.ID, checks)
+			nt, err := a.Engine.Enqueue(bg, tasks.Task{FromKind: "user", FromName: "auto review", ToAgent: "Reviewer", Title: fmt.Sprintf("Review workspace #%d", w.ID), Input: input})
+			if err != nil {
+				a.Logf("warn", "code", "could not queue the review of workspace #%d: %v", w.ID, err)
+				continue
+			}
+			_ = builtin.SetWorkspaceReview(bg, a.DB.Pool, w.ID, nt.ID)
+			a.Emit("workspaces.update", map[string]any{"id": w.ID})
+		}
+	}()
 }
 
 // MemoryStatus tells what the memory maintenance loop is doing and when it last and next runs.
@@ -593,4 +639,12 @@ func (a *App) Close() {
 		a.DB.Close()
 	}
 	a.ready = false
+}
+
+func trimText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
