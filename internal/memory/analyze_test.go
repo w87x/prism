@@ -210,7 +210,7 @@ func TestEnrichBriefDescribesTheSubjectAndWhatIsKnown(t *testing.T) {
 	if _, err := s.ExtractEntities(ctx, bank.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	g, _ := s.EntityGraph(ctx, bank.ID, 0)
+	g, _ := s.EntityGraph(ctx, bank.ID, false, 0)
 	if len(g.Nodes) == 0 {
 		t.Fatal("no entity")
 	}

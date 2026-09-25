@@ -25,11 +25,12 @@ type FullNode struct {
 }
 
 type FullEdge struct {
-	A      string  `json:"a"`
-	B      string  `json:"b"`
-	Kind   string  `json:"kind"` // related|supports|contradicts|evidence|supersedes (facts) | temporal|semantic (entities) | mentions
-	Label  string  `json:"label,omitempty"`
-	Weight float64 `json:"weight"`
+	A       string  `json:"a"`
+	B       string  `json:"b"`
+	Kind    string  `json:"kind"` // related|supports|contradicts|evidence|supersedes (facts) | temporal|semantic (entities) | mentions
+	Label   string  `json:"label,omitempty"`
+	Weight  float64 `json:"weight"`
+	Retired bool    `json:"retired,omitempty"` // entity relation no longer valid (superseded or contradicted); only present with history
 }
 
 type FullGraphResult struct {
@@ -46,7 +47,7 @@ func (s *Service) FullGraph(ctx context.Context, bankID int64, history bool, lim
 	if err != nil {
 		return nil, err
 	}
-	eg, err := s.EntityGraph(ctx, bankID, limit)
+	eg, err := s.EntityGraph(ctx, bankID, history, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func (s *Service) FullGraph(ctx context.Context, bankID int64, history bool, lim
 		out.Nodes = append(out.Nodes, FullNode{ID: entityNodeID(n.ID), Type: "entity", Text: n.Name, Kind: n.Kind, Mentions: n.Mentions})
 	}
 	for _, e := range eg.Edges {
-		out.Edges = append(out.Edges, FullEdge{A: entityNodeID(e.A), B: entityNodeID(e.B), Kind: e.Kind, Label: e.Label, Weight: e.Weight})
+		out.Edges = append(out.Edges, FullEdge{A: entityNodeID(e.A), B: entityNodeID(e.B), Kind: e.Kind, Label: e.Label, Weight: e.Weight, Retired: e.Retired})
 	}
 
 	if len(entIDs) > 0 && len(factIDs) > 0 {

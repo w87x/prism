@@ -61,7 +61,7 @@
     for (const e of g.edges) {
       const a = idx.get(e.a), b = idx.get(e.b);
       if (a === undefined || b === undefined) continue;
-      edges.push({ a, b, kind: e.kind, label: e.label, w: e.weight || 0.5 });
+      edges.push({ a, b, kind: e.kind, label: e.label, w: e.weight || 0.5, retired: !!e.retired });
       adj[a].push(edges.length - 1); adj[b].push(edges.length - 1);
     }
     // label priority: conclusions, then well-connected / frequently mentioned nodes
@@ -215,10 +215,10 @@
       const e = edges[ei], A = nodes[e.a], B = nodes[e.b];
       if (!pos[A.id] || !pos[B.id]) continue;
       const hot = focus >= 0 && (e.a === focus || e.b === focus);
-      ctx.globalAlpha = hot ? 0.95 : hlOn ? (lit[e.a] || lit[e.b] ? 0.5 : 0.03) : focus >= 0 ? 0.04 : busy2 ? 0.2 : dense ? 0.32 : 0.6;
+      ctx.globalAlpha = (hot ? 0.95 : hlOn ? (lit[e.a] || lit[e.b] ? 0.5 : 0.03) : focus >= 0 ? 0.04 : busy2 ? 0.2 : dense ? 0.32 : 0.6) * (e.retired ? 0.5 : 1);
       ctx.strokeStyle = colors['e_' + e.kind] || colors.mute;
       ctx.lineWidth = (0.6 + e.w * 1.4) * (hot ? 1.2 : 1);
-      ctx.setLineDash((edgeStyle[e.kind]?.d || '').split(' ').filter(Boolean).map(Number));
+      ctx.setLineDash(e.retired ? [3, 3] : (edgeStyle[e.kind]?.d || '').split(' ').filter(Boolean).map(Number));
       ctx.beginPath(); ctx.moveTo(sx(A), sy(A)); ctx.lineTo(sx(B), sy(B)); ctx.stroke();
       if (hot) {
         const u = ((t / 1400) + ei * 0.13) % 1, from = e.a === focus ? A : B, to = e.a === focus ? B : A;

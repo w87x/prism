@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Entities turns facts into a second, coarser graph: named things (people, organisations, products,
@@ -220,18 +222,125 @@ func (s *Service) upsertEntity(ctx context.Context, bankID int64, name, kind str
 	return id, isNew, err
 }
 
-// linkEntities creates or strengthens the relation between two entities (undirected, a<b, one per pair —
-// mirrors Link for facts).
+// linkEntities creates or strengthens the relation between two entities (undirected, a<b, one live edge per
+// pair — mirrors Link for facts). If the pair already carries a different relation, the old one is archived
+// to memory_entity_link_history (valid_to set) rather than silently overwritten, and the new one starts a
+// fresh validity window — so "how did this relation change over time" stays answerable. If a "semantic"
+// relation (works-at, part-of, owns, located-in, ...) newly connects entity a to a different counterpart
+// under the same label, any other CURRENT edge of a sharing that label is treated as superseded (a person
+// can work at only one employer at a time) and is closed off too.
 func (s *Service) linkEntities(ctx context.Context, a, b int64, kind, label, by string, weight float64) error {
 	if a == b {
 		return errors.New("an entity cannot be linked to itself")
 	}
 	a, b = order(a, b)
-	_, err := s.db.Exec(ctx, `INSERT INTO memory_entity_links(a,b,kind,label,weight,source) VALUES($1,$2,$3,$4,$5,$6)
-		ON CONFLICT (a,b) DO UPDATE SET kind=EXCLUDED.kind, label=CASE WHEN EXCLUDED.label<>'' THEN EXCLUDED.label ELSE memory_entity_links.label END,
-			source=EXCLUDED.source, weight=LEAST(1,GREATEST(memory_entity_links.weight, EXCLUDED.weight)+0.05)`,
-		a, b, kind, label, float32(weight), by)
+
+	var curLabel string
+	var found bool
+	err := s.db.QueryRow(ctx, `SELECT label FROM memory_entity_links WHERE a=$1 AND b=$2 AND valid_to IS NULL`, a, b).Scan(&curLabel)
+	switch {
+	case err == nil:
+		found = true
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
+		return err
+	}
+
+	sameRelation := found && strings.EqualFold(strings.TrimSpace(curLabel), strings.TrimSpace(label))
+	if found && !sameRelation && strings.TrimSpace(label) != "" {
+		// the pair's relation changed (not merely re-observed): archive the old state, start a new window.
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_entity_link_history(a,b,kind,label,weight,source,valid_from,valid_to,invalidated_by)
+			SELECT a,b,kind,label,weight,source,valid_from,now(),'replaced' FROM memory_entity_links WHERE a=$1 AND b=$2 AND valid_to IS NULL`, a, b); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(ctx, `UPDATE memory_entity_links SET valid_to=now(), invalidated_by='replaced' WHERE a=$1 AND b=$2 AND valid_to IS NULL`, a, b); err != nil {
+			return err
+		}
+		found = false
+	}
+
+	if kind == "semantic" && strings.TrimSpace(label) != "" {
+		if err := s.invalidateExclusiveEdges(ctx, a, b, label); err != nil {
+			return err
+		}
+	}
+
+	if !found {
+		_, err = s.db.Exec(ctx, `INSERT INTO memory_entity_links(a,b,kind,label,weight,source,valid_from,valid_to,invalidated_by)
+			VALUES($1,$2,$3,$4,$5,$6,now(),NULL,'')
+			ON CONFLICT (a,b) DO UPDATE SET kind=EXCLUDED.kind, label=EXCLUDED.label, source=EXCLUDED.source,
+				weight=LEAST(1,GREATEST(memory_entity_links.weight, EXCLUDED.weight)+0.05), valid_from=now(), valid_to=NULL, invalidated_by=''`,
+			a, b, kind, label, float32(weight), by)
+		return err
+	}
+	_, err = s.db.Exec(ctx, `UPDATE memory_entity_links SET source=$3, weight=LEAST(1,GREATEST(weight,$4)+0.05) WHERE a=$1 AND b=$2 AND valid_to IS NULL`,
+		a, b, by, float32(weight))
 	return err
+}
+
+// invalidateExclusiveEdges closes off any other CURRENT semantic edge that shares entity a (or b) and the
+// same normalised label but points at a different counterpart — the newly asserted relation replaces it
+// (e.g. the user's "works at" moves from one employer to another). Archived, not deleted.
+func (s *Service) invalidateExclusiveEdges(ctx context.Context, a, b int64, label string) error {
+	rows, err := s.db.Query(ctx, `SELECT a,b FROM memory_entity_links
+		WHERE valid_to IS NULL AND lower(label)=lower($3) AND (a=$1 OR b=$1 OR a=$2 OR b=$2) AND NOT (a=$1 AND b=$2)`,
+		a, b, strings.TrimSpace(label))
+	if err != nil {
+		return err
+	}
+	type pair struct{ a, b int64 }
+	var stale []pair
+	for rows.Next() {
+		var p pair
+		if rows.Scan(&p.a, &p.b) == nil {
+			stale = append(stale, p)
+		}
+	}
+	rows.Close()
+	for _, p := range stale {
+		// only the shared endpoint makes it exclusive: (a,b) and (p.a,p.b) must overlap in the entity whose
+		// relation is being replaced, which the WHERE clause above already guarantees.
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_entity_link_history(a,b,kind,label,weight,source,valid_from,valid_to,invalidated_by)
+			SELECT a,b,kind,label,weight,source,valid_from,now(),'contradicted' FROM memory_entity_links WHERE a=$1 AND b=$2 AND valid_to IS NULL`, p.a, p.b); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(ctx, `UPDATE memory_entity_links SET valid_to=now(), invalidated_by='contradicted' WHERE a=$1 AND b=$2 AND valid_to IS NULL`, p.a, p.b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EntityLinkHistory returns the past validity windows of the relation between two entities, oldest first —
+// "how did this relationship change over time".
+type EntityLinkState struct {
+	Kind          string     `json:"kind"`
+	Label         string     `json:"label"`
+	Source        string     `json:"source"`
+	ValidFrom     time.Time  `json:"valid_from"`
+	ValidTo       *time.Time `json:"valid_to,omitempty"`
+	InvalidatedBy string     `json:"invalidated_by,omitempty"`
+}
+
+func (s *Service) EntityLinkHistory(ctx context.Context, a, b int64) ([]EntityLinkState, error) {
+	a, b = order(a, b)
+	rows, err := s.db.Query(ctx, `SELECT kind,label,source,valid_from,valid_to,invalidated_by FROM memory_entity_link_history WHERE a=$1 AND b=$2
+		UNION ALL
+		SELECT kind,label,source,valid_from,valid_to,invalidated_by FROM memory_entity_links WHERE a=$1 AND b=$2 AND valid_to IS NULL
+		ORDER BY valid_from`, a, b)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EntityLinkState{}
+	for rows.Next() {
+		var st EntityLinkState
+		if err := rows.Scan(&st.Kind, &st.Label, &st.Source, &st.ValidFrom, &st.ValidTo, &st.InvalidatedBy); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
 }
 
 // EntityGraph describes the entity graph for the Memory page, alongside the fact graph.
@@ -244,11 +353,15 @@ type EntityNode struct {
 }
 
 type EntityEdge struct {
-	A      int64   `json:"a"`
-	B      int64   `json:"b"`
-	Kind   string  `json:"kind"`
-	Label  string  `json:"label"`
-	Weight float64 `json:"weight"`
+	A             int64      `json:"a"`
+	B             int64      `json:"b"`
+	Kind          string     `json:"kind"`
+	Label         string     `json:"label"`
+	Weight        float64    `json:"weight"`
+	ValidFrom     time.Time  `json:"valid_from"`
+	ValidTo       *time.Time `json:"valid_to,omitempty"`
+	Retired       bool       `json:"retired,omitempty"`
+	InvalidatedBy string     `json:"invalidated_by,omitempty"`
 }
 
 type EntityGraphResult struct {
@@ -257,7 +370,10 @@ type EntityGraphResult struct {
 	More  int          `json:"more"`
 }
 
-func (s *Service) EntityGraph(ctx context.Context, bankID int64, limit int) (*EntityGraphResult, error) {
+// EntityGraph returns up to limit entities (by bank, or every bank when bankID is 0) with the relations
+// between them. Only currently-valid relations are included unless history is set, in which case closed-off
+// (superseded/contradicted) edges are included too, marked Retired — same convention as Graph's fact history.
+func (s *Service) EntityGraph(ctx context.Context, bankID int64, history bool, limit int) (*EntityGraphResult, error) {
 	if limit <= 0 || limit > 300 {
 		limit = 150
 	}
@@ -283,7 +399,8 @@ func (s *Service) EntityGraph(ctx context.Context, bankID int64, limit int) (*En
 	if len(ids) == 0 {
 		return g, nil
 	}
-	erows, err := s.db.Query(ctx, `SELECT a,b,kind,label,weight FROM memory_entity_links WHERE a=ANY($1) AND b=ANY($1)`, ids)
+	erows, err := s.db.Query(ctx, `SELECT a,b,kind,label,weight,valid_from,valid_to,invalidated_by FROM memory_entity_links
+		WHERE a=ANY($1) AND b=ANY($1) AND ($2 OR valid_to IS NULL)`, ids, history)
 	if err != nil {
 		return nil, err
 	}
@@ -291,8 +408,9 @@ func (s *Service) EntityGraph(ctx context.Context, bankID int64, limit int) (*En
 	for erows.Next() {
 		var e EntityEdge
 		var w float32
-		if erows.Scan(&e.A, &e.B, &e.Kind, &e.Label, &w) == nil {
+		if erows.Scan(&e.A, &e.B, &e.Kind, &e.Label, &w, &e.ValidFrom, &e.ValidTo, &e.InvalidatedBy) == nil {
 			e.Weight = float64(w)
+			e.Retired = e.ValidTo != nil
 			g.Edges = append(g.Edges, e)
 		}
 	}
