@@ -142,6 +142,7 @@ func (a *App) Cleanup(ctx context.Context) (maint.Result, error) {
 	res, err := maint.Cleanup(ctx, a.DB.Pool, rt.LogsDays, rt.TasksDays, rt.TaskStatuses...)
 	_, _ = a.Notifs.Prune(ctx, 30*24*time.Hour)
 	_, _ = builtin.PurgeArtifacts(ctx, a.DB.Pool)
+	_, _ = builtin.PruneProcesses(ctx, a.DB.Pool)
 	a.Metrics.Prune(ctx)
 	_, _, _ = builtin.DecayBookmarks(ctx, a.DB.Pool) // self-gating to once/day; safe on every hourly tick
 	return res, err

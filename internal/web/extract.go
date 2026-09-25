@@ -26,6 +26,12 @@ Answer with JSON only, in this form: {"data": <result>} where <result> is an arr
 
 // Extract runs the instruction over the page. schema is an optional description of the desired object shape.
 func (x *Extractor) Extract(ctx context.Context, page *Page, instruction, schema string, maxItems int) (any, error) {
+	return x.extractPage(ctx, page, instruction, schema, maxItems, "")
+}
+
+// extractPage reads the page's visible content through the model; extra is appended to what the model sees
+// (image and table listings the compact form leaves out).
+func (x *Extractor) extractPage(ctx context.Context, page *Page, instruction, schema string, maxItems int, extra string) (any, error) {
 	if strings.TrimSpace(instruction) == "" {
 		return nil, errors.New("instruction is required")
 	}
@@ -46,6 +52,7 @@ func (x *Extractor) Extract(ctx context.Context, page *Page, instruction, schema
 	if strings.TrimSpace(src) == "" {
 		return nil, errors.New("the page has no content to extract from")
 	}
+	src += extra
 	window := x.LLM.Window(ctx, "role:fast")
 	chunkSize := window * 4 / 3
 	chunkSize = max(6000, min(chunkSize, 24000))

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"os"
 	"os/exec"
@@ -591,4 +592,23 @@ func describeProcess(p Process, out string) string {
 		out = "…" + string(r[len(r)-4000:])
 	}
 	return head + "\noutput:\n" + out
+}
+
+// Finished background processes only bloat the list: ones that ended well (exit 0, or stopped on purpose) are
+// dropped after a day, ones that failed, exited with an error or were lost across a restart are kept a week so
+// there is time to look at why.
+const (
+	processKeepOK   = 24 * time.Hour
+	processKeepFail = 7 * 24 * time.Hour
+)
+
+// PruneProcesses deletes finished background processes past their keep time; running ones are never touched.
+func PruneProcesses(ctx context.Context, db *pgxpool.Pool) (int, error) {
+	tag, err := db.Exec(ctx, `DELETE FROM bg_processes WHERE status<>'running' AND COALESCE(finished_at, created_at) < CASE
+			WHEN status='killed' OR (status='exited' AND COALESCE(exit_code,0)=0) THEN now()-$1::interval ELSE now()-$2::interval END`,
+		fmt.Sprintf("%d seconds", int(processKeepOK.Seconds())), fmt.Sprintf("%d seconds", int(processKeepFail.Seconds())))
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
 }

@@ -33,12 +33,17 @@ type Page struct {
 	ContentType string
 	Body        string // raw body (HTML or text)
 	Rendered    bool   // came from the browser
+	Via         string // http | flare | browser: how it was fetched
+	Learned     bool   // the method was chosen because it worked for this site before
 }
 
 type Fetcher struct {
 	Settings     *settings.Store
 	Browser      Renderer
 	AllowPrivate bool // tests / advanced users; also settings.Web.AllowPrivate
+
+	prefMu sync.Mutex
+	prefs  map[string]hostPref // host -> the fetch method that worked (see learn)
 
 	downMu sync.Mutex
 	down   map[string]time.Time // hostname -> when its DNS lookup last failed outright
@@ -109,10 +114,41 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, mode, waitSel string, wait tim
 	if mode == "browser" {
 		return f.viaBrowser(ctx, u.String(), waitSel, wait)
 	}
-	page, herr := f.viaHTTP(ctx, u, cfg)
 	if mode == "http" {
-		return page, herr
+		return f.viaHTTP(ctx, u, cfg)
 	}
+	// auto: a method that worked for this site before goes first, so a protected site is not fetched the slow way
+	// on every visit
+	if via := f.learned(ctx, u.Hostname()); via != "" {
+		var p *Page
+		var err error
+		switch via {
+		case "flare":
+			if cfg.FlareSolverrURL != "" {
+				p, err = f.viaFlare(ctx, cfg, u.String())
+			}
+		case "browser":
+			if f.Browser != nil && f.Browser.Available() {
+				p, err = f.viaBrowser(ctx, u.String(), waitSel, wait)
+			}
+		}
+		if p != nil && err == nil && p.Status/100 == 2 && !looksLikeChallenge(p.Body) {
+			p.Learned = true
+			return p, nil
+		}
+		f.learn(ctx, u.Hostname(), "") // it no longer works: forget it and take the normal route
+	}
+	page, err := f.fetchAuto(ctx, u, cfg, waitSel, wait)
+	if err == nil && page != nil && page.Status/100 == 2 {
+		f.learn(ctx, u.Hostname(), map[string]string{"flare": "flare", "browser": "browser"}[page.Via])
+	}
+	return page, err
+}
+
+// fetchAuto is the default route: plain HTTP, escalating to FlareSolverr or the browser when the page is blocked
+// or needs JavaScript.
+func (f *Fetcher) fetchAuto(ctx context.Context, u *url.URL, cfg settings.Web, waitSel string, wait time.Duration) (*Page, error) {
+	page, herr := f.viaHTTP(ctx, u, cfg)
 	blocked := herr == nil && (page.Status == 403 || page.Status == 503 || page.Status == 429) && looksLikeChallenge(page.Body)
 	if blocked && cfg.FlareSolverrURL != "" {
 		if p, err := f.viaFlare(ctx, cfg, u.String()); err == nil {
@@ -165,7 +201,7 @@ func (f *Fetcher) viaHTTP(ctx context.Context, u *url.URL, cfg settings.Web) (*P
 	if err != nil {
 		return nil, err
 	}
-	return &Page{URL: u.String(), FinalURL: resp.Request.URL.String(), Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: decodeBody(b, resp.Header.Get("Content-Type"))}, nil
+	return &Page{URL: u.String(), FinalURL: resp.Request.URL.String(), Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: decodeBody(b, resp.Header.Get("Content-Type")), Via: "http"}, nil
 }
 
 func (f *Fetcher) viaBrowser(ctx context.Context, raw, waitSel string, wait time.Duration) (*Page, error) {
@@ -176,7 +212,7 @@ func (f *Fetcher) viaBrowser(ctx context.Context, raw, waitSel string, wait time
 	if err != nil {
 		return nil, err
 	}
-	return &Page{URL: raw, FinalURL: raw, Status: 200, ContentType: "text/html", Body: h, Rendered: true}, nil
+	return &Page{URL: raw, FinalURL: raw, Status: 200, ContentType: "text/html", Body: h, Rendered: true, Via: "browser"}, nil
 }
 
 // viaFlare solves Cloudflare-style challenges through a FlareSolverr instance.
@@ -204,7 +240,7 @@ func (f *Fetcher) viaFlare(ctx context.Context, cfg settings.Web, target string)
 	if r.Status != "ok" {
 		return nil, fmt.Errorf("flaresolverr: %s", r.Message)
 	}
-	return &Page{URL: target, FinalURL: r.Solution.URL, Status: r.Solution.Status, ContentType: "text/html", Body: r.Solution.Response, Rendered: true}, nil
+	return &Page{URL: target, FinalURL: r.Solution.URL, Status: r.Solution.Status, ContentType: "text/html", Body: r.Solution.Response, Rendered: true, Via: "flare"}, nil
 }
 
 // decodeBody converts the body to UTF-8 using the declared charset (header, BOM or <meta>), so
@@ -219,4 +255,119 @@ func decodeBody(b []byte, ct string) string {
 		return string(b)
 	}
 	return string(out)
+}
+
+// ── what worked for a site ──────────────────────────────────────────────────
+
+const learnedTTL = 14 * 24 * time.Hour
+
+type hostPref struct {
+	Via string    `json:"via"`
+	At  time.Time `json:"at"`
+}
+
+func (f *Fetcher) loadPrefs(ctx context.Context) {
+	f.prefMu.Lock()
+	defer f.prefMu.Unlock()
+	if f.prefs == nil {
+		f.prefs = map[string]hostPref{}
+		if f.Settings != nil {
+			f.prefs = settings.Load(ctx, f.Settings, "web.hosts", map[string]hostPref{})
+			if f.prefs == nil {
+				f.prefs = map[string]hostPref{}
+			}
+		}
+	}
+}
+
+func (f *Fetcher) learned(ctx context.Context, host string) string {
+	f.loadPrefs(ctx)
+	f.prefMu.Lock()
+	defer f.prefMu.Unlock()
+	p, ok := f.prefs[host]
+	if !ok || time.Since(p.At) > learnedTTL {
+		return ""
+	}
+	return p.Via
+}
+
+// learn records which method produced a good page for host ("" clears the entry); it writes only when something
+// changed, and keeps the table small.
+func (f *Fetcher) learn(ctx context.Context, host, via string) {
+	f.loadPrefs(ctx)
+	f.prefMu.Lock()
+	cur, had := f.prefs[host]
+	switch {
+	case via == "" && !had:
+		f.prefMu.Unlock()
+		return
+	case via == "":
+		delete(f.prefs, host)
+	case had && cur.Via == via && time.Since(cur.At) < learnedTTL/2:
+		f.prefMu.Unlock()
+		return
+	default:
+		f.prefs[host] = hostPref{Via: via, At: time.Now()}
+	}
+	if len(f.prefs) > 300 {
+		for h, p := range f.prefs {
+			if time.Since(p.At) > learnedTTL {
+				delete(f.prefs, h)
+			}
+		}
+	}
+	snapshot := make(map[string]hostPref, len(f.prefs))
+	for k, v := range f.prefs {
+		snapshot[k] = v
+	}
+	f.prefMu.Unlock()
+	if f.Settings != nil {
+		_ = f.Settings.Set(ctx, "web.hosts", snapshot)
+	}
+}
+
+// ── network capture ─────────────────────────────────────────────────────────
+
+// CapturedJSON is a JSON response the page fetched by itself while loading (its data API).
+type CapturedJSON struct {
+	URL       string `json:"url"`
+	Status    int    `json:"status"`
+	Body      string `json:"body"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// Capture is what a page's own network traffic revealed.
+type Capture struct {
+	JSON     []CapturedJSON `json:"json"`
+	Media    []string       `json:"media"` // stream / video / audio URLs the player requested
+	Requests int            `json:"requests"`
+}
+
+// Capturer is a renderer that can also record the page's network traffic.
+type Capturer interface {
+	Capture(ctx context.Context, rawURL, waitSelector string, wait time.Duration) (html string, c Capture, err error)
+}
+
+// CaptureFetch renders a page in the browser and records its JSON API responses and media requests. Many sites
+// load their data from such calls, and stream URLs never appear in the HTML at all.
+func (f *Fetcher) CaptureFetch(ctx context.Context, raw, waitSel string, wait time.Duration) (*Page, *Capture, error) {
+	u, err := checkURL(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := settings.Load(ctx, f.Settings, settings.KeyWeb, settings.Web{})
+	if !f.allowPrivate(cfg) {
+		if err := netguard.CheckURL(ctx, u.String()); err != nil {
+			return nil, nil, err
+		}
+	}
+	cp, ok := f.Browser.(Capturer)
+	if f.Browser == nil || !ok || !f.Browser.Available() {
+		return nil, nil, errors.New("network capture needs the browser (install Chrome or configure a remote DevTools URL)")
+	}
+	h, c, err := cp.Capture(ctx, u.String(), waitSel, wait)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &Page{URL: u.String(), FinalURL: u.String(), Status: 200, ContentType: "text/html", Body: h, Rendered: true, Via: "browser"}, &c, nil
 }

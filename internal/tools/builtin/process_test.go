@@ -284,3 +284,42 @@ func TestQuickProcessesDoNotNotify(t *testing.T) {
 		t.Fatalf("a quick command produced %d notice(s)", notices)
 	}
 }
+
+// Finished processes go after a day when they ended well and after a week when they failed; running ones stay.
+func TestFinishedProcessesArePrunedByAgeAndOutcome(t *testing.T) {
+	_, deps, _, _ := setup(t)
+	ctx := context.Background()
+	add := func(status string, exit *int, age time.Duration) int64 {
+		var id int64
+		at := time.Now().Add(-age)
+		if err := deps.DB.QueryRow(ctx, `INSERT INTO bg_processes(command,status,exit_code,created_at,finished_at) VALUES('x',$1,$2,$3,$3) RETURNING id`, status, exit, at).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	zero, one := 0, 1
+	okOld := add("exited", &zero, 30*time.Hour)     // gone
+	okNew := add("exited", &zero, 5*time.Hour)      // kept: under a day
+	killedOld := add("killed", nil, 26*time.Hour)   // gone: stopped on purpose
+	failNew := add("exited", &one, 3*24*time.Hour)  // kept: failures stay a week
+	failOld := add("failed", nil, 8*24*time.Hour)   // gone
+	lostOld := add("unknown", nil, 9*24*time.Hour)  // gone
+	running := add("running", nil, 30*24*time.Hour) // never touched
+	n, err := PruneProcesses(ctx, deps.DB)
+	if err != nil || n != 4 {
+		t.Fatalf("pruned %d err=%v", n, err)
+	}
+	left := map[int64]bool{}
+	rows, _ := deps.DB.Query(ctx, `SELECT id FROM bg_processes`)
+	for rows.Next() {
+		var id int64
+		_ = rows.Scan(&id)
+		left[id] = true
+	}
+	rows.Close()
+	for id, want := range map[int64]bool{okOld: false, okNew: true, killedOld: false, failNew: true, failOld: false, lostOld: false, running: true} {
+		if left[id] != want {
+			t.Errorf("process %d present=%v, want %v", id, left[id], want)
+		}
+	}
+}

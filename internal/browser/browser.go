@@ -18,12 +18,14 @@ import (
 	"time"
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
 	"prism/internal/netguard"
 	"prism/internal/settings"
 	"prism/internal/tools"
+	"prism/internal/web"
 )
 
 // SaveFunc stores a binary artifact and returns its id and path.
@@ -267,6 +269,128 @@ func (m *Manager) Render(ctx context.Context, rawURL, waitSelector string, wait 
 		return "", fmt.Errorf("render %s: %w", rawURL, err)
 	}
 	return out, nil
+}
+
+// noisyHosts serve analytics and ads, never the page's own data.
+var noisyHosts = []string{"google-analytics.com", "googletagmanager.com", "doubleclick.net", "sentry.io", "segment.io", "segment.com", "hotjar.com", "clarity.ms", "facebook.net", "facebook.com/tr", "amplitude.com", "mixpanel.com", "newrelic.com", "nr-data.net", "datadoghq.com", "cloudflareinsights.com", "yandex.ru/metrika", "mc.yandex.ru"}
+
+func noisy(u string) bool {
+	l := strings.ToLower(u)
+	for _, h := range noisyHosts {
+		if strings.Contains(l, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaRequest(mime, u string) bool {
+	l := strings.ToLower(u)
+	if i := strings.IndexAny(l, "?#"); i >= 0 {
+		l = l[:i]
+	}
+	return strings.HasPrefix(mime, "video/") || strings.HasPrefix(mime, "audio/") || strings.Contains(mime, "mpegurl") || strings.Contains(mime, "dash+xml") ||
+		strings.HasSuffix(l, ".m3u8") || strings.HasSuffix(l, ".mpd") || strings.HasSuffix(l, ".mp4") || strings.HasSuffix(l, ".webm") || strings.HasSuffix(l, ".mp3")
+}
+
+// Capture renders a page like Render and also records what the page fetched by itself: the JSON responses of its
+// data API (XHR / fetch) and the media requests of its players (HLS / DASH manifests, video and audio files).
+func (m *Manager) Capture(ctx context.Context, rawURL, waitSelector string, wait time.Duration) (string, web.Capture, error) {
+	var cp web.Capture
+	m.mu.Lock()
+	if err := m.start(); err != nil {
+		m.mu.Unlock()
+		return "", cp, err
+	}
+	bctx := m.browser
+	m.mu.Unlock()
+	tabCtx, cancel := chromedp.NewContext(bctx)
+	defer cancel()
+	if err := chromedp.Run(tabCtx); err != nil {
+		return "", cp, fmt.Errorf("open tab: %w", err)
+	}
+	tctx, cancelT := context.WithTimeout(tabCtx, 70*time.Second)
+	defer cancelT()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancelT()
+		case <-tctx.Done():
+		}
+	}()
+	type pending struct {
+		id     network.RequestID
+		url    string
+		status int
+	}
+	var mu sync.Mutex
+	var pend []pending
+	seenMedia := map[string]bool{}
+	chromedp.ListenTarget(tctx, func(ev any) {
+		e, ok := ev.(*network.EventResponseReceived)
+		if !ok || e.Response == nil {
+			return
+		}
+		mime, u := strings.ToLower(e.Response.MimeType), e.Response.URL
+		mu.Lock()
+		defer mu.Unlock()
+		cp.Requests++
+		switch {
+		case mediaRequest(mime, u):
+			if !seenMedia[u] && len(cp.Media) < 60 {
+				seenMedia[u] = true
+				cp.Media = append(cp.Media, u)
+			}
+		case strings.Contains(mime, "json") && (e.Type == network.ResourceTypeXHR || e.Type == network.ResourceTypeFetch) && !noisy(u) && len(pend) < 40:
+			pend = append(pend, pending{id: e.RequestID, url: u, status: int(e.Response.Status)})
+		}
+	})
+	if waitSelector == "" {
+		waitSelector = "body"
+	}
+	if wait <= 0 {
+		wait = 1500 * time.Millisecond
+	}
+	var out string
+	err := chromedp.Run(tctx,
+		network.Enable(),
+		chromedp.Navigate(rawURL),
+		chromedp.WaitReady(waitSelector, chromedp.ByQuery),
+		chromedp.Sleep(wait),
+		chromedp.Evaluate(`window.scrollTo(0, document.body ? document.body.scrollHeight : 0)`, nil), // trigger lazy loading
+		chromedp.Sleep(900*time.Millisecond),
+	)
+	if err == nil {
+		err = m.guardLocation(tctx)
+	}
+	if err == nil {
+		err = chromedp.Run(tctx, chromedp.OuterHTML("html", &out, chromedp.ByQuery))
+	}
+	if err != nil {
+		return "", cp, fmt.Errorf("capture %s: %w", rawURL, err)
+	}
+	mu.Lock()
+	todo := append([]pending(nil), pend...)
+	mu.Unlock()
+	const maxBody = 150 << 10
+	for _, p := range todo {
+		var body []byte
+		gerr := chromedp.Run(tctx, chromedp.ActionFunc(func(c context.Context) error {
+			b, err := network.GetResponseBody(p.id).Do(c)
+			body = b
+			return err
+		}))
+		if gerr != nil || len(body) == 0 {
+			continue
+		}
+		cj := web.CapturedJSON{URL: p.url, Status: p.status}
+		if len(body) > maxBody {
+			body, cj.Truncated = body[:maxBody], true
+		}
+		cj.Body = string(body)
+		cp.JSON = append(cp.JSON, cj)
+	}
+	return out, cp, nil
 }
 
 var unsafeIDChars = regexp.MustCompile(`[^a-zA-Z0-9_.:-]+`)

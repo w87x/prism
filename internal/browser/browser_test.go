@@ -370,3 +370,56 @@ func TestUploadReachesFileInput(t *testing.T) {
 		t.Fatal("expected the read policy to refuse an unlisted path")
 	}
 }
+
+// Capture records what a page loads by itself: the JSON its script fetches (a data API that is not in the HTML) and
+// the media its player requests.
+func TestCaptureRecordsPageApiJSONAndMedia(t *testing.T) {
+	d := testutil.DB(t)
+	st := settings.New(d.Pool)
+	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
+	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
+	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	if !m.Available() {
+		t.Skip("no Chrome installed")
+	}
+	defer m.Stop()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<!doctype html><html><body><div id="app">loading</div><script>
+fetch('/api/items?page=1').then(r=>r.json()).then(j=>{document.getElementById('app').textContent='items: '+j.items.length});
+fetch('/api/track', {method:'POST'}).catch(()=>{});
+fetch('/stream/master.m3u8').then(r=>r.text()); // what hls.js does: the player requests the manifest itself
+</script></body></html>`)
+	})
+	mux.HandleFunc("/api/items", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"items":[{"id":1,"name":"alpha"},{"id":2,"name":"beta"}]}`)
+	})
+	mux.HandleFunc("/stream/master.m3u8", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		fmt.Fprint(w, "#EXTM3U\n")
+	})
+	site := httptest.NewServer(mux)
+	defer site.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	html, cp, err := m.Capture(ctx, site.URL, "#app", 600*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "items: 2") {
+		t.Fatalf("page did not finish loading:\n%s", html)
+	}
+	if len(cp.JSON) != 1 || !strings.Contains(cp.JSON[0].Body, `"alpha"`) || !strings.Contains(cp.JSON[0].URL, "/api/items") {
+		t.Fatalf("captured json = %+v", cp.JSON)
+	}
+	found := false
+	for _, u := range cp.Media {
+		if strings.HasSuffix(u, "/stream/master.m3u8") {
+			found = true
+		}
+	}
+	if !found || cp.Requests < 3 {
+		t.Fatalf("captured media = %v requests=%d", cp.Media, cp.Requests)
+	}
+}
