@@ -58,6 +58,8 @@ type rawRow struct {
 	tainted  bool
 	attempts int
 	taskID   int64 // 0: not tied to a task (e.g. an ask_colleague exchange)
+	channel  string
+	topic    string
 }
 
 const extractPrompt = `You are the memory clerk of a personal AI assistant. From the conversation excerpt, extract durable facts worth remembering for future tasks.
@@ -110,7 +112,7 @@ func (s *Service) ProcessMin(ctx context.Context, batch, minRaw int, force bool)
 
 	// raw messages already tracked by an active (not given-up) pending fact are excluded: they are being
 	// retried by flushPendingFacts above, not re-extracted from scratch.
-	rows, err := s.db.Query(ctx, `SELECT r.id,r.from_name,r.to_name,r.text,r.agent,r.created_at,r.tainted,r.attempts,r.task_id FROM memory_raw r
+	rows, err := s.db.Query(ctx, `SELECT r.id,r.from_name,r.to_name,r.text,r.agent,r.created_at,r.tainted,r.attempts,r.task_id,r.channel,r.topic FROM memory_raw r
 		WHERE NOT processed AND NOT EXISTS (SELECT 1 FROM memory_pending_facts p WHERE r.id = ANY(p.raw_ids) AND NOT p.given_up)
 		ORDER BY id LIMIT $1`, batch)
 	if err != nil {
@@ -123,7 +125,7 @@ func (s *Service) ProcessMin(ctx context.Context, batch, minRaw int, force bool)
 	for rows.Next() {
 		var r rawRow
 		var taskID *int64
-		if err := rows.Scan(&r.id, &r.from, &r.to, &r.text, &r.agent, &r.at, &r.tainted, &r.attempts, &taskID); err != nil {
+		if err := rows.Scan(&r.id, &r.from, &r.to, &r.text, &r.agent, &r.at, &r.tainted, &r.attempts, &taskID, &r.channel, &r.topic); err != nil {
 			rows.Close()
 			if firstErr == nil {
 				firstErr = err
@@ -148,18 +150,24 @@ func (s *Service) ProcessMin(ctx context.Context, batch, minRaw int, force bool)
 		if o == "" {
 			o = guessOwner(r)
 		}
-		if _, ok := groups[o]; !ok {
-			owners = append(owners, o)
+		key := o + "\x00" + r.channel + "\x00" + r.topic // chats are digested separately: each may focus on its own project
+		if _, ok := groups[key]; !ok {
+			owners = append(owners, key)
 		}
-		groups[o] = append(groups[o], r)
+		groups[key] = append(groups[key], r)
 	}
-	for _, o := range owners {
-		grp := groups[o]
+	for _, key := range owners {
+		grp := groups[key]
+		o := strings.SplitN(key, "\x00", 2)[0]
 		ids := make([]int64, len(grp))
 		for i, r := range grp {
 			ids[i] = r.id
 		}
-		stored, pending, err := s.distil(ctx, o, grp)
+		project := ""
+		if s.ChatProject != nil {
+			project = s.ChatProject(ctx, grp[0].channel, grp[0].topic)
+		}
+		stored, pending, err := s.distil(ctx, o, grp, project)
 		if err != nil { // the whole batch failed (model call or unparsable JSON): retry later, up to the cap
 			s.bumpRawAttempts(ctx, ids, err)
 			if firstErr == nil {
@@ -347,7 +355,7 @@ func guessOwner(r rawRow) string {
 // It returns (stored, pending, err): err is set only for a whole-batch failure (the model call or its JSON);
 // a fact that failed to store individually is durably queued (see queuePendingFact) and counted in pending,
 // never silently dropped.
-func (s *Service) distil(ctx context.Context, owner string, raws []rawRow) (stored, pending int, err error) {
+func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, project string) (stored, pending int, err error) {
 	tainted := false
 	var taskID int64 // best-effort provenance: the first task any raw message in this batch belonged to
 	for _, r := range raws {
@@ -361,6 +369,9 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow) (stor
 	var sb strings.Builder
 	sb.WriteString(s.guidance(ctx))
 	fmt.Fprintf(&sb, "Agent whose profile bank is \"profile\": %s\n\n", owner)
+	if project != "" {
+		fmt.Fprintf(&sb, "This conversation is focused on the project bank %q: file facts about the work being discussed there (unless they clearly belong to another project or domain); facts about the user personally still go to \"user\".\n\n", project)
+	}
 	if names := s.namedBanks(ctx); names != "" {
 		fmt.Fprintf(&sb, "Existing project/domain banks (reuse one of these when a fact fits):\n%s\n\n", names)
 	}
@@ -393,6 +404,9 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow) (stor
 		bank := strings.TrimSpace(f.Bank)
 		if bank == "" {
 			bank = "user"
+			if project != "" {
+				bank = project
+			}
 		}
 		if _, _, _, err := ParseSpec(bank, owner); err != nil {
 			bank = "domain:General"

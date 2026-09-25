@@ -94,6 +94,9 @@ type Service struct {
 	// OnNew fires when something that background maintenance might act on arrived (a fact changed, a raw
 	// message was queued); the app uses it to run its pass soon instead of waiting for the next timer tick.
 	OnNew func()
+	// ChatProject names the project bank a web chat is focused on ("" when none); set by the app. Distillation uses
+	// it to file facts about the work in that project by default.
+	ChatProject func(ctx context.Context, channel, topic string) string
 	// VectorOn makes similarity search run inside Postgres (pgvector) instead of in-process.
 	VectorOn bool
 }

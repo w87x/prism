@@ -1,6 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { S, call, toast, clock, stamp, setActivityMode } from '../lib/store.svelte.js';
+  import ChatList from '../lib/ChatList.svelte';
+  import ChatHeader from '../lib/ChatHeader.svelte';
   import { artifactUrl } from '../lib/ws.js';
   import { prepareImage, imagesFrom, MAX_IMAGES } from '../lib/image.js';
   import { readFile, filesFrom, sizeText, MAX_FILES, MAX_TOTAL } from '../lib/attach.js';
@@ -24,6 +26,9 @@
   let cmds = $state([]);
   let sel = $state(0);
   let menuOff = $state(false);
+  let listOpen = $state(false); // narrow screens: the chat list is a drawer
+  const busy = $derived(!!S.chatBusy[S.chatTopic]);
+  const topic = $derived(S.chatTopic);
 
   // ── pictures: paste, drop or pick; shown as removable thumbnails until sent ──
   let atts = $state([]); // {name, mime, data, preview}
@@ -69,13 +74,17 @@
         // activity from an unrelated run tree (e.g. a Quick Ask, possibly several delegation hops deep)
         // must never show up in this conversation — see runKind inheritance in register().
         if (a.runKind === 'quick') continue;
+        if ((a.chat === undefined ? '' : a.chat) !== S.chatTopic) continue; // another chat's agents
         const sub = a.depth > 0;
         if (mode === 'agents' && !(sub && (a.kind === 'start' || a.kind === 'end'))) continue;
         if (mode === 'tools' && a.kind !== 'tool' && !(sub && (a.kind === 'start' || a.kind === 'end'))) continue;
         items.push({ k: 'act', ts: a.ts, a });
       }
     }
-    return items.sort((x, y) => x.ts - y.ts);
+    items.sort((x, y) => x.ts - y.ts);
+    let prev = '';
+    for (const it of items) if (it.k === 'msg') { it.first = !!it.m.moved_from && it.m.moved_from !== prev; prev = it.m.moved_from || ''; }
+    return items;
   });
 
   // ── scrolling: follow new content unless the user scrolled up to read ──
@@ -122,11 +131,11 @@
     const sent = atts, sentDocs = docs, sentPaths = paths;
     let r;
     if (t.startsWith('/') && !sent.length && !sentDocs.length && !sentPaths.length) {
-      r = await call('chat.command', { text: t });
-      if (r === false) r = await call('chat.send', { text: t }); // not a command: an ordinary message
+      r = await call('chat.command', { text: t, topic });
+      if (r === false) r = await call('chat.send', { text: t, topic }); // not a command: an ordinary message
     } else {
       atts = []; docs = []; paths = [];
-      r = await call('chat.send', { text: t, images: sent.map(({ name, mime, data }) => ({ name, mime, data })), files: sentDocs.map(({ name, mime, data }) => ({ name, mime, data })), paths: sentPaths });
+      r = await call('chat.send', { topic, text: t, images: sent.map(({ name, mime, data }) => ({ name, mime, data })), files: sentDocs.map(({ name, mime, data }) => ({ name, mime, data })), paths: sentPaths });
       if (r === undefined) { atts = sent; docs = sentDocs; paths = sentPaths; } // keep the draft (and what was attached) if it failed
       else sent.forEach((a) => URL.revokeObjectURL(a.preview));
     }
@@ -141,10 +150,10 @@
     clearTimeout(clearTimer);
     if (!clearArmed) { clearArmed = true; clearTimer = setTimeout(() => (clearArmed = false), 3500); return; }
     clearArmed = false;
-    call('chat.clear', { purge: true });
+    call('chat.clear', { purge: true, topic });
   }
   async function compact() {
-    const r = await call('chat.compact');
+    const r = await call('chat.compact', { topic });
     if (r) toast('Context compacted');
   }
   function exportChat() {
@@ -178,7 +187,11 @@
 
 <svelte:window onpointerdown={outsideAttach} />
 
+<div class="shell" class:open={listOpen}>
+<div class="drawer"><ChatList onpick={() => (listOpen = false)} /></div>
+{#if listOpen}<button type="button" class="scrim" aria-label="close the chat list" onclick={() => (listOpen = false)}></button>{/if}
 <div class="page" class:drag={dragging} role="presentation" {ondragover} ondragleave={() => (dragging = false)} {ondrop}>
+  <ChatHeader onlist={() => (listOpen = !listOpen)} />
   <div class="log-wrap">
     <div class="log scroll" role="log" bind:this={list} onscroll={onScroll} onpointerenter={() => (hover = true)} onpointerleave={() => { hover = false; if (unread > 0) toBottom(); }}>
       {#each feed as it (it.k === 'msg' ? 'm' + it.m.id : 'a' + it.ts + it.a.run + (it.a.tool || it.a.kind))}
@@ -191,6 +204,7 @@
           </div>
         {:else}
           {@const m = it.m}
+          {#if m.moved_from && it.first}<div class="mv">↳ from “{m.moved_title}”</div>{/if}
           {#if m.role === 'user'}
             <div class="m user" class:steer={m.steered}><span class="who">user:</span>{#if m.steered}<span class="steertag" title="sent while Atlas was working — it steers the current turn">↳ steering</span>{/if}<span class="tx"><span class="pre">{m.text}</span>
               {#if m.images?.length}<span class="pics">{#each m.images as id}<a href={artifactUrl(id)} target="_blank" rel="noopener noreferrer"><img src={artifactUrl(id)} alt="attached" loading="lazy" /></a>{/each}</span>{/if}</span><span class="ts">{clock(m.created_at)}</span></div>
@@ -247,11 +261,11 @@
       </div>
       <div class="grow">
         <Textarea bind:this={ta} bind:value={text} autosize rows={1} maxRows={7} mono={false} {onkey} {onpaste}
-          placeholder={S.busy ? 'Atlas is working — messages you send now steer the current turn…' : 'Message Atlas   (Enter to send · Shift+Enter new line · / for commands)'}
+          placeholder={busy ? 'Atlas is working — messages you send now steer the current turn…' : 'Message Atlas   (Enter to send · Shift+Enter new line · / for commands)'}
           onenter={send} />
       </div>
       <div class="send">
-        {#if S.busy}<Button variant="danger" onclick={() => call('chat.stop')}><Icon name="stop" size={12} /> Stop</Button>{/if}
+        {#if busy}<Button variant="danger" onclick={() => call('chat.stop', { topic })}><Icon name="stop" size={12} /> Stop</Button>{/if}
         <Button variant="primary" disabled={(!text.trim() && !atts.length && !docs.length && !paths.length) || sending} onclick={send}><Icon name="send" size={12} /> Send</Button>
       </div>
     </div>
@@ -267,6 +281,7 @@
       <Button variant="ghost" size="sm" onclick={openQuick} title="A small, self-contained request run outside this conversation — its own fresh session, no memory recall"><Icon name="send" size={12} /> Quick Ask</Button>
     </div>
   </div>
+</div>
 </div>
 
 <PathPicker bind:open={pathOpen} onpick={addPaths} />
@@ -300,7 +315,15 @@
 </Modal>
 
 <style>
-  .page { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
+  .shell { display: flex; gap: 6px; height: 100%; min-height: 0; }
+  .page { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; flex: 1; min-width: 0; }
+  .drawer { display: flex; min-height: 0; }
+  .scrim { display: none; }
+  @media (max-width: 820px) {
+    .drawer { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform 0.18s; }
+    .shell.open .drawer { transform: none; }
+    .shell.open .scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.5); border: 0; }
+  }
   .log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
   .log { flex: 1; border: 1px solid var(--line); background: var(--panel-bg); padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
   .m { display: flex; gap: 8px; align-items: baseline; }
@@ -317,6 +340,7 @@
   .ts { flex: none; font-size: 10px; color: var(--fg-faint); align-self: flex-start; padding-top: 2px; }
   .act { font-size: 11px; color: var(--fg-mute); line-height: 1.4; }
   .act b { font-weight: 500; color: var(--fg-dim); } .act .args { color: var(--fg-faint); }
+  .mv { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin: 4px 0 -2px 22px; }
   .page.drag .log { outline: 2px dashed var(--accent); outline-offset: -4px; }
   .pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .steertag { flex: none; align-self: flex-start; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--attn); border: 1px solid var(--attn-dim); padding: 0 5px; margin-right: 6px; }

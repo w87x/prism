@@ -162,11 +162,14 @@ type ChatMsg struct {
 	Text   string  `json:"text"`
 	Images []int64 `json:"images"` // artifact ids of attached pictures
 	// Steered marks a user message sent while an agent was already working: it steers the running turn.
-	Steered   bool      `json:"steered,omitempty"`
-	Channel   string    `json:"channel"`
-	Topic     string    `json:"topic"`
-	TaskID    *int64    `json:"task_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Steered bool `json:"steered,omitempty"`
+	// MovedFrom is the chat a message came from when chats were merged (MovedTitle its title).
+	MovedFrom  string    `json:"moved_from,omitempty"`
+	MovedTitle string    `json:"moved_title,omitempty"`
+	Channel    string    `json:"channel"`
+	Topic      string    `json:"topic"`
+	TaskID     *int64    `json:"task_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func (e *Engine) logChat(ctx context.Context, role, agent, text, channel, topic string, taskID int64) ChatMsg {
@@ -195,8 +198,8 @@ func (e *Engine) ChatHistory(ctx context.Context, channel, topic string, limit i
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := e.DB.Query(ctx, `SELECT id,role,agent,text,channel,topic,task_id,created_at,images,steered FROM
-		(SELECT * FROM chat_messages WHERE channel=$1 AND topic=$2 ORDER BY id DESC LIMIT $3) x ORDER BY id`, channel, topic, limit)
+	rows, err := e.DB.Query(ctx, `SELECT x.id,x.role,x.agent,x.text,x.channel,x.topic,x.task_id,x.created_at,x.images,x.steered,x.moved_from,CASE WHEN x.moved_from='' THEN '' ELSE COALESCE(NULLIF(c.title,''),'a merged chat') END FROM
+		(SELECT * FROM chat_messages WHERE channel=$1 AND topic=$2 ORDER BY id DESC LIMIT $3) x LEFT JOIN chats c ON c.topic=x.moved_from AND x.moved_from<>'' ORDER BY x.id`, channel, topic, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +207,7 @@ func (e *Engine) ChatHistory(ctx context.Context, channel, topic string, limit i
 	var out []ChatMsg
 	for rows.Next() {
 		var m ChatMsg
-		if err := rows.Scan(&m.ID, &m.Role, &m.Agent, &m.Text, &m.Channel, &m.Topic, &m.TaskID, &m.CreatedAt, &m.Images, &m.Steered); err != nil {
+		if err := rows.Scan(&m.ID, &m.Role, &m.Agent, &m.Text, &m.Channel, &m.Topic, &m.TaskID, &m.CreatedAt, &m.Images, &m.Steered, &m.MovedFrom, &m.MovedTitle); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -218,6 +221,8 @@ func ChatKey(channel, topic string) string {
 		return "tg:topic:" + topic
 	case channel == "telegram":
 		return "tg:dm"
+	case topic != "":
+		return "web:" + topic // one of the user's several web chats (see chats.go)
 	}
 	return "web"
 }
@@ -301,7 +306,13 @@ func (e *Engine) UserMessage(ctx context.Context, m UserMsg) error {
 	working := e.chatRun[key] != nil
 	e.mu.Unlock()
 	e.logChatFull(ctx, "user", "", m.Text, m.Channel, m.Topic, 0, imageIDs, working)
-	if e.Memory != nil {
+	e.touchChat(ctx, m.Channel, m.Topic)
+	if m.Channel == "web" && m.Topic != "" && m.Text != "" { // a provisional title straight from the first message; a model refines it later
+		if r, err := e.DB.Exec(ctx, `UPDATE chats SET title=$2 WHERE topic=$1 AND auto_title AND title=''`, m.Topic, briefText(m.Text, 40)); err == nil && r.RowsAffected() > 0 {
+			e.Emit("chats.update", map[string]any{"topic": m.Topic})
+		}
+	}
+	if e.Memory != nil && e.ChatRemembers(ctx, m.Channel, m.Topic) {
 		note := m.Text
 		if len(imageIDs) > 0 {
 			note = strings.TrimSpace(note + fmt.Sprintf(" [%d image(s) attached]", len(imageIDs)))
@@ -337,7 +348,7 @@ func (e *Engine) UserMessage(ctx context.Context, m UserMsg) error {
 	}
 	steer := make(chan string, 32)
 	ar := &activeRun{steer: steer, started: time.Now()}
-	ar.Info = RunInfo{ID: e.runSeq.Add(1), Agent: atlas.Name, SessionID: sess.ID}
+	ar.Info = RunInfo{ID: e.runSeq.Add(1), Agent: atlas.Name, SessionID: sess.ID, IsChat: true, ChatTopic: m.Topic, ChatChannel: m.Channel}
 	e.chatRun[key] = ar
 	e.mu.Unlock()
 	go e.chatLoop(context.WithoutCancel(ctx), m, imageIDs, key, atlas, sess, ar)
@@ -373,7 +384,11 @@ func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key st
 				text = "(no answer)"
 			}
 			e.logChat(ctx, "agent", atlas.Name, text, m.Channel, m.Topic, task.ID)
-			if e.Memory != nil {
+			e.touchChat(ctx, m.Channel, m.Topic)
+			if m.Channel == "web" && m.Topic != "" {
+				go e.nameChat(context.WithoutCancel(ctx), m.Topic) // a title and a project suggestion after the first exchange
+			}
+			if e.Memory != nil && e.ChatRemembers(ctx, m.Channel, m.Topic) {
 				_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: atlas.Name, To: "user", Channel: m.Channel, Topic: m.Topic, Text: text, TaskID: task.ID, Agent: atlas.Name, Tainted: res.Tainted})
 			}
 			_ = e.Tasks.Finish(ctx, task.ID, tasks.Done, text, "", "")
@@ -475,7 +490,35 @@ func (e *Engine) StopChat(key string) bool {
 		return false
 	}
 	ar.cancel()
+	go e.cancelDescendants(ar.Info.TaskID) // delegated work started by this turn stops with it
 	return true
+}
+
+// cancelDescendants stops the running or queued tasks below a task.
+func (e *Engine) cancelDescendants(taskID int64) {
+	if taskID == 0 {
+		return
+	}
+	ctx := context.Background()
+	root := taskID
+	if t, err := e.Tasks.Get(ctx, taskID); err == nil && t.RootID != 0 {
+		root = t.RootID
+	}
+	rows, err := e.DB.Query(ctx, `SELECT id FROM tasks WHERE root_id=$1 AND id<>$2 AND status IN ('queued','running')`, root, taskID)
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		_ = e.CancelTask(ctx, id)
+	}
 }
 
 func (e *Engine) ChatBusy(key string) bool {
@@ -675,6 +718,21 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	}
 	spec := RunSpec{Profile: p, Session: sess, Task: &t, Input: input, Provenance: prov, Tainted: o.Tainted, Leaf: o.Leaf, Restricted: o.Restricted,
 		Channel: "task", Interactive: t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram"), Depth: t.Depth, ParentRun: o.ParentRun}
+	if t.Depth > 0 { // a delegated task can be redirected by whoever delegated it (task_steer)
+		steerCh := make(chan string, 8)
+		spec.Steer, spec.SteerFrom = steerCh, t.FromName
+		e.mu.Lock()
+		if e.taskSteer == nil {
+			e.taskSteer = map[int64]chan string{}
+		}
+		e.taskSteer[t.ID] = steerCh
+		e.mu.Unlock()
+		defer func() {
+			e.mu.Lock()
+			delete(e.taskSteer, t.ID)
+			e.mu.Unlock()
+		}()
+	}
 	res, err := e.Run(tctx, spec)
 	if err != nil {
 		return fail(err)

@@ -63,16 +63,17 @@ type Deps struct {
 type Engine struct {
 	Deps
 
-	semMu   sync.Mutex
-	llmSem  chan struct{}
-	runSeq  atomic.Int64
-	askSeq  atomic.Int64
-	mu      sync.Mutex
-	runs    map[int64]*activeRun
-	chatRun map[string]*activeRun // chat session key → active Atlas run (for steering)
-	asks    map[int64]*pendingAsk
-	cancels map[int64]context.CancelFunc // task id → cancel
-	Sinks   []NoticeSink
+	semMu     sync.Mutex
+	llmSem    chan struct{}
+	runSeq    atomic.Int64
+	askSeq    atomic.Int64
+	mu        sync.Mutex
+	runs      map[int64]*activeRun
+	chatRun   map[string]*activeRun // chat session key → active Atlas run (for steering)
+	taskSteer map[int64]chan string // delegated task id → its steering channel (task_steer)
+	asks      map[int64]*pendingAsk
+	cancels   map[int64]context.CancelFunc // task id → cancel
+	Sinks     []NoticeSink
 	// OnTaskDone, when set, is called after a task finished successfully (used to review coding workspaces).
 	OnTaskDone func(ctx context.Context, t tasks.Task)
 }
@@ -146,6 +147,10 @@ type RunInfo struct {
 	SessionID int64  `json:"session"`
 	Title     string `json:"title,omitempty"`
 	Kind      string `json:"kind,omitempty"` // "ask": a colleague answering ask_colleague (the graph draws it as a request line)
+	// IsChat marks the Atlas turn of a user chat; ChatTopic says which web chat ("" is the main one).
+	IsChat      bool   `json:"is_chat,omitempty"`
+	ChatTopic   string `json:"chat_topic,omitempty"`
+	ChatChannel string `json:"chat_channel,omitempty"`
 }
 
 // NewRunID hands out a run id for work that shows up as an agent in the UI without being an
@@ -193,6 +198,7 @@ type RunSpec struct {
 	Topic       string
 	Interactive bool
 	Steer       chan string
+	SteerFrom   string // set for a delegated task: the delegating agent whose messages arrive on Steer (not the user)
 	ExtraTools  []string
 	Depth       int
 	Preamble    string
@@ -270,6 +276,9 @@ func brief(s string, n int) string {
 // Run executes one agent turn-sequence (until a final answer, a needed input, or budget exhaustion).
 func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	p := spec.Profile
+	if spec.Channel == "web" { // memory recall in this run (and its delegates) favours the chat's project
+		ctx = withChat(ctx, spec.Channel, spec.Topic)
+	}
 	spec.Restricted = spec.Restricted || p.Probation
 	ar := e.register(spec)
 	ctx, cancel := context.WithCancel(ctx)
@@ -286,7 +295,8 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		delete(e.runs, ar.Info.ID)
 		e.mu.Unlock()
 		e.Emit("run.end", map[string]any{"run": ar.Info.ID, "agent": p.Name, "task": ar.Info.TaskID, "depth": spec.Depth,
-			"status": status, "error": errMsg, "tokens_in": res.TokensIn, "tokens_out": res.TokensOut})
+			"status": status, "error": errMsg, "tokens_in": res.TokensIn, "tokens_out": res.TokensOut,
+			"is_chat": ar.Info.IsChat, "chat_topic": ar.Info.ChatTopic})
 	}()
 
 	sess := spec.Session
@@ -403,7 +413,11 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		}
 		// steering: user messages that arrived while we were working
 		for _, s := range drain(spec.Steer) {
-			_ = add(Msg{Message: llm.Message{Role: "user", Content: s}, Provenance: "user", ImageIDs: ar.takeImages()})
+			content, prov := s, "user"
+			if spec.SteerFrom != "" { // a delegator's redirect: guidance from a colleague, not the user speaking
+				content, prov = "[Message from "+spec.SteerFrom+" while you work — it refines or replaces your instruction] "+s, "agent"
+			}
+			_ = add(Msg{Message: llm.Message{Role: "user", Content: content}, Provenance: prov, ImageIDs: ar.takeImages()})
 			// taint stays: the untrusted content is still in the context window, whatever the user says next
 		}
 		if iter >= maxIter {
@@ -855,6 +869,9 @@ func detectRepeat(s string) (pattern string, count int) {
 func (e *Engine) execTools(ctx context.Context, spec RunSpec, ar *activeRun, env *tools.Env, calls []llm.ToolCall, tainted *bool, guard *loopGuard, steer chan string) []toolResult {
 	results := make([]toolResult, len(calls))
 	skip := "Skipped: the user sent a new message while you were working. Re-read it and decide how to proceed."
+	if spec.SteerFrom != "" {
+		skip = "Skipped: " + spec.SteerFrom + " sent you a new message while you were working. Re-read it and decide how to proceed."
+	}
 	i := 0
 	for i < len(calls) {
 		if drainPeek(steer) { // steering: synthesize skipped results so tool_use/tool_result pairing stays valid
@@ -880,13 +897,13 @@ func (e *Engine) execTools(ctx context.Context, spec RunSpec, ar *activeRun, env
 				wg.Add(1)
 				go func(k int) {
 					defer wg.Done()
-					results[k] = e.execOne(ctx, ar, env, calls[k], *tainted, guard)
+					results[k] = e.execOne(ctx, ar, env, calls[k], *tainted, guard, steer, spec)
 				}(k)
 			}
 			wg.Wait()
 			i = j
 		} else {
-			results[i] = e.execOne(ctx, ar, env, calls[i], *tainted, guard)
+			results[i] = e.execOne(ctx, ar, env, calls[i], *tainted, guard, steer, spec)
 			i++
 		}
 		for k := 0; k < i; k++ {
@@ -905,11 +922,15 @@ func (e *Engine) execTools(ctx context.Context, spec RunSpec, ar *activeRun, env
 	return results
 }
 
-func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc llm.ToolCall, tainted bool, guard *loopGuard) (res toolResult) {
+func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc llm.ToolCall, tainted bool, guard *loopGuard, steer chan string, spec RunSpec) (res toolResult) {
 	start := time.Now()
-	emit := func(phase string, ok bool) {
-		e.Emit("run.tool", map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": brief(tc.Arguments, 140),
-			"phase": phase, "ok": ok, "ms": time.Since(start).Milliseconds()})
+	emit := func(phase string, ok bool, why ...string) {
+		ev := map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": brief(tc.Arguments, 140),
+			"phase": phase, "ok": ok, "ms": time.Since(start).Milliseconds()}
+		if len(why) > 0 && why[0] != "" {
+			ev["error"] = brief(why[0], 200)
+		}
+		e.Emit("run.tool", ev)
 	}
 	tool, ok := e.Tools.Get(tc.Name)
 	if !ok {
@@ -962,6 +983,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	marked := false
 	tenv.Taint = func() { marked = true }
 	runCtx := ctx
+	if steer != nil && (tool.Name == "delegate" || tool.Name == "ask_colleague") {
+		// specialists may outlive this turn when the user interrupts the wait; Stop cancels them explicitly
+		runCtx = context.WithoutCancel(ctx)
+	}
 	var cancel context.CancelFunc
 	if tool.Name != "delegate" && tool.Name != "ask_user" {
 		limit := tool.Timeout
@@ -973,14 +998,56 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	}
 	var out string
 	var err error
-	func() {
+	type toolReturn struct {
+		out string
+		err error
+	}
+	done := make(chan toolReturn, 1)
+	go func() {
+		var r toolReturn
 		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("tool panicked: %v", r)
+			if rec := recover(); rec != nil {
+				r.err = fmt.Errorf("tool panicked: %v", rec)
 			}
+			done <- r
 		}()
-		out, err = tool.Run(runCtx, &tenv, []byte(tc.Arguments))
+		r.out, r.err = tool.Run(runCtx, &tenv, []byte(tc.Arguments))
 	}()
+	// A user message that arrives while a tool is running (a specialist working for minutes, a long command) must
+	// not wait for it: stop waiting, hand control back to the model, and let it read the message. Delegated work
+	// keeps running in the background; other tools are cancelled.
+	if steer == nil || tool.Name == "ask_user" { // a pending question is answered through its own channel, not by chatting
+		r := <-done
+		out, err = r.out, r.err
+	} else {
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+	wait:
+		for {
+			select {
+			case r := <-done:
+				out, err = r.out, r.err
+				break wait
+			case <-tick.C:
+				if !drainPeek(steer) {
+					continue
+				}
+				emit("interrupted", true)
+				detached := tool.Name == "delegate" || tool.Name == "ask_colleague"
+				go func() { // whatever the tool returns later is shown to the user, not fed back into the run
+					r := <-done
+					if detached {
+						txt := strings.TrimSpace(r.out)
+						if r.err != nil {
+							txt = "failed: " + r.err.Error()
+						}
+						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, brief(txt, 600)), spec.Channel, spec.Topic, env.TaskID)
+					}
+				}()
+				return toolResult{text: e.interruptedText(ctx, tool.Name, env.TaskID, detached, spec.SteerFrom)}
+			}
+		}
+	}
 	if e.OnTool != nil {
 		var ni0 *tools.NeedsInput
 		if !errors.As(err, &ni0) { // a question relayed to the user is not a tool failure
@@ -998,7 +1065,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		return toolResult{text: "Your question was relayed to the requester: " + ni.Question, needsInput: ni.Question}
 	case err != nil:
 		out = "Error: " + err.Error()
-		emit("end", false)
+		emit("end", false, err.Error())
 	default:
 		emit("end", true)
 	}
@@ -1031,3 +1098,34 @@ func isYes(a string) bool {
 }
 
 func llmMsg(role, content string) llm.Message { return llm.Message{Role: role, Content: content} }
+
+// interruptedText is what the model is told when a user message cut a tool call short.
+func (e *Engine) interruptedText(ctx context.Context, tool string, taskID int64, detached bool, from string) string {
+	who := "the user"
+	if from != "" {
+		who = from
+	}
+	txt := "Interrupted: " + who + " sent a new message while this was running. Read the message and decide what to do."
+	if !detached {
+		return txt + " The call was cancelled; repeat it later only if it is still needed."
+	}
+	txt += " The delegated work itself keeps running in the background and its result will be shown to the user when it finishes"
+	if taskID != 0 {
+		rows, err := e.DB.Query(ctx, `SELECT id,to_agent,title,status FROM tasks WHERE parent_id=$1 AND status IN ('queued','running') ORDER BY id`, taskID)
+		if err == nil {
+			defer rows.Close()
+			var lines []string
+			for rows.Next() {
+				var id int64
+				var agent, title, status string
+				if rows.Scan(&id, &agent, &title, &status) == nil {
+					lines = append(lines, fmt.Sprintf("#%d %s (%s): %s", id, agent, status, brief(title, 80)))
+				}
+			}
+			if len(lines) > 0 {
+				txt += ": " + strings.Join(lines, "; ") + ". Decide for each: if the new message changes or contradicts what it is doing, redirect it with task_steer(id, message) or stop it with task_cancel(id); if it is unrelated, leave it running; check on one with task_status(id) when relevant"
+			}
+		}
+	}
+	return txt + ". Tell the user it is still running if they ask."
+}

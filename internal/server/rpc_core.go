@@ -116,27 +116,29 @@ func (s *Server) registerCore() {
 			}
 			text += "\n\n" + note
 		}
-		return true, a.Engine.UserMessage(ctx, agent.UserMsg{Text: text, Images: r.Images, Channel: "web"})
+		return true, a.Engine.UserMessage(ctx, agent.UserMsg{Text: text, Images: r.Images, Channel: "web", Topic: r.Topic})
 	})
 	rpc(s, "fs.browse", func(ctx context.Context, r chatReq) (*dirListing, error) { return s.browse(ctx, r.Path, r.Hidden) })
 	rpc(s, "chat.commands", func(ctx context.Context, _ none) ([]agent.Command, error) { return agent.Commands, nil })
 	// chat.command runs a slash command; the result is posted to the conversation as a system message.
 	rpc(s, "chat.command", func(ctx context.Context, r chatReq) (bool, error) {
-		out, handled := a.Engine.RunCommand(ctx, "web", "", r.Text)
+		out, handled := a.Engine.RunCommand(ctx, "web", r.Topic, r.Text)
 		if !handled {
 			return false, nil
 		}
 		if strings.TrimSpace(out) != "" {
-			a.Engine.PostSystem(ctx, "web", "", out)
+			a.Engine.PostSystem(ctx, "web", r.Topic, out)
 		}
 		return true, nil
 	})
-	rpc(s, "chat.stop", func(ctx context.Context, r chatReq) (bool, error) { return a.Engine.StopChat("web"), nil })
+	rpc(s, "chat.stop", func(ctx context.Context, r chatReq) (bool, error) {
+		return a.Engine.StopChat(agent.ChatKey("web", r.Topic)), nil
+	})
 	rpc(s, "chat.clear", func(ctx context.Context, r chatReq) (bool, error) {
-		return true, a.Engine.ClearChat(ctx, "web", "", r.Purge)
+		return true, a.Engine.ClearChat(ctx, "web", r.Topic, r.Purge)
 	})
 	rpc(s, "chat.compact", func(ctx context.Context, r chatReq) (bool, error) {
-		return true, a.Engine.CompactChat(ctx, "web", "")
+		return true, a.Engine.CompactChat(ctx, "web", r.Topic)
 	})
 	// A small, self-contained request run outside the main conversation: a fresh one-off session, no
 	// automatic memory recall — cheaper than a normal chat turn for something like "create an agent that
@@ -155,6 +157,41 @@ func (s *Server) registerCore() {
 	})
 	rpc(s, "runs.snapshot", func(ctx context.Context, _ none) (map[string]any, error) {
 		return map[string]any{"runs": a.Engine.ActiveRuns(), "asks": a.Engine.PendingAsks(), "busy": a.Engine.ChatBusy("web")}, nil
+	})
+	// the user's web chats
+	rpc(s, "chats.list", func(ctx context.Context, r struct {
+		Archived bool `json:"archived"`
+	}) ([]agent.Chat, error) {
+		return a.Engine.Chats(ctx, r.Archived)
+	})
+	rpc(s, "chats.create", func(ctx context.Context, r struct {
+		Title         string `json:"title"`
+		ProjectBankID int64  `json:"project_bank_id"`
+	}) (agent.Chat, error) {
+		return a.Engine.CreateChat(ctx, r.Title, r.ProjectBankID)
+	})
+	rpc(s, "chats.update", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+		agent.ChatPatch
+	}) (agent.Chat, error) {
+		return a.Engine.UpdateChat(ctx, r.ID, r.ChatPatch)
+	})
+	rpc(s, "chats.merge", func(ctx context.Context, r struct {
+		Sources       []int64 `json:"sources"`
+		Target        int64   `json:"target"`
+		ProjectBankID *int64  `json:"project_bank_id"`
+	}) (*agent.MergeResult, error) {
+		return a.Engine.MergeChats(ctx, r.Sources, r.Target, r.ProjectBankID)
+	})
+	rpc(s, "chats.unmerge", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.UnmergeChat(ctx, r.ID)
+	})
+	rpc(s, "chats.delete", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.DeleteChat(ctx, r.ID)
 	})
 
 	// ── agents ──

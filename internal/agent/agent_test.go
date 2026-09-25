@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1903,5 +1904,170 @@ func TestAutoRetryCanBeSwitchedOff(t *testing.T) {
 	h.e.RunTask(ctx, created, TaskOpts{})
 	if out, _ := h.e.Tasks.Get(ctx, created.ID); out.Status != tasks.Partial {
 		t.Fatalf("with auto-retry off the task stays partial, got %s", out.Status)
+	}
+}
+
+// Bug: a message sent while Atlas waited for a delegated specialist sat in the queue until the specialist was done
+// (minutes). It must now interrupt the wait at once: Atlas reads the message while the specialist keeps working,
+// and the specialist's eventual result is shown to the user as a system message.
+func TestSteeringInterruptsAWaitOnDelegatedWork(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Slowpoke", Soul: "You are Slowpoke, a slow specialist.", Enabled: true, MaxIterations: 4, Role: RoleWorker}, ""); err != nil {
+		t.Fatal(err)
+	}
+	var slowStarted atomic.Bool
+	hasText := func(req map[string]any, sub string) bool {
+		for _, m := range req["messages"].([]any) {
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, sub) {
+				return true
+			}
+		}
+		return false
+	}
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		switch {
+		case hasText(req, "You are Slowpoke"):
+			slowStarted.Store(true)
+			return testutil.Reply{Content: "slow result ready", DelayMS: 4000} // the fake server serialises handlers, so slowness is a delay, not a block
+		case hasText(req, "Interrupted: the user sent a new message"):
+			return testutil.Reply{Content: "Understood — I read your new message while Slowpoke keeps working."}
+		case hasText(req, "start the slow job"):
+			return testutil.Reply{Tools: []llm.ToolCall{tc("d1", "delegate", map[string]any{"tasks": []map[string]any{{"agent": "Slowpoke", "instruction": "take your time"}}})}}
+		}
+		return testutil.Reply{Content: "unexpected turn"}
+	}
+	go func() { _ = h.e.UserMessage(ctx, UserMsg{Text: "start the slow job"}) }()
+	waitFor(t, 8*time.Second, func() bool { return slowStarted.Load() })
+	start := time.Now()
+	if err := h.e.UserMessage(ctx, UserMsg{Text: "change of plan: do something else"}); err != nil {
+		t.Fatal(err)
+	}
+	var reply string
+	waitFor(t, 6*time.Second, func() bool {
+		hist, _ := h.e.ChatHistory(ctx, "web", "", 30)
+		for _, m := range hist {
+			if m.Role == "agent" && strings.Contains(m.Text, "read your new message") {
+				reply = m.Text
+				return true
+			}
+		}
+		return false
+	})
+	if reply == "" || time.Since(start) > 3*time.Second {
+		t.Fatalf("Atlas must answer while the specialist is still working (it needs 4s): reply=%q after %s", reply, time.Since(start))
+	}
+	waitFor(t, 8*time.Second, func() bool {
+		hist, _ := h.e.ChatHistory(ctx, "web", "", 40)
+		for _, m := range hist {
+			if m.Role == "system" && strings.Contains(m.Text, "finished in the background") && strings.Contains(m.Text, "slow result ready") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// A non-delegating tool that is still running when a message arrives is cancelled, and the model is told so.
+func TestSteeringCancelsAWaitingTool(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	cancelled := make(chan struct{})
+	h.e.Tools.Register(&tools.Tool{Name: "stuck", Description: "blocks", Risk: tools.RiskWrite, Auto: true, Params: tools.Obj(""),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			<-ctx.Done()
+			close(cancelled)
+			return "", ctx.Err()
+		}})
+	steer := make(chan string, 4)
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		for _, m := range req["messages"].([]any) {
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "Interrupted: the user sent a new message") {
+				return testutil.Reply{Content: "stopped waiting"}
+			}
+		}
+		return testutil.Reply{Tools: []llm.ToolCall{tc("s1", "stuck", map[string]any{})}}
+	}
+	p, _ := h.e.Profiles.Save(ctx, Profile{Name: "Waiter", Soul: "You are Waiter.", Tools: []string{"stuck"}, Enabled: true, MaxIterations: 6}, "")
+	sess, _ := h.e.Sessions.Create(ctx, "Waiter", "task", "", 0)
+	go func() { time.Sleep(600 * time.Millisecond); steer <- "hey, stop that" }()
+	res, err := h.e.Run(ctx, RunSpec{Profile: p, Session: sess, Input: "wait for it", Steer: steer, Interactive: true})
+	if err != nil || res.Text != "stopped waiting" {
+		t.Fatalf("run = %+v err=%v", res, err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the blocked tool must be cancelled")
+	}
+}
+
+// After an interruption Atlas can redirect a still-running specialist (task_steer) or stop it (task_cancel), but only
+// its own; a redirect reaches the specialist as guidance from the delegator, not as a user message.
+func TestDelegatorCanSteerOrCancelItsRunningSpecialist(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Worker9", Soul: "You are Worker9, a patient specialist.", Enabled: true, MaxIterations: 6, Role: RoleWorker}, ""); err != nil {
+		t.Fatal(err)
+	}
+	proceed := make(chan struct{})
+	var sawRedirect atomic.Bool
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		joined := fmt.Sprint(req["messages"])
+		if strings.Contains(joined, "You are Worker9") {
+			if strings.Contains(joined, "Message from Parent") && strings.Contains(joined, "use the second option") {
+				sawRedirect.Store(true)
+				return testutil.Reply{Content: "did it the second way"}
+			}
+			<-proceed // first turn: wait until the redirect has been queued
+			return testutil.Reply{Tools: []llm.ToolCall{tc("c1", "clock", map[string]any{})}}
+		}
+		return testutil.Reply{Content: "n/a"}
+	}
+	parentTask, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "coordinate", Depth: 0}, true)
+	child, _ := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &parentTask.ID, RootID: parentTask.ID, FromKind: "agent", FromName: "Parent", ToAgent: "Worker9", Input: "do the job", Depth: 1}, true)
+	done := make(chan tasks.Task, 1)
+	go func() { done <- h.e.RunTask(ctx, child, TaskOpts{}) }()
+	waitFor(t, 5*time.Second, func() bool {
+		h.e.mu.Lock()
+		defer h.e.mu.Unlock()
+		return h.e.taskSteer[child.ID] != nil
+	})
+	steerTool, _ := h.e.Tools.Get("task_steer")
+	cancelTool, _ := h.e.Tools.Get("task_cancel")
+	stranger := &tools.Env{Agent: "Other", TaskID: 999999}
+	if _, err := steerTool.Run(ctx, stranger, []byte(fmt.Sprintf(`{"id":%d,"message":"hijack"}`, child.ID))); err == nil {
+		t.Fatal("an agent must not steer a task it did not delegate")
+	}
+	if _, err := cancelTool.Run(ctx, stranger, []byte(fmt.Sprintf(`{"id":%d}`, child.ID))); err == nil {
+		t.Fatal("an agent must not cancel a task it did not delegate")
+	}
+	owner := &tools.Env{Agent: "Parent", TaskID: parentTask.ID}
+	if out, err := steerTool.Run(ctx, owner, []byte(fmt.Sprintf(`{"id":%d,"message":"use the second option"}`, child.ID))); err != nil || !strings.Contains(out, "Delivered") {
+		t.Fatalf("steer: %q %v", out, err)
+	}
+	close(proceed)
+	out := <-done
+	if out.Status != tasks.Done || !sawRedirect.Load() || !strings.Contains(out.Result, "second way") {
+		t.Fatalf("the specialist must act on the redirect: %s %q redirect=%v", out.Status, out.Result, sawRedirect.Load())
+	}
+}
+
+// Stopping a chat turn also stops the specialists it started.
+func TestStopCancelsDelegatedDescendants(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	parent, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "coordinate"}, true)
+	child, _ := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &parent.ID, RootID: parent.ID, FromKind: "agent", FromName: "Atlas", ToAgent: "Scout", Input: "work", Depth: 1}, true)
+	stopped := make(chan struct{}, 1)
+	h.e.mu.Lock()
+	h.e.cancels[child.ID] = func() { stopped <- struct{}{} }
+	h.e.mu.Unlock()
+	_, _ = h.e.DB.Exec(ctx, `UPDATE tasks SET status='running' WHERE id=$1`, child.ID)
+	h.e.cancelDescendants(parent.ID)
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the running descendant must be cancelled")
 	}
 }

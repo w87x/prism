@@ -157,6 +157,7 @@ func (a *App) build(ctx context.Context) error {
 	a.Engine = agent.NewEngine(agent.Deps{DB: a.DB.Pool, LLM: a.LLM, Tools: a.Tools, Profiles: a.Profiles, Sessions: a.Sessions,
 		Tasks: a.Tasks, Memory: a.Memory, TaskSum: a.TaskSum, Settings: a.Settings, Emit: a.Emit, DefaultBanks: a.defaultBanks})
 	a.Engine.OnTaskDone = a.reviewWorkspaces
+	a.Memory.ChatProject = a.Engine.ChatProject
 
 	// tools
 	memory.RegisterTools(a.Tools, a.Memory, a.defaultBanks)
@@ -235,6 +236,12 @@ func (a *App) defaultBanks(ctx context.Context, name string) []string {
 	banks := []string{"user", "profile:" + name}
 	if p, err := a.Profiles.Get(ctx, name); err == nil {
 		banks = append(banks, p.Banks...)
+	}
+	// a chat focused on a project searches that project's bank instead of every project's
+	if ch, topic, ok := agent.ChatFrom(ctx); ok && a.Engine != nil {
+		if label := a.Engine.ChatProject(ctx, ch, topic); label != "" {
+			return append(banks, label)
+		}
 	}
 	// active project banks are cheap to include and often what a follow-up refers to
 	if bs, err := a.Memory.Banks(ctx); err == nil {

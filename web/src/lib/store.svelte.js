@@ -14,9 +14,13 @@ export const S = $state({
   navOpen: lsGet('prism.navOpen', true),
   widgetOpen: lsGet('prism.widgetOpen', true),
   chat: [],
-  busy: false,
   runs: {}, // run id → live run
   askTrail: [], // finished ask_colleague requests, kept a few seconds so the graph can show the answer coming back
+  chats: [], // the user's web chats (main first); see loadChats
+  chatTopic: lsGet('prism.chatTopic', ''), // the chat shown on the Chat page ('' = main)
+  chatBusy: {}, // topic -> an Atlas turn is running in that chat
+  chatUnread: {}, // topic -> new messages seen while another chat was open
+  chatRead: lsGet('prism.chatRead', {}), // topic -> id of the last message the user has seen
   asks: [], // pending questions/confirmations
   agents: [],
   models: null, // {models, lists} for pickers
@@ -62,7 +66,7 @@ export async function openProposal(id) {
 // Methods a view-only tab may still call: everything that only reads. Unknown methods are refused, so a
 // newly added writing RPC is safe by default.
 const READ_ONLY_OK = new Set(`agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
-browser.status chat.commands chat.history crons.list docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
+browser.status chat.commands chat.history chats.list crons.list docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
 foldermap.list fs.browse intents.list kb.page_get kb.tree lists.list logs.list mail.accounts mail.himalaya mcp.list memory.banks memory.entity_facts
 memory.entity_graph memory.export memory.fact memory.facts memory.find memory.full_graph memory.graph memory.links memory.ops memory.review
 memory.stats models.list notifications.list obsidian.status onboarding.state onboarding.templates ops.dashboard ops.delegation plugins.get
@@ -114,7 +118,8 @@ export function activeRuns() {
 
 function newRun(e) {
   return { id: e.run, agent: e.agent, depth: e.depth || 0, task: e.task || 0, parent_run: e.parent_run || 0, kind: e.kind || '', title: e.title || '', task_text: '',
-    tokens_in: 0, tokens_out: 0, context: 0, window: 0, buf: '', started: Date.now(), phase: 'thinking', done: false, calls: 0, live: false, liveMs: LIVE_MS_DEFAULT, kb: e.kb || 0, compactions: 0 };
+    tokens_in: 0, tokens_out: 0, context: 0, window: 0, buf: '', started: Date.now(), phase: 'thinking', done: false, calls: 0, live: false, liveMs: LIVE_MS_DEFAULT, kb: e.kb || 0, compactions: 0,
+    chat: e.is_chat ? (e.chat_topic || '') : S.runs[e.parent_run]?.chat }; // which chat a run belongs to (sub-agents inherit it)
 }
 
 // LED "live" pulse speed tracks how fast tokens are actually arriving: a smoothed (EMA) inter-arrival gap
@@ -156,8 +161,8 @@ function wire() {
     S.runs[e.run] = newRun(e);
     // a "quick" run (see QuickAsk) is a separate one-off request, not this conversation continuing — it
     // must never make the chat page look busy or steerable.
-    if (e.agent === 'Atlas' && (e.depth || 0) === 0 && e.kind !== 'quick') S.busy = true;
-    pushActivity({ kind: 'start', agent: e.agent, depth: e.depth || 0, run: e.run, runKind: e.kind || '', text: (e.kind === 'ask' ? 'answering a colleague’s request' : e.title) || '' });
+    if (e.is_chat && (e.depth || 0) === 0 && e.kind !== 'quick') S.chatBusy[e.chat_topic || ''] = true;
+    pushActivity({ kind: 'start', agent: e.agent, depth: e.depth || 0, run: e.run, runKind: e.kind || '', chat: S.runs[e.run].chat, text: (e.kind === 'ask' ? 'answering a colleague’s request' : e.title) || '' });
   });
   on('run.delta', (e) => {
     const r = S.runs[e.run];
@@ -177,11 +182,11 @@ function wire() {
       r.phase = 'acting';
       markLive(r);
       r.buf = (r.buf + `\n▸ ${e.tool} ${short(e.args)}\n`).slice(-BUF);
-      pushActivity({ kind: 'tool', agent: e.agent, depth: r.depth, run: e.run, runKind: r.kind, tool: e.tool, text: short(e.args, 120) });
+      pushActivity({ kind: 'tool', agent: e.agent, depth: r.depth, run: e.run, runKind: r.kind, chat: r.chat, tool: e.tool, text: short(e.args, 120) });
     }
     else if (e.phase === 'end') r.phase = 'thinking';
     if (e.phase === 'denied') r.buf = (r.buf + `\n✗ ${e.tool} denied\n`).slice(-BUF);
-    else if (e.phase === 'end' && e.ok === false) r.buf = (r.buf + `✗ ${e.tool} failed\n`).slice(-BUF);
+    else if (e.phase === 'end' && e.ok === false) r.buf = (r.buf + `✗ ${e.tool} failed${e.error ? ': ' + e.error : ''}\n`).slice(-BUF);
   });
   on('run.usage', (e) => {
     const r = S.runs[e.run];
@@ -199,8 +204,8 @@ function wire() {
         setTimeout(() => { S.askTrail = S.askTrail.filter((x) => x.id !== t.id); }, 5200);
       }
     }
-    pushActivity({ kind: 'end', agent: e.agent, depth: e.depth || 0, run: e.run, runKind: r?.kind || '', status: e.status, text: e.error || '' });
-    if (e.agent === 'Atlas' && (e.depth || 0) === 0 && r?.kind !== 'quick') S.busy = false;
+    pushActivity({ kind: 'end', agent: e.agent, depth: e.depth || 0, run: e.run, runKind: r?.kind || '', chat: r?.chat, status: e.status, text: e.error || '' });
+    if (e.is_chat && (e.depth || 0) === 0 && r?.kind !== 'quick') S.chatBusy[e.chat_topic || ''] = false;
     setTimeout(() => { delete S.runs[e.run]; }, 700);
     if (e.status === 'failed' && e.error) toast(`${e.agent}: ${e.error}`, 'err', 8000);
   });
@@ -208,10 +213,19 @@ function wire() {
   on('ask.done', (a) => { S.asks = S.asks.filter((x) => x.id !== a.id); });
   on('chat.message', (m) => {
     if (m.channel !== 'web' && m.channel) return;
-    if (!S.chat.find((x) => x.id === m.id)) S.chat.push(m);
-    if (S.chat.length > 400) S.chat.splice(0, S.chat.length - 400);
+    const topic = m.topic || '';
+    if (topic === S.chatTopic) {
+      if (!S.chat.find((x) => x.id === m.id)) S.chat.push(m);
+      if (S.chat.length > 400) S.chat.splice(0, S.chat.length - 400);
+      markRead(topic, m.id);
+    } else if (m.role === 'agent') S.chatUnread[topic] = (S.chatUnread[topic] || 0) + 1; // something new in a chat that is not open
+    const c = S.chats.find((x) => x.topic === topic);
+    if (c) { c.last_at = m.created_at; c.last_msg_id = m.id; if (m.role === 'user' || m.role === 'agent') c.last_text = String(m.text || '').slice(0, 120); }
+    else if (topic) loadChats(); // a chat this tab has not heard of yet
   });
-  on('chat.cleared', (e) => { if (e.channel === 'web') S.chat = []; });
+  on('chat.cleared', (e) => { if (e.channel === 'web' && (e.topic || '') === S.chatTopic) S.chat = []; });
+  on('chats.update', () => loadChats());
+  on('chat.reload', async (e) => { if ((e.topic || '') === S.chatTopic) { const h = await call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }); if (h && S.chatTopic === (e.topic || '')) S.chat = h; } });
   on('notice', (n) => { if (n.level === 'attention' || n.level === 'warning' || n.level === 'error') toast(`${n.agent}: ${short(n.text, 140)}`, n.level === 'attention' ? 'attn' : n.level === 'warning' ? 'warn' : 'err', 9000); });
   on('log', (l) => { if (l.level === 'error') toast(`${l.source}: ${short(l.message, 160)}`, 'err', 8000); });
   on('agents.update', () => { loadAgents(); S.refresh++; });
@@ -262,18 +276,55 @@ export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
   if (st) S.status = st;
   if (!st || st.setup) return;
-  const [hist, snap] = await Promise.all([call('chat.history', { limit: 120 }, { quiet: true }), call('runs.snapshot', {}, { quiet: true })]);
-  if (hist) S.chat = hist;
+  await loadChats();
+  const [hist, snap] = await Promise.all([call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }), call('runs.snapshot', {}, { quiet: true })]);
+  if (hist) { S.chat = hist; if (hist.length) markRead(S.chatTopic, hist[hist.length - 1].id); }
   if (snap) {
     S.runs = {};
     for (const r of snap.runs || []) S.runs[r.run] = { ...newRun(r), task_text: r.task_text, tokens_in: r.tokens_in, tokens_out: r.tokens_out, context: r.context, window: r.window, started: r.started };
     S.asks = snap.asks || [];
-    S.busy = !!snap.busy;
+    S.chatBusy = {};
+    for (const r of snap.runs || []) if (r.is_chat && (r.depth || 0) === 0 && r.kind !== 'quick') S.chatBusy[r.chat_topic || ''] = true;
   }
   loadAgents();
   loadModels();
   loadNotifs();
   loadProposals();
+}
+
+// ── several web chats ──
+export function markRead(topic, id) {
+  S.chatUnread[topic] = 0;
+  if (id && (S.chatRead[topic] || 0) < id) { S.chatRead[topic] = id; lsSet('prism.chatRead', $state.snapshot(S.chatRead)); }
+}
+export async function loadChats() {
+  const r = await call('chats.list', {}, { quiet: true });
+  if (!r) return;
+  S.chats = r;
+  for (const c of r) if (c.busy) S.chatBusy[c.topic] = true;
+  if (!r.find((c) => c.topic === S.chatTopic)) S.chatTopic = ''; // the open chat was deleted
+}
+/** A chat other than the open one has something the user has not seen yet. */
+export function chatHasNew(c) {
+  if (c.topic === S.chatTopic) return false;
+  if ((S.chatUnread[c.topic] || 0) > 0) return true;
+  const seen = S.chatRead[c.topic];
+  return seen !== undefined && c.last_msg_id > seen;
+}
+export async function selectChat(topic) {
+  if (topic === S.chatTopic) return;
+  S.chatTopic = topic;
+  lsSet('prism.chatTopic', topic);
+  S.chat = [];
+  const hist = await call('chat.history', { limit: 120, topic }, { quiet: true });
+  if (S.chatTopic !== topic) return; // the user moved on while it loaded
+  S.chat = hist || [];
+  markRead(topic, S.chat.length ? S.chat[S.chat.length - 1].id : 0);
+}
+export async function newChat(title = '', projectBankId = 0) {
+  const c = await call('chats.create', { title, project_bank_id: projectBankId });
+  if (c) { await loadChats(); await selectChat(c.topic); }
+  return c;
 }
 
 export async function loadNotifs() {

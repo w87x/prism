@@ -143,6 +143,7 @@ func (a *App) Cleanup(ctx context.Context) (maint.Result, error) {
 	_, _ = a.Notifs.Prune(ctx, 30*24*time.Hour)
 	_, _ = builtin.PurgeArtifacts(ctx, a.DB.Pool)
 	_, _ = builtin.PruneProcesses(ctx, a.DB.Pool)
+	a.Engine.PurgeMergedChats(ctx, 30*24*time.Hour) // merged-away chats stay restorable for a month
 	a.Metrics.Prune(ctx)
 	_, _, _ = builtin.DecayBookmarks(ctx, a.DB.Pool) // self-gating to once/day; safe on every hourly tick
 	return res, err

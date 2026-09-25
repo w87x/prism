@@ -24,6 +24,8 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolAgentUpdate(),
 		e.toolAskUser(),
 		e.toolTaskStatus(),
+		e.toolTaskSteer(),
+		e.toolTaskCancel(),
 		e.toolNotify(),
 		e.toolToolSearch(),
 		e.toolScratchRead(),
@@ -791,4 +793,89 @@ func inTeam(team []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// ownedRunningTask loads a task the caller delegated (directly or through its own delegates) that is still going.
+func (e *Engine) ownedRunningTask(ctx context.Context, env *tools.Env, id int64) (tasks.Task, error) {
+	t, err := e.Tasks.Get(ctx, id)
+	if err != nil {
+		return t, err
+	}
+	owned := false
+	for cur, hops := t, 0; env.TaskID != 0 && cur.ParentID != nil && hops < 5; hops++ { // a task below one of the caller's own delegates counts too
+		if *cur.ParentID == env.TaskID {
+			owned = true
+			break
+		}
+		parent, perr := e.Tasks.Get(ctx, *cur.ParentID)
+		if perr != nil {
+			break
+		}
+		cur = parent
+	}
+	if !owned {
+		return t, errors.New("that task is not one you delegated")
+	}
+	if t.Status != tasks.Running && t.Status != tasks.Queued {
+		return t, fmt.Errorf("task #%d is already %s", t.ID, t.Status)
+	}
+	return t, nil
+}
+
+func (e *Engine) toolTaskSteer() *tools.Tool {
+	return &tools.Tool{
+		Name: "task_steer", Category: "agents", Base: true, Risk: tools.RiskWrite, Auto: true,
+		Description: "Redirect a specialist you delegated to while it is still working: your message reaches it at its next step and is read as a refinement or replacement of its instruction. Use it when new information (for example something the user just said) changes what it should do. Use task_cancel to stop it instead.",
+		Params:      tools.Obj("id,message", tools.Int("id", "the delegated task id"), tools.Str("message", "what it should do differently — complete and self-contained")),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			a, err := tools.Decode[struct {
+				ID      int64  `json:"id"`
+				Message string `json:"message"`
+			}](raw)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(a.Message) == "" {
+				return "", errors.New("say what it should do differently")
+			}
+			t, err := e.ownedRunningTask(ctx, env, a.ID)
+			if err != nil {
+				return "", err
+			}
+			e.mu.Lock()
+			ch := e.taskSteer[t.ID]
+			e.mu.Unlock()
+			if ch == nil {
+				return "", fmt.Errorf("task #%d (%s) is queued or cannot be steered right now; cancel it and delegate again with the new instruction", t.ID, t.ToAgent)
+			}
+			select {
+			case ch <- strings.TrimSpace(a.Message):
+				return fmt.Sprintf("Delivered to %s (task #%d): it will read it at its next step. Check on it later with task_status(%d).", t.ToAgent, t.ID, t.ID), nil
+			default:
+				return "", errors.New("it already has several unread messages; wait a moment")
+			}
+		},
+	}
+}
+
+func (e *Engine) toolTaskCancel() *tools.Tool {
+	return &tools.Tool{
+		Name: "task_cancel", Category: "agents", Base: true, Risk: tools.RiskWrite, Auto: true,
+		Description: "Stop a specialist you delegated to that is still working (its partial results are kept). Use it when the user's new message makes its work pointless; redirect it with task_steer instead when it should continue differently.",
+		Params:      tools.Obj("id", tools.Int("id", "the delegated task id")),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			a, err := tools.Decode[struct{ ID int64 }](raw)
+			if err != nil {
+				return "", err
+			}
+			t, err := e.ownedRunningTask(ctx, env, a.ID)
+			if err != nil {
+				return "", err
+			}
+			if err := e.CancelTask(ctx, t.ID); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Cancelled task #%d (%s). What it had produced so far is kept.", t.ID, t.ToAgent), nil
+		},
+	}
 }

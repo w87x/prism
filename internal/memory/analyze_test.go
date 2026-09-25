@@ -380,3 +380,45 @@ func TestProvenanceAndTimeView(t *testing.T) {
 		t.Fatalf("timeline counts: corrected %d added %d in %+v", corrected, added, tl)
 	}
 }
+
+// Messages of a chat focused on a project are digested apart from other chats, the model is told the project, and a
+// fact that names no bank lands there instead of in the user bank.
+func TestDistillationFollowsAChatsProjectFocus(t *testing.T) {
+	ctx := context.Background()
+	s, fake := newSvc(t)
+	s.ChatProject = func(_ context.Context, channel, topic string) string {
+		if channel == "web" && topic == "c7" {
+			return "project:Berlin Trip"
+		}
+		return ""
+	}
+	sawHint := 0
+	fake.Handler = func(req map[string]any, _ int) testutil.Reply {
+		all := fmt.Sprint(req["messages"])
+		if strings.Contains(all, "focused on the project bank") {
+			sawHint++
+			return testutil.Reply{Content: `{"facts":[{"text":"The hotel booking for the trip must be cancellable until May 1.","confidence":0.8}]}`}
+		}
+		if strings.Contains(all, "memory clerk") {
+			return testutil.Reply{Content: `{"facts":[{"text":"The user drinks green tea in the morning.","bank":"user","confidence":0.8}]}`}
+		}
+		return testutil.Reply{Content: `{"relations":[]}`}
+	}
+	for i := 0; i < 3; i++ {
+		_ = s.AddRaw(ctx, RawMsg{From: "user", To: "Atlas", Channel: "web", Topic: "c7", Text: fmt.Sprintf("we must keep the hotel cancellable, note %d", i), Agent: "Atlas"})
+		_ = s.AddRaw(ctx, RawMsg{From: "user", To: "Atlas", Channel: "web", Topic: "", Text: fmt.Sprintf("good morning, tea again %d", i), Agent: "Atlas"})
+	}
+	if _, err := s.ProcessMin(ctx, 40, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	if sawHint != 1 {
+		t.Fatalf("exactly the focused chat's batch carries the project hint, saw %d", sawHint)
+	}
+	proj, _ := s.BankBySpec(ctx, "project:Berlin Trip", "", false)
+	pf, _ := s.Facts(ctx, proj.ID, "", false, 10, 0)
+	usr, _ := s.BankBySpec(ctx, "user", "", false)
+	uf, _ := s.Facts(ctx, usr.ID, "", false, 10, 0)
+	if len(pf) != 1 || !strings.Contains(pf[0].Text, "cancellable") || len(uf) != 1 || !strings.Contains(uf[0].Text, "green tea") {
+		t.Fatalf("project facts %+v, user facts %+v", pf, uf)
+	}
+}
