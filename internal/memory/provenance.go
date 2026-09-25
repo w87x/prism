@@ -52,6 +52,10 @@ func describeSource(src string, tainted bool) (channel, text string) {
 		return "document", "Learned from the document " + strings.TrimPrefix(src, "document: ") + "."
 	case src == "reflection":
 		return "reflection", "Drawn by reflection from several facts (see what it rests on below)."
+	case src == SourceSynthesis:
+		return "synthesis", "Level 2: synthesised from beliefs of several banks read together (see what it rests on below)."
+	case src == SourcePrinciple:
+		return "principle", "Level 3: a standing principle distilled from the level-2 syntheses (see what it rests on below)."
 	case src == "analysis":
 		return "analysis", "Derived by deep analysis of the facts in its bank (see what it rests on below)."
 	case strings.HasPrefix(src, "raw"):
@@ -152,8 +156,10 @@ func (s *Service) Provenance(ctx context.Context, id int64) (*Provenance, error)
 	const cols = `x.id, b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END, x.text, x.confidence, x.rank`
 	other := `CASE WHEN l.a=$1 THEN l.b ELSE l.a END`
 	if f.Kind == ConclusionKind {
-		p.Evidence = ref(`SELECT `+cols+` FROM memory_links l JOIN memory_facts x ON x.id=`+other+` JOIN memory_banks b ON b.id=x.bank_id
-			WHERE (l.a=$1 OR l.b=$1) AND l.kind='evidence' ORDER BY x.valid_to IS NOT NULL, x.id`, id)
+		p.Evidence = ref(`SELECT `+cols+` FROM memory_links l JOIN memory_facts x ON x.id=`+other+` JOIN memory_banks b ON b.id=x.bank_id JOIN memory_facts f ON f.id=$1
+			WHERE (l.a=$1 OR l.b=$1) AND l.kind='evidence' AND `+levelExpr("x")+` < `+levelExpr("f")+` ORDER BY x.valid_to IS NOT NULL, x.id`, id)
+		p.UsedBy = ref(`SELECT `+cols+` FROM memory_links l JOIN memory_facts x ON x.id=`+other+` JOIN memory_banks b ON b.id=x.bank_id JOIN memory_facts f ON f.id=$1
+			WHERE (l.a=$1 OR l.b=$1) AND l.kind='evidence' AND `+levelExpr("x")+` > `+levelExpr("f")+` ORDER BY x.valid_to IS NOT NULL, x.id`, id)
 	} else {
 		p.UsedBy = ref(`SELECT `+cols+` FROM memory_links l JOIN memory_facts x ON x.id=`+other+` JOIN memory_banks b ON b.id=x.bank_id
 			WHERE (l.a=$1 OR l.b=$1) AND l.kind='evidence' AND x.kind='conclusion' ORDER BY x.valid_to IS NOT NULL, x.id`, id)

@@ -411,6 +411,30 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_synthesize", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
+			Description: "Higher levels of thinking. level 2 reads the conclusions and insights of every bank together and derives cross-domain syntheses (themes, causes, implications, tensions); level 3 distils standing principles, open tensions and gaps from level 2. Each cites the level below, so chains end in real facts. Runs automatically after enough new material; call it to force a pass. level omitted = both.",
+			Params:      tools.Obj("", tools.Int("level", "2 or 3 (default both)")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct{ Level int }](raw)
+				if err != nil {
+					return "", err
+				}
+				levels := []int{2, 3}
+				if a.Level == 2 || a.Level == 3 {
+					levels = []int{a.Level}
+				}
+				var sb strings.Builder
+				for _, lv := range levels {
+					r, err := s.Synthesize(ctx, lv, true, 0)
+					if err != nil {
+						return sb.String(), err
+					}
+					sb.WriteString(r.String() + "\n")
+				}
+				return sb.String(), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_merge_banks", Category: "memory", Only: maintainers, Risk: tools.RiskWrite,
 			Description: "Merge project (or domain) banks into one: all facts move into 'into' (an existing bank of the same kind, or a new bank created with that name) and the emptied banks are removed. Exact duplicates collapse. Use when several banks turned out to cover one topic.",
 			Params:      tools.Obj("banks,into", tools.StrList("banks", "bank specs to merge, e.g. project:Trip plan, project:Trip notes"), tools.Str("into", "target bank spec, e.g. project:Trip")),

@@ -257,7 +257,7 @@ func (s *Service) ReflectDue(ctx context.Context, minNew, maxBanks int) ([]Refle
 
 func (s *Service) conclusions(ctx context.Context, bankID int64) ([]conclusionRow, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.bank_id=$1 AND f.kind='conclusion' AND f.source<>'analysis' AND f.valid_to IS NULL ORDER BY f.id`, bankID)
+		WHERE f.bank_id=$1 AND f.kind='conclusion' AND f.source NOT IN ('analysis','synthesis','principle') AND f.valid_to IS NULL ORDER BY f.id`, bankID)
 	if err != nil {
 		return nil, err
 	}

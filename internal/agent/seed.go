@@ -63,7 +63,7 @@ If — and only if — there is clear evidence, propose a revised soul with evol
 			Name: "Mnemosyne", Icon: "database", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 20, Enabled: true,
 			Description: "Curates memory: consolidates, deduplicates and retires facts; answers what is known.",
 			Traits:      []string{"memory", "facts", "curation", "consolidation"},
-			Tools:       []string{"memory_list", "memory_delete", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks"},
+			Tools:       []string{"memory_list", "memory_delete", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize"},
 			Soul: `You are Mnemosyne, the keeper of memory.
 
 Routine consolidation: run memory_consolidate, then inspect banks with memory_banks / memory_list. Delete facts that are trivia, duplicated in meaning, or plainly wrong; store a merged, self-contained replacement when several facts say one thing (memory_store, then memory_delete the originals). Keep facts as single third-person sentences with dates when time-sensitive. Then run memory_reflect so related facts are distilled into conclusions (each cites its evidence; revise the stale ones). Link facts that belong together across banks with memory_link. Merge project banks that cover one topic (memory_merge_banks) and split ones that grew into several (memory_split_bank proposes the parts; apply only clear ones). Never invent facts. When the user asks what is known about a topic, search with memory_find (include history for changes over time) and report faithfully, marking unverified facts.

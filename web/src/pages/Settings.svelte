@@ -25,7 +25,7 @@
   // ── general ──
   let gen = $state({ user_name: '', timezone: '', language: '', locale: '' });
   let ctx = $state({ compact_at: 0.8, target: 0.2 });
-  let mem = $state({ process_every_s: 300, raw_batch: 40, reflect_off: false, reflect_after: 0, auto_merge_off: false, hints: '', process_min: 0, entities_off: false, entities_after: 0, analyze_off: false, analyze_after: 0, bookmarks_off: false, digest_off: false, digest_days: 0, verify_off: false, auto_ingest_off: false });
+  let mem = $state({ process_every_s: 300, raw_batch: 40, reflect_off: false, reflect_after: 0, auto_merge_off: false, hints: '', process_min: 0, entities_off: false, entities_after: 0, analyze_off: false, analyze_after: 0, synth_off: false, synth_after: 0, bookmarks_off: false, digest_off: false, digest_days: 0, verify_off: false, auto_ingest_off: false });
   let rt = $state({ llm_concurrency: 4 });
   let el = $state({ api_key: '', voice_id: '', model_id: 'eleven_flash_v2_5', monthly_cap: 8000, confirm_over: 600, image_model: 'gemini-2.5-flash-image' });
   let els = $state(null); // plan and credits
@@ -462,6 +462,8 @@
           <div class="two"><Switch checked={!mem.reflect_off} label="reflect automatically" onchange={(v) => (mem.reflect_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.reflect_after} min={0} max={100} step={1} /></Field></div>
           <div class="sm mute">Deep analysis reads a whole bank and derives patterns, deductions, hypotheses, trends, risks and open questions, flags contradicting facts, retires duplicates and keeps a profile card. It uses the chat model.</div>
           <div class="two"><Switch checked={!mem.analyze_off} label="analyse automatically" onchange={(v) => (mem.analyze_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (12)"><NumberInput bind:value={mem.analyze_after} min={0} max={200} step={1} /></Field></div>
+          <div class="sm mute">Synthesis thinks in levels: level 2 reads the analysis results of all banks together (themes, causes, implications, tensions); level 3 distils standing principles, open tensions and gaps from level 2. Each cites the level below, so every chain ends in real facts, and confidence shrinks per level.</div>
+          <div class="two"><Switch checked={!mem.synth_off} label="synthesise automatically" onchange={(v) => (mem.synth_off = !v)} /><Field label="…after new conclusions" hint="0 = default (6)"><NumberInput bind:value={mem.synth_after} min={0} max={200} step={1} /></Field></div>
           <div class="sm mute">Entity extraction pulls people, products, places and their relations out of facts into the entity graph (Memory → graph).</div>
           <div class="two"><Switch checked={!mem.entities_off} label="extract entities automatically" onchange={(v) => (mem.entities_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.entities_after} min={0} max={100} step={1} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>

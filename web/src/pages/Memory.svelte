@@ -276,6 +276,15 @@
     else toast(rs[0]?.skipped ? `Nothing to analyse: ${rs[0].skipped}` : 'Nothing new found');
     loadBanks(); loadFacts(); loadHealth();
   }
+  async function synthesize() {
+    busy = 'synth';
+    const rs = await call('memory.synthesize', { level: 0 });
+    busy = '';
+    if (!rs) return;
+    const n = rs.reduce((a, r) => a + r.new + r.updated + r.retired, 0);
+    toast(n ? rs.map((r) => `L${r.level}: ${r.new} new, ${r.updated} updated, ${r.retired} retired`).join(' · ') : (rs.find((r) => r.skipped)?.skipped ? `Nothing to synthesise: ${rs.find((r) => r.skipped).skipped}` : 'Nothing new found'));
+    loadBanks(); loadFacts(); loadHealth();
+  }
   let health = $state([]);
   async function loadHealth() { health = (await call('memory.health', {})) || []; }
   const curHealth = $derived(health.find((h) => h.id === bank));
@@ -393,6 +402,7 @@
       {#snippet right()}
         <Button size="sm" variant="ghost" loading={busy === 'reflect'} title="Draw conclusions from facts that agree with each other{bank ? ' in this bank' : ''}" onclick={reflect}>Reflect</Button>
         <Button size="sm" variant="ghost" loading={busy === 'analyze'} title="Deep analysis: patterns, hypotheses, trends, contradictions, duplicates and a profile card{bank ? ' for this bank' : ''}" onclick={analyze}>Analyze</Button>
+        <Button size="sm" variant="ghost" loading={busy === 'synth'} title="Higher levels of thinking across all banks: level 2 syntheses (themes, causes, implications, tensions), then level 3 principles" onclick={synthesize}>Synthesize</Button>
         <Button size="sm" variant="ghost" loading={busy === 'entities'} title="Pull named entities (people, products, places…) and their relations out of facts{bank ? ' in this bank' : ''}" onclick={extractEntities}>Extract entities</Button>
         <Button size="sm" variant="ghost" loading={busy === 'process'} onclick={() => run('process', 'memory.process', {}, (n) => `${n} facts distilled from raw`)}>Digest raw</Button>
         <Button size="sm" variant="ghost" loading={busy === 'reindex'} onclick={() => run('reindex', 'memory.reindex', {}, (n) => `${n} facts re-embedded`)}>Re-embed</Button>

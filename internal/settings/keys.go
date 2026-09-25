@@ -124,6 +124,10 @@ type Memory struct {
 	DigestDays    int  `json:"digest_days"`
 	AnalyzeOff    bool `json:"analyze_off"`
 	AnalyzeAfter  int  `json:"analyze_after"`
+	// Synthesis (memory.Synthesize) reads the analysis output across all banks and derives level-2 syntheses and
+	// level-3 principles once SynthAfter new lower-level items exist (0 = 6) unless SynthOff.
+	SynthOff   bool `json:"synth_off"`
+	SynthAfter int  `json:"synth_after"`
 }
 
 type Onboarding struct {

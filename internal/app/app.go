@@ -555,6 +555,23 @@ func (a *App) memoryLoop(ctx context.Context) {
 				}
 			}
 			a.memJob("deep analysis", fmt.Sprintf("%d banks due, %d changes", len(rs), ch), ch > 0, err)
+			if cfg.SynthOff {
+				a.memJob("synthesis", off, false, nil)
+			} else {
+				a.memStage("synthesising")
+				rs, err := a.Memory.SynthesizeDue(ctx, cfg.SynthAfter)
+				if err != nil {
+					a.Logf("warn", "memory", "synthesis failed: %v", err)
+				}
+				ch := 0
+				for _, r := range rs {
+					ch += r.Changes()
+					if r.Changes() > 0 {
+						a.Logf("info", "memory", "synthesis — %s", r)
+					}
+				}
+				a.memJob("synthesis", fmt.Sprintf("%d changes", ch), ch > 0, err)
+			}
 			a.memStage("refreshing mental models") // models follow the analysis: they read its insights too
 			ms, err := a.Memory.ModelsDue(ctx, 0, 2)
 			if err != nil {

@@ -175,6 +175,25 @@ func (s *Server) registerMemory() {
 		}
 		return rs, err
 	})
+	// levels of thinking: level 2 (synthesis across banks) and 3 (principles); 0 = both, in order
+	rpc(s, "memory.synthesize", func(ctx context.Context, r struct {
+		Level int `json:"level"`
+	}) ([]memory.SynthResult, error) {
+		var rs []memory.SynthResult
+		levels := []int{2, 3}
+		if r.Level == 2 || r.Level == 3 {
+			levels = []int{r.Level}
+		}
+		for _, lv := range levels {
+			x, err := a.Memory.Synthesize(ctx, lv, true, 0)
+			if err != nil {
+				return rs, err
+			}
+			a.Logf("info", "memory", "synthesis (manual) — %s", x)
+			rs = append(rs, x)
+		}
+		return rs, nil
+	})
 	rpc(s, "memory.confirm", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (bool, error) {

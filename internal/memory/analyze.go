@@ -54,6 +54,7 @@ type AnalyzeResult struct {
 	Contradictions int    `json:"contradictions"`
 	Duplicates     int    `json:"duplicates"`
 	CardUpdated    bool   `json:"card_updated"`
+	Batches        int    `json:"batches,omitempty"` // extra windows of older facts read after the first
 	Skipped        string `json:"skipped,omitempty"`
 }
 
@@ -69,8 +70,8 @@ func (r AnalyzeResult) String() string {
 	if r.Skipped != "" {
 		return fmt.Sprintf("%s: skipped (%s)", r.Bank, r.Skipped)
 	}
-	return fmt.Sprintf("%s: %d insights (+%d strengthened, %d revised, %d retired), %d contradictions, %d duplicates%s (from %d facts)",
-		r.Bank, r.Insights, r.Strengthened, r.Revised, r.Retired, r.Contradictions, r.Duplicates, map[bool]string{true: ", card updated"}[r.CardUpdated], r.Considered)
+	return fmt.Sprintf("%s: %d insights (+%d strengthened, %d revised, %d retired), %d contradictions, %d duplicates%s (from %d facts%s)",
+		r.Bank, r.Insights, r.Strengthened, r.Revised, r.Retired, r.Contradictions, r.Duplicates, map[bool]string{true: ", card updated"}[r.CardUpdated], r.Considered, map[bool]string{true: fmt.Sprintf(" in %d batches", r.Batches+1)}[r.Batches > 0])
 }
 
 // Insight is the type tag of an analysis-derived conclusion ("" for anything else).
@@ -115,8 +116,42 @@ func (s *Service) analysisInsights(ctx context.Context, bankID int64) ([]conclus
 	return out, nil
 }
 
-// Analyze runs the deep analysis on one bank. Without force it waits for minNew new usable facts.
+// maxAnalyzeBatches bounds how many windows of maxAnalyzeFacts facts one analysis walks back through.
+const maxAnalyzeBatches = 5
+
+// Analyze runs the deep analysis on one bank. Without force it waits for minNew new usable facts. A bank with more
+// usable facts than one window holds is read in several windows, newest first: the first analysis of a bank and any
+// forced pass walk back through the older ones too, so they get a turn (later insights dedupe against earlier ones).
 func (s *Service) Analyze(ctx context.Context, bankID int64, force bool, minNew int) (AnalyzeResult, error) {
+	var first bool
+	_ = s.db.QueryRow(ctx, `SELECT analyzed_at IS NULL FROM memory_banks WHERE id=$1`, bankID).Scan(&first)
+	res, err := s.analyzeWindow(ctx, bankID, force, minNew, 0)
+	if err != nil || res.Skipped != "" || res.Considered < maxAnalyzeFacts || !(force || first) {
+		return res, err
+	}
+	for w := 1; w < maxAnalyzeBatches; w++ {
+		r, err := s.analyzeWindow(ctx, bankID, true, minNew, w*maxAnalyzeFacts)
+		if err != nil {
+			return res, err
+		}
+		res.Considered += r.Considered
+		res.Insights += r.Insights
+		res.Strengthened += r.Strengthened
+		res.Revised += r.Revised
+		res.Retired += r.Retired
+		res.Contradictions += r.Contradictions
+		res.Duplicates += r.Duplicates
+		res.Batches++
+		if r.Considered < maxAnalyzeFacts {
+			break
+		}
+	}
+	return res, nil
+}
+
+// analyzeWindow analyses one window of a bank's facts: offset 0 is the newest maxAnalyzeFacts, later offsets step back
+// in time. Only the first window refreshes the profile card and the analysed-at mark.
+func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, minNew, offset int) (AnalyzeResult, error) {
 	var res AnalyzeResult
 	var b Bank
 	var analyzed *time.Time
@@ -134,7 +169,7 @@ func (s *Service) Analyze(ctx context.Context, bankID int64, force bool, minNew 
 		minNew = DefaultAnalyzeMin
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,text,created_at FROM memory_facts
-		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND confidence>=0.5 ORDER BY created_at DESC, id DESC LIMIT $2`, bankID, maxAnalyzeFacts)
+		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND confidence>=0.5 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, bankID, maxAnalyzeFacts, offset)
 	if err != nil {
 		return res, err
 	}
@@ -162,7 +197,7 @@ func (s *Service) Analyze(ctx context.Context, bankID int64, force bool, minNew 
 		res.Skipped = "fewer than four trusted facts"
 		return res, nil
 	}
-	if !force && fresh < minNew {
+	if !force && offset == 0 && fresh < minNew {
 		res.Skipped = fmt.Sprintf("only %d new facts", fresh)
 		return res, nil
 	}
@@ -320,7 +355,7 @@ func (s *Service) Analyze(ctx context.Context, bankID int64, force bool, minNew 
 			}
 		}
 	}
-	if c := strings.TrimSpace(parsed.Card); c != "" && c != strings.TrimSpace(card) {
+	if c := strings.TrimSpace(parsed.Card); offset == 0 && c != "" && c != strings.TrimSpace(card) {
 		if len(c) > 900 {
 			c = c[:900]
 		}
@@ -328,7 +363,9 @@ func (s *Service) Analyze(ctx context.Context, bankID int64, force bool, minNew 
 			res.CardUpdated = true
 		}
 	}
-	_, _ = s.db.Exec(ctx, `UPDATE memory_banks SET analyzed_at=now() WHERE id=$1`, bankID)
+	if offset == 0 {
+		_, _ = s.db.Exec(ctx, `UPDATE memory_banks SET analyzed_at=now() WHERE id=$1`, bankID)
+	}
 	if res.Changes() > 0 {
 		s.changed()
 	}
@@ -396,7 +433,7 @@ func (s *Service) Health(ctx context.Context) ([]BankHealth, error) {
 		count(*) FILTER (WHERE f.kind='fact' AND f.confidence<0.5),
 		count(*) FILTER (WHERE f.kind='fact' AND f.confidence>=0.5 AND (b.reflected_at IS NULL OR f.created_at>b.reflected_at)),
 		count(*) FILTER (WHERE f.kind='fact' AND f.confidence>=0.5 AND (b.analyzed_at IS NULL OR f.created_at>b.analyzed_at)),
-		count(*) FILTER (WHERE f.kind='conclusion' AND f.source<>'analysis'),
+		count(*) FILTER (WHERE f.kind='conclusion' AND f.source NOT IN ('analysis','synthesis','principle')),
 		count(*) FILTER (WHERE f.kind='conclusion' AND f.source='analysis'),
 		count(*) FILTER (WHERE f.kind='conclusion' AND EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 			WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL)),
