@@ -420,7 +420,7 @@
           </Panel>
       </div>
     {:else if tab === 'context'}
-      <div class="cols">
+      <div class="mas">
         <Panel title="Auto-compaction">
           <div class="sm mute">When an agent's context reaches the trigger, stale results are dropped and old turns are summarized down to the target (a fixed template; memory hits are dropped since they can be queried again).</div>
           <div class="two"><Field label="Trigger (% of model window)"><NumberInput value={Math.round(ctx.compact_at * 100)} min={40} max={95} step={5} unit="%" onchange={(v) => (ctx.compact_at = v / 100)} /></Field>
@@ -432,36 +432,51 @@
           <div class="two"><Field label="Parallel model calls"><NumberInput bind:value={rt.llm_concurrency} min={1} max={16} step={1} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('runtime', rt, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Guardrails">
+        <Panel title="Guardrails · loops">
           <div class="sm mute">Loop detection: when an agent keeps making the identical tool call, or gets stuck regenerating the same text, it is warned once and then the run is stopped rather than left to burn tokens forever.</div>
           <div class="two"><Field label="Warn after (identical tool call)"><NumberInput bind:value={gr.tool_repeat_warn} min={2} max={9} step={1} /></Field>
             <Field label="Stop after"><NumberInput bind:value={gr.tool_repeat_abort} min={2} max={10} step={1} /></Field></div>
           <Field label="Stop after (stuck repeating text)" hint="lower than the tool threshold — regenerating a whole reply is far more expensive than retrying one call"><NumberInput bind:value={gr.text_repeat_abort} min={1} max={5} step={1} /></Field>
+          <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
+        </Panel>
+        <Panel title="Guardrails · long runs">
           <div class="sm mute">Autonomous runs (a schedule firing, a standing intent waking its owner) get extra iteration budget over the agent's own limit, since nobody is there to ask for more time.</div>
           <div class="two"><Field label="Extra budget" hint="% added to the agent's own limit"><NumberInput bind:value={gr.autonomous_boost_pct} min={0} max={200} step={10} unit="%" /></Field>
             <Field label="Hard cap (iterations)"><NumberInput bind:value={gr.autonomous_max_iterations} min={10} max={200} step={10} /></Field></div>
           <div class="sm mute">When a run uses its whole budget or is stopped as a loop, PRISM analyses it (what was achieved, why it stalled), rewrites the instruction and runs it once more in a fresh session. If that fails too, a delegated task ends as failed with the analysis so the parent agent tells you; a top-level task stays "partial" for your review.</div>
-          <Switch checked={!gr.code_review_off} label="when a coding task finishes: run the project's checks and have Reviewer judge the diff (shown in Library → Code)" onchange={(v) => (gr.code_review_off = !v)} />
           <Switch checked={!gr.auto_retry_off} label="analyse and retry stalled tasks once" onchange={(v) => (gr.auto_retry_off = !v)} />
+          <Switch checked={!gr.code_review_off} label="when a coding task finishes: run the project's checks and have Reviewer judge the diff (shown in Library → Code)" onchange={(v) => (gr.code_review_off = !v)} />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Memory pipeline">
+        <Panel title="Memory · digesting">
+          <div class="sm mute">Raw conversation is distilled into facts on this cadence; new messages also wake the pipeline sooner.</div>
           <div class="two"><Field label="Digest raw messages every (s)"><NumberInput bind:value={mem.process_every_s} min={30} max={86400} step={30} unit="s" /></Field><Field label="Batch size"><NumberInput bind:value={mem.raw_batch} min={5} max={200} step={5} /></Field></div>
           <Field label="…but only once this many raw messages are waiting" hint="0 = default (6). A smaller backlog is still digested when its oldest message is 20 minutes old. New messages and facts also wake the pipeline within ~20 s instead of waiting for the timer."><NumberInput bind:value={mem.process_min} min={0} max={200} step={1} /></Field>
+          <div class="sm mute">Auto-merge finds project/domain banks that turned out to be the same topic (one per model version instead of one for the family) and merges them — undoable from the Memory page.</div>
+          <Switch checked={!mem.auto_merge_off} label="merge near-duplicate banks automatically" onchange={(v) => (mem.auto_merge_off = !v)} />
+          <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button><Button onclick={() => call('memory.process').then((n) => n !== undefined && toast(`${n} facts distilled`))}>Digest now</Button><Button onclick={() => call('memory.reindex').then((n) => n !== undefined && toast(`${n} facts re-embedded`))}>Re-embed all facts</Button><Button onclick={() => call('memory.auto_merge').then((rs) => rs && toast(rs.length ? `${rs.length} bank group(s) merged` : 'No near-duplicate banks found'))}>Merge duplicate banks now</Button></div>
+        </Panel>
+        <Panel title="Memory · thinking">
+          <div class="sm mute">What memory works out from its facts, per bank, once enough new ones have arrived.</div>
           <div class="sm mute">Reflection draws conclusions from facts that agree with each other (each keeps its evidence and is revised when the evidence changes).</div>
           <div class="two"><Switch checked={!mem.reflect_off} label="reflect automatically" onchange={(v) => (mem.reflect_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.reflect_after} min={0} max={100} step={1} /></Field></div>
-          <Switch checked={!mem.bookmarks_off} label="bookmark pages the agents visited (the model keeps only reusable references)" onchange={(v) => (mem.bookmarks_off = !v)} />
-          <Switch checked={!mem.verify_off} label="have an agent verify unverified web facts and hypotheses (at most every 3 days)" onchange={(v) => (mem.verify_off = !v)} />
-          <Switch checked={!mem.auto_ingest_off} label="learn new inbox documents automatically (chats wait until you say which participant you are)" onchange={(v) => (mem.auto_ingest_off = !v)} />
-          <div class="two"><Switch checked={!mem.digest_off} label="write a memory digest briefing" onchange={(v) => (mem.digest_off = !v)} /><Field label="…every (days)" hint="0 = default (7). Sums up what memory learned, worked out and doubts."><NumberInput bind:value={mem.digest_days} min={0} max={60} step={1} /></Field></div>
           <div class="sm mute">Deep analysis reads a whole bank and derives patterns, deductions, hypotheses, trends, risks and open questions, flags contradicting facts, retires duplicates and keeps a profile card. It uses the chat model.</div>
           <div class="two"><Switch checked={!mem.analyze_off} label="analyse automatically" onchange={(v) => (mem.analyze_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (12)"><NumberInput bind:value={mem.analyze_after} min={0} max={200} step={1} /></Field></div>
           <div class="sm mute">Entity extraction pulls people, products, places and their relations out of facts into the entity graph (Memory → graph).</div>
           <div class="two"><Switch checked={!mem.entities_off} label="extract entities automatically" onchange={(v) => (mem.entities_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.entities_after} min={0} max={100} step={1} /></Field></div>
-          <div class="sm mute">Auto-merge finds project/domain banks that turned out to be the same topic (one per model version instead of one for the family) and merges them — undoable from the Memory page.</div>
-          <Switch checked={!mem.auto_merge_off} label="merge near-duplicate banks automatically" onchange={(v) => (mem.auto_merge_off = !v)} />
+          <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
+        </Panel>
+        <Panel title="Memory · upkeep">
+          <div class="sm mute">Background housekeeping around memory: what to keep, check and summarise.</div>
+          <Switch checked={!mem.bookmarks_off} label="bookmark pages the agents visited (the model keeps only reusable references)" onchange={(v) => (mem.bookmarks_off = !v)} />
+          <Switch checked={!mem.verify_off} label="have an agent verify unverified web facts and hypotheses (at most every 3 days)" onchange={(v) => (mem.verify_off = !v)} />
+          <Switch checked={!mem.auto_ingest_off} label="learn new inbox documents automatically (chats wait until you say which participant you are)" onchange={(v) => (mem.auto_ingest_off = !v)} />
+          <div class="two"><Switch checked={!mem.digest_off} label="write a memory digest briefing" onchange={(v) => (mem.digest_off = !v)} /><Field label="…every (days)" hint="0 = default (7). Sums up what memory learned, worked out and doubts."><NumberInput bind:value={mem.digest_days} min={0} max={60} step={1} /></Field></div>
+          <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
+        </Panel>
+        <Panel title="Memory · hints">
           <Field label="Hints for memory" hint="Your own instructions, shown to the model whenever memory distils conversations, draws conclusions or extracts entities. PRISM already tells it your name (General) and that agent names are software, not people. Examples: “Treat the Berlin trip as a project, not a person.” · “Never store prices as facts about me.”"><Textarea bind:value={mem.hints} rows={4} mono={false} placeholder="e.g. I am Danil. Facts about my hardware belong in the user bank." /></Field>
-          <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button><Button onclick={() => call('memory.process').then((n) => n !== undefined && toast(`${n} facts distilled`))}>Digest now</Button><Button onclick={() => call('memory.reindex').then((n) => n !== undefined && toast(`${n} facts re-embedded`))}>Re-embed all facts</Button><Button onclick={() => call('memory.auto_merge').then((rs) => rs && toast(rs.length ? `${rs.length} bank group(s) merged` : 'No near-duplicate banks found'))}>Merge duplicate banks now</Button></div>
+          <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Retention">
           <div class="sm mute">How long finished tasks (with their agent sessions) and log entries are kept. 0 keeps them forever. Cleanup runs hourly.</div>
@@ -604,6 +619,7 @@
   .mas { columns: 380px; column-gap: 8px; }
   .mas > :global(.p) { break-inside: avoid; margin-bottom: 8px; overflow: hidden; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row { flex-wrap: wrap; } /* button rows wrap instead of overflowing a narrow panel */
   .kv { display: flex; justify-content: space-between; color: var(--fg-dim); }
   .kv b { color: var(--fg-hi); font-weight: 500; }
   .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"prism/internal/scheduler"
 	"prism/internal/settings"
 	"prism/internal/skills"
+	"prism/internal/tools"
 	"prism/internal/tools/builtin"
 	"prism/internal/tracker"
 	"prism/internal/web"
@@ -160,6 +162,16 @@ func (a *App) buildExtensions(ctx context.Context) error {
 	x.Sched.Notify = a.Notify
 	x.Sched.Env = scheduler.Env{
 		LLM: a.LLM,
+		CallTool: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			t, ok := a.Tools.Get(name)
+			if !ok {
+				return "", fmt.Errorf("no such tool %q", name)
+			}
+			if st := a.Tools.State(name); !st.Enabled || !st.Armed {
+				return "", fmt.Errorf("tool %q is not armed, so a background check may not call it (arm it in Settings → Tools, or pick a read-only tool)", name)
+			}
+			return t.Run(ctx, &tools.Env{Agent: "sentinel"}, args)
+		},
 		FetchText: func(ctx context.Context, url string) (string, error) {
 			p, err := fetcher.Fetch(ctx, url, "auto", "", 0)
 			if err != nil {

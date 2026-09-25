@@ -383,6 +383,7 @@ func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key st
 			if text == "" {
 				text = "(no answer)"
 			}
+			text = e.embedWebImages(ctx, text, res.Sources, atlas.Name)
 			e.logChat(ctx, "agent", atlas.Name, text, m.Channel, m.Topic, task.ID)
 			e.touchChat(ctx, m.Channel, m.Topic)
 			if m.Channel == "web" && m.Topic != "" {
@@ -742,6 +743,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		var plan recovery
 		res, plan = e.recoverRun(tctx, t, p, sess, res, spec)
 		recov = &plan
+		e.learnFromStall(ctx, t, p, res, plan)
 	}
 	if e.Memory != nil && t.FromKind == "agent" {
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: t.FromName, To: p.Name, Text: t.Input, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})

@@ -65,6 +65,15 @@
   function ondrop(e) { dragging = false; const fs = imagesFrom(e.dataTransfer), ds = filesFrom(e.dataTransfer); if (fs.length || ds.length) { e.preventDefault(); addFiles(fs); addDocs(ds); } }
   function ondragover(e) { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); dragging = true; } }
 
+  function dayLabel(ts) {
+    const d = new Date(ts), now = new Date();
+    const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((startOf(now) - startOf(d)) / 864e5);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+  }
+
   // ── feed: messages plus (optionally) agent activity, merged by time ──
   const feed = $derived.by(() => {
     const items = S.chat.map((m) => ({ k: 'msg', ts: Date.parse(m.created_at) || 0, m }));
@@ -82,6 +91,15 @@
       }
     }
     items.sort((x, y) => x.ts - y.ts);
+    // a divider whenever the day changes (a chat that runs past midnight or resumes tomorrow), so times are never ambiguous
+    const days = new Set(items.map((it) => new Date(it.ts).toDateString()));
+    if (days.size > 1) {
+      let lastDay = '';
+      for (let i = 0; i < items.length; i++) {
+        const dk = new Date(items[i].ts).toDateString();
+        if (dk !== lastDay) { lastDay = dk; items.splice(i, 0, { k: 'day', ts: items[i].ts, label: dayLabel(items[i].ts) }); i++; }
+      }
+    }
     let prev = '';
     for (const it of items) if (it.k === 'msg') { it.first = !!it.m.moved_from && it.m.moved_from !== prev; prev = it.m.moved_from || ''; }
     return items;
@@ -194,8 +212,10 @@
   <ChatHeader onlist={() => (listOpen = !listOpen)} />
   <div class="log-wrap">
     <div class="log scroll" role="log" bind:this={list} onscroll={onScroll} onpointerenter={() => (hover = true)} onpointerleave={() => { hover = false; if (unread > 0) toBottom(); }}>
-      {#each feed as it (it.k === 'msg' ? 'm' + it.m.id : 'a' + it.ts + it.a.run + (it.a.tool || it.a.kind))}
-        {#if it.k === 'act'}
+      {#each feed as it (it.k === 'msg' ? 'm' + it.m.id : it.k === 'day' ? 'd' + it.ts : 'a' + it.ts + it.a.run + (it.a.tool || it.a.kind))}
+        {#if it.k === 'day'}
+          <div class="day"><span>{it.label}</span></div>
+        {:else if it.k === 'act'}
           {@const a = it.a}
           <div class="act" style="margin-left:{22 + Math.max(0, a.depth - 1) * 12}px">
             {#if a.kind === 'start'}↳ <Glyph name={a.agent} /> <b>{a.agent}</b> started{a.text ? ` — ${a.text}` : ''}
@@ -207,11 +227,11 @@
           {#if m.moved_from && it.first}<div class="mv">↳ from “{m.moved_title}”</div>{/if}
           {#if m.role === 'user'}
             <div class="m user" class:steer={m.steered}><span class="who">user:</span>{#if m.steered}<span class="steertag" title="sent while Atlas was working — it steers the current turn">↳ steering</span>{/if}<span class="tx"><span class="pre">{m.text}</span>
-              {#if m.images?.length}<span class="pics">{#each m.images as id}<a href={artifactUrl(id)} target="_blank" rel="noopener noreferrer"><img src={artifactUrl(id)} alt="attached" loading="lazy" /></a>{/each}</span>{/if}</span><span class="ts">{clock(m.created_at)}</span></div>
+              {#if m.images?.length}<span class="pics">{#each m.images as id}<a href={artifactUrl(id)} target="_blank" rel="noopener noreferrer"><img src={artifactUrl(id)} alt="attached" loading="lazy" /></a>{/each}</span>{/if}</span><span class="ts" title={stamp(m.created_at)}>{clock(m.created_at)}</span></div>
           {:else if m.role === 'system'}
             <div class="m sys" class:bad={m.text.startsWith('Error')}><span class="who">system:</span><span class="tx pre">{m.text}</span></div>
           {:else}
-            <div class="m agent"><span class="who"><span class="gl"><Glyph name={m.agent} /></span>{m.agent || 'agent'}:</span><span class="tx"><RichMessage text={m.text} /></span><span class="ts">{clock(m.created_at)}</span></div>
+            <div class="m agent"><span class="who"><span class="gl"><Glyph name={m.agent} /></span>{m.agent || 'agent'}:</span><span class="tx"><RichMessage text={m.text} /></span><span class="ts" title={stamp(m.created_at)}>{clock(m.created_at)}</span></div>
           {/if}
         {/if}
       {:else}
@@ -337,7 +357,10 @@
   .sys.bad .who, .sys.bad .tx { color: var(--err); }
   .tx { min-width: 0; flex: 1; line-height: 1.5; }
   .gl { display: inline-block; width: 1.5em; text-align: center; margin-right: 2px; opacity: 0.85; font-size: 0.9em; }
-  .ts { flex: none; font-size: 10px; color: var(--fg-faint); align-self: flex-start; padding-top: 2px; }
+  .ts { flex: none; width: 38px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--fg-mute); align-self: flex-start; padding-top: 3px; line-height: 1.5; }
+  .user .ts { color: var(--accent-dim, var(--fg-mute)); }
+  .day { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; color: var(--fg-mute); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .day::before, .day::after { content: ''; flex: 1; height: 1px; background: var(--line-2); }
   .act { font-size: 11px; color: var(--fg-mute); line-height: 1.4; }
   .act b { font-weight: 500; color: var(--fg-dim); } .act .args { color: var(--fg-faint); }
   .mv { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin: 4px 0 -2px 22px; }

@@ -74,6 +74,31 @@ func (s *Server) registerMisc() {
 	}) (bool, error) {
 		return true, builtin.KeepArtifact(ctx, a.DB.Pool, r.ID)
 	})
+	// bulk versions for the Artifacts page: keep = drop the expiry, delete = remove the file too
+	rpc(s, "artifacts.keep_many", func(ctx context.Context, r struct {
+		IDs []int64 `json:"ids"`
+	}) (int, error) {
+		t, err := a.DB.Exec(ctx, `UPDATE artifacts SET expires_at=NULL WHERE id=ANY($1) AND expires_at IS NOT NULL AND expires_at>now()`, r.IDs)
+		return int(t.RowsAffected()), err
+	})
+	rpc(s, "artifacts.delete_many", func(ctx context.Context, r struct {
+		IDs []int64 `json:"ids"`
+	}) (int, error) {
+		rows, err := a.DB.Query(ctx, `DELETE FROM artifacts WHERE id=ANY($1) RETURNING path`, r.IDs)
+		if err != nil {
+			return 0, err
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var p string
+			if rows.Scan(&p) == nil {
+				_ = os.Remove(p)
+				n++
+			}
+		}
+		return n, rows.Err()
+	})
 	rpc(s, "artifacts.delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (bool, error) {

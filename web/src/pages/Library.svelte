@@ -10,6 +10,7 @@
   import Badge from '../lib/ui/Badge.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Modal from '../lib/ui/Modal.svelte';
+  import Segmented from '../lib/ui/Segmented.svelte';
   import Field from '../lib/ui/Field.svelte';
   import Tags from '../lib/ui/Tags.svelte';
   import Empty from '../lib/ui/Empty.svelte';
@@ -110,6 +111,20 @@
   // artifacts
   let arts = $state([]);
   const loadA = async () => (arts = (await call('artifacts.list', {}, { quiet: true })) || []);
+  // bulk keep / delete: many temporary pictures pile up, and only some are worth keeping
+  let asel = $state({});
+  let afilter = $state('all'); // all | temp | kept
+  const ashown = $derived(arts.filter((a) => afilter === 'all' || (afilter === 'temp' ? !!a.expires_at : !a.expires_at)));
+  const aids = $derived(Object.entries(asel).filter(([, v]) => v).map(([k]) => Number(k)));
+  const aTempSel = $derived(arts.filter((a) => asel[a.id] && a.expires_at).length);
+  const isImg = (a) => (a.mime || '').startsWith('image/');
+  function selectAll(v) { asel = Object.fromEntries(ashown.map((a) => [a.id, v])); }
+  async function keepSel() { const n = await call('artifacts.keep_many', { ids: aids }); if (n !== undefined) { toast(`${n} kept for good`); asel = {}; loadA(); } }
+  async function delSel() {
+    if (!(await confirmBox({ title: 'Delete artifacts', text: `Delete ${aids.length} selected artifact${aids.length === 1 ? '' : 's'} and their files?`, ok: 'Delete', danger: true }))) return;
+    const n = await call('artifacts.delete_many', { ids: aids });
+    if (n !== undefined) { toast(`${n} deleted`); asel = {}; loadA(); }
+  }
   $effect(() => { loadA(); return listen('artifact.new', loadA); });
   // folder maps: one-line summaries of every file under a folder the user attached
   let maps = $state([]);
@@ -233,14 +248,17 @@
         </tbody></table></div>
     </Panel>
   {:else if tab === 'artifacts'}
+    <div class="bar"><Segmented size="sm" bind:value={afilter} options={[{ value: 'all', label: 'all' }, { value: 'temp', label: 'temporary' }, { value: 'kept', label: 'kept' }]} />
+      <span class="sm mute">Temporary ones (pictures fetched for you, hand-offs between agents) delete themselves; Keep makes one permanent.</span><span class="grow"></span>
+      {#if aids.length}<span class="sm">{aids.length} selected</span>{#if aTempSel}<Button size="sm" variant="accent" onclick={keepSel}>Keep {aTempSel}</Button>{/if}<Button size="sm" variant="ghost" onclick={delSel}><Icon name="trash" size={11} /> Delete {aids.length}</Button>{/if}</div>
     <Panel flush grow>
       <div class="scroll"><table class="t">
-        <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>By</th><th>Created</th><th style="width:96px"></th></tr></thead>
+        <thead><tr><th style="width:26px"><input type="checkbox" aria-label="select all" checked={ashown.length > 0 && ashown.every((a) => asel[a.id])} onchange={(e) => selectAll(e.currentTarget.checked)} /></th><th>Name</th><th>Type</th><th>Size</th><th>By</th><th>Created</th><th style="width:96px"></th></tr></thead>
         <tbody>
-          {#each arts as a (a.id)}
-            <tr><td class="hi"><a href={artifactUrl(a.id)} target="_blank" rel="noopener noreferrer">{a.name}</a>{#if a.expires_at} <Badge tone="attn" title="a hand-off between agents: deleted {stamp(a.expires_at)} unless you keep it">temp · {until(a.expires_at)}</Badge>{/if}{#if a.tainted} <Badge tone="mute" title="written while untrusted content was in scope">untrusted</Badge>{/if} <span class="sm mute">#{a.id}</span></td><td class="mute">{a.mime}</td><td class="mute">{human(a.size)}</td><td class="dim">{a.created_by}</td><td class="mute sm">{stamp(a.created_at)}</td>
+          {#each ashown as a (a.id)}
+            <tr><td><input type="checkbox" aria-label="select {a.name}" checked={!!asel[a.id]} onchange={(e) => (asel[a.id] = e.currentTarget.checked)} /></td><td class="hi">{#if isImg(a)}<img class="th" src={artifactUrl(a.id)} alt="" loading="lazy" />{/if}<a href={artifactUrl(a.id)} target="_blank" rel="noopener noreferrer">{a.name}</a>{#if a.expires_at} <Badge tone="attn" title="a hand-off between agents: deleted {stamp(a.expires_at)} unless you keep it">temp · {until(a.expires_at)}</Badge>{/if}{#if a.tainted} <Badge tone="mute" title="written while untrusted content was in scope">untrusted</Badge>{/if} <span class="sm mute">#{a.id}</span></td><td class="mute">{a.mime}</td><td class="mute">{human(a.size)}</td><td class="dim">{a.created_by}</td><td class="mute sm">{stamp(a.created_at)}</td>
               <td class="end">{#if a.expires_at}<Button size="sm" variant="ghost" title="keep it permanently" onclick={() => keepA(a)}>Keep</Button>{/if}<Button size="sm" variant="ghost" onclick={() => delA(a)}><Icon name="trash" size={11} /></Button></td></tr>
-          {:else}<tr><td colspan="6"><Empty>no artifacts yet — deliverables saved by agents appear here</Empty></td></tr>{/each}
+          {:else}<tr><td colspan="7"><Empty>{arts.length ? 'nothing matches this filter' : 'no artifacts yet — deliverables saved by agents appear here'}</Empty></td></tr>{/each}
         </tbody></table></div>
     </Panel>
   {:else if tab === 'folders'}
@@ -356,6 +374,7 @@
 
 <style>
   .patch { margin: 0; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 62vh; white-space: pre; }
+  .th { width: 28px; height: 28px; object-fit: cover; vertical-align: middle; margin-right: 6px; border: 1px solid var(--line-2); }
   .chk { margin-bottom: 8px; }
   .patch.small { max-height: 160px; margin-top: 4px; }
   .patch.wrap { white-space: pre-wrap; }

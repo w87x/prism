@@ -44,6 +44,11 @@ type Predicate struct {
 	At string `json:"at,omitempty"`
 	// download
 	DownloadID int64 `json:"download_id,omitempty"`
+	// tool: poll any read-only tool (an MCP tool included); Expect (regex) is matched against Field's value, or the whole
+	// output when Field is empty
+	Tool  string `json:"tool,omitempty"`
+	Args  string `json:"args,omitempty"`  // JSON object with the tool's arguments
+	Field string `json:"field,omitempty"` // dot path into the tool's JSON output, e.g. data.tasks.0.status ('*' = every array element)
 
 	State map[string]any `json:"state,omitempty"`
 }
@@ -60,8 +65,10 @@ type Env struct {
 	Search    func(ctx context.Context, query string) (string, error)
 	Feed      func(ctx context.Context, url string) ([]FeedItem, error)
 	Download  func(ctx context.Context, id int64) (status string, bytes, total int64, err error)
-	LLM       *llm.Router
-	Now       func() time.Time
+	// CallTool runs a registered tool (MCP tools included) for a tool predicate; the app checks that it is safe to poll.
+	CallTool func(ctx context.Context, tool string, args json.RawMessage) (string, error)
+	LLM      *llm.Router
+	Now      func() time.Time
 }
 
 type FeedItem struct{ ID, Title, Link string }
@@ -125,8 +132,26 @@ func (p *Predicate) Validate() error {
 		if p.DownloadID == 0 {
 			return errors.New("download predicate needs download_id")
 		}
+	case "tool":
+		if p.Tool == "" {
+			return errors.New("tool predicate needs tool (the name of a read-only tool, e.g. an MCP tool)")
+		}
+		if p.Args != "" {
+			var probe map[string]any
+			if err := json.Unmarshal([]byte(p.Args), &probe); err != nil {
+				return fmt.Errorf("args must be a JSON object: %w", err)
+			}
+		}
+		if p.Expect == "" && !p.Changed {
+			return errors.New("tool predicate needs expect (a regex meaning 'done') or changed=true")
+		}
+		if p.Expect != "" {
+			if _, err := regexp.Compile(p.Expect); err != nil {
+				return fmt.Errorf("expect is not a valid regex: %w", err)
+			}
+		}
 	default:
-		return fmt.Errorf("unknown predicate kind %q (http, file, process, rss, llm, time, download, shell)", p.Kind)
+		return fmt.Errorf("unknown predicate kind %q (http, file, process, rss, llm, time, download, tool, shell)", p.Kind)
 	}
 	return nil
 }
@@ -277,6 +302,51 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 		}
 		return Result{Progress: prog}, nil
 
+	case "tool":
+		if env.CallTool == nil {
+			return Result{}, errors.New("polling tools is unavailable")
+		}
+		args := json.RawMessage(p.Args)
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		out, err := env.CallTool(ctx, p.Tool, args)
+		if err != nil {
+			return Result{}, err
+		}
+		val := out
+		if p.Field != "" {
+			v, ok := jsonField(out, p.Field)
+			if !ok {
+				return Result{Progress: "field " + p.Field + " not in the output"}, nil
+			}
+			val = v
+		}
+		prog := lastLine(strings.TrimSpace(val))
+		if len(prog) > 160 {
+			prog = prog[:160] + "…"
+		}
+		if p.Changed {
+			h := hashOf(val)
+			prev, _ := st["hash"].(string)
+			st["hash"] = h
+			if prev == "" {
+				return Result{Progress: "baseline: " + prog}, nil
+			}
+			if h != prev {
+				return Result{Fired: true, Progress: prog, Evidence: p.Tool + " output changed: " + prog}, nil
+			}
+			return Result{Progress: prog}, nil
+		}
+		re, err := regexp.Compile(p.Expect)
+		if err != nil {
+			return Result{}, err
+		}
+		if re.MatchString(val) {
+			return Result{Fired: true, Progress: prog, Evidence: p.Tool + " output matched /" + p.Expect + "/: " + prog}, nil
+		}
+		return Result{Progress: prog}, nil
+
 	case "llm":
 		var evidence string
 		var err error
@@ -395,4 +465,52 @@ func firstNonEmpty(a ...string) string {
 		}
 	}
 	return ""
+}
+
+// jsonField reads a dot path out of JSON text: keys, array indexes, and * for every array element (values are joined
+// with ", "). ok=false when the text is not JSON or the path is absent.
+func jsonField(text, path string) (string, bool) {
+	var v any
+	if err := json.Unmarshal([]byte(text), &v); err != nil {
+		return "", false
+	}
+	vals := []any{v}
+	for _, seg := range strings.Split(path, ".") {
+		var next []any
+		for _, x := range vals {
+			switch t := x.(type) {
+			case map[string]any:
+				if seg == "*" {
+					for _, y := range t {
+						next = append(next, y)
+					}
+				} else if y, ok := t[seg]; ok {
+					next = append(next, y)
+				}
+			case []any:
+				if seg == "*" {
+					next = append(next, t...)
+				} else if i, err := strconv.Atoi(seg); err == nil && i >= 0 && i < len(t) {
+					next = append(next, t[i])
+				}
+			}
+		}
+		vals = next
+		if len(vals) == 0 {
+			return "", false
+		}
+	}
+	var parts []string
+	for _, x := range vals {
+		switch t := x.(type) {
+		case string:
+			parts = append(parts, t)
+		case nil:
+			parts = append(parts, "null")
+		default:
+			b, _ := json.Marshal(t)
+			parts = append(parts, string(b))
+		}
+	}
+	return strings.Join(parts, ", "), true
 }

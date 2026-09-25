@@ -13,7 +13,7 @@ import (
 )
 
 var predicateProps = []tools.Prop{
-	tools.Enum("kind", "what to check", "time", "http", "file", "process", "rss", "llm", "download"),
+	tools.Enum("kind", "what to check", "time", "http", "file", "process", "rss", "llm", "download", "tool"),
 	tools.Str("at", "kind=time: when to fire, RFC3339 with timezone (use the clock tool to compute)"),
 	tools.Str("url", "kind=http|rss|llm: page or feed URL"),
 	tools.Int("status", "kind=http: expected HTTP status"),
@@ -27,6 +27,10 @@ var predicateProps = []tools.Prop{
 	tools.Str("question", "kind=llm: the condition to judge, e.g. 'Is version 2.0 released?'"),
 	tools.Str("query", "kind=llm: web search query used as evidence when no url is given"),
 	tools.Int("download_id", "kind=download: id from download_start"),
+	tools.Str("tool", "kind=tool: name of a READ-ONLY tool to poll — an MCP tool of the service being watched (e.g. mcp__downloadstation__list_tasks) is the right way to watch that service; do not guess its web address with curl"),
+	tools.Str("args", "kind=tool: JSON object with the tool's arguments, e.g. {\"id\":\"dbid_764\"}"),
+	tools.Str("field", "kind=tool: dot path into the tool's JSON output to judge, e.g. data.task.status ('*' = every array element)"),
+	tools.Str("expect", "kind=tool: regex on that value (or the whole output) meaning 'done', e.g. finished|seeding|100"),
 }
 
 // RegisterTools installs intent, watch, cron and briefing tools.
@@ -55,6 +59,13 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if a.Kind == "shell" {
 					return "", errors.New("shell checks need the watch_command tool")
 				}
+				if a.Type == "watch" {
+					if ex, err := s.watchGuard(ctx, env.Agent, a.Predicate); err != nil {
+						return "", err
+					} else if ex != 0 {
+						return fmt.Sprintf("Already watching this: watch #%d.", ex), nil
+					}
+				}
 				id, err := s.CreateIntent(ctx, Intent{Owner: env.Agent, Description: a.Description, Type: a.Type, CadenceS: a.CadenceS, Repeat: a.Repeat, Notify: true}, a.Predicate)
 				if err != nil {
 					return "", err
@@ -64,7 +75,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 		},
 		&tools.Tool{
 			Name: "watch_command", Category: "autonomy", Risk: tools.RiskExec,
-			Description: "Watch a long-running thing by polling a shell command (e.g. an rsync log's last percentage). The watch is complete when the output matches the 'expect' regex (or, without it, when the command exits 0). Progress is recorded and the user is notified on completion. The command runs unattended on every poll — keep it read-only.",
+			Description: "Watch a long-running thing by polling a shell command (e.g. an rsync log's last percentage). Never guess the address of a service with curl: if the service has an MCP tool, watch it with monitor_start kind=tool instead. The watch is complete when the output matches the 'expect' regex (or, without it, when the command exits 0). Progress is recorded and the user is notified on completion. The command runs unattended on every poll — keep it read-only.",
 			Params: tools.Obj("description,command", tools.Str("description", "what is being watched"), tools.Str("command", "read-only shell command to poll"),
 				tools.Str("expect", "regex on stdout meaning 'done', e.g. 100%"), tools.Int("cadence_s", "poll interval seconds (default 30, min 15)"),
 				tools.Int("for_minutes", "give up after this many minutes (default 120, max 1440); a percentage or n/m in the output gives the user a finish-time estimate")),
@@ -82,8 +93,13 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if a.CadenceS == 0 {
 					a.CadenceS = 30
 				}
-				id, err := s.CreateIntent(ctx, Intent{Owner: env.Agent, Type: "watch", Description: a.Description, CadenceS: a.CadenceS, Notify: true, ExpiresAt: budget(a.ForMinutes, 120)},
-					Predicate{Kind: "shell", Command: a.Command, Expect: a.Expect})
+				pred := Predicate{Kind: "shell", Command: a.Command, Expect: a.Expect}
+				if ex, err := s.watchGuard(ctx, env.Agent, pred); err != nil {
+					return "", err
+				} else if ex != 0 {
+					return fmt.Sprintf("Already watching this: watch #%d.", ex), nil
+				}
+				id, err := s.CreateIntent(ctx, Intent{Owner: env.Agent, Type: "watch", Description: a.Description, CadenceS: a.CadenceS, Notify: true, ExpiresAt: budget(a.ForMinutes, 120)}, pred)
 				return fmt.Sprintf("Watch #%d started.", id), err
 			},
 		},
@@ -200,6 +216,11 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				}
 				if a.EveryS == 0 {
 					a.EveryS = 60
+				}
+				if ex, err := s.watchGuard(ctx, env.Agent, a.Predicate); err != nil {
+					return "", err
+				} else if ex != 0 {
+					return fmt.Sprintf("Already watching this: monitor #%d.", ex), nil
 				}
 				id, err := s.CreateIntent(ctx, Intent{Owner: env.Agent, Type: "watch", Description: a.Description, CadenceS: max(a.EveryS, 15), Notify: true, Announce: a.Announce,
 					ExpiresAt: budget(a.ForMinutes, 60)}, a.Predicate)

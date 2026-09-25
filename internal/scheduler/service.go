@@ -628,3 +628,42 @@ func jaccardSets(a, b map[string]bool) float64 {
 	}
 	return float64(inter) / float64(len(a)+len(b)-inter)
 }
+
+// maxActiveWatches is how many watches one agent may have running at once. A task with several downloads needs
+// one check that covers them all (a list call), not one polling loop per item.
+const maxActiveWatches = 3
+
+// watchGuard refuses a fourth active watch of an agent and reports an identical one that already exists.
+func (s *Service) watchGuard(ctx context.Context, owner string, p Predicate) (existing int64, err error) {
+	rows, err := s.DB.Query(ctx, `SELECT id, predicate FROM intents WHERE owner=$1 AND type='watch' AND status='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id`, owner)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	p.State = nil
+	want, _ := json.Marshal(p)
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		var raw []byte
+		if rows.Scan(&id, &raw) != nil {
+			continue
+		}
+		var q Predicate
+		if json.Unmarshal(raw, &q) == nil {
+			q.State = nil
+			if got, _ := json.Marshal(q); string(got) == string(want) {
+				return id, nil
+			}
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) >= maxActiveWatches {
+		var l []string
+		for _, id := range ids {
+			l = append(l, fmt.Sprintf("#%d", id))
+		}
+		return 0, fmt.Errorf("you already have %d active watches (%s). Do not start one watch per item: cancel or adjust an existing one (intent_cancel, monitor_adjust), or cover several items with a single check — one list call whose output shows all of them", len(ids), strings.Join(l, " "))
+	}
+	return 0, nil
+}

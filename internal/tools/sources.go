@@ -14,6 +14,7 @@ import (
 type Sources struct {
 	mu    sync.Mutex
 	hosts map[string]bool
+	urls  map[string]bool // exact addresses that appeared in tool RESULTS (not in what the agent typed)
 }
 
 var urlRe = regexp.MustCompile(`https?://[^\s"'<>)\]\\]+`)
@@ -35,6 +36,41 @@ func (s *Sources) Note(texts ...string) {
 			}
 		}
 	}
+}
+
+// NoteResult records the exact URLs printed in a tool's result. Unlike Note it ignores what the agent itself wrote:
+// an address the assistant composed (say, with data appended to its query) is not "seen".
+func (s *Sources) NoteResult(text string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.urls == nil {
+		s.urls = map[string]bool{}
+	}
+	for _, m := range urlRe.FindAllString(text, 800) {
+		if len(s.urls) < 5000 {
+			s.urls[normURL(m)] = true
+		}
+	}
+}
+
+func normURL(u string) string {
+	if i := strings.IndexByte(u, '#'); i >= 0 {
+		u = u[:i]
+	}
+	return strings.TrimRight(u, ".,;:!?")
+}
+
+// HasURL reports whether this exact address was printed in a result this run received.
+func (s *Sources) HasURL(rawURL string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.urls[normURL(strings.TrimSpace(rawURL))]
 }
 
 // Has reports whether the URL's site appeared in this run.

@@ -106,3 +106,28 @@ func (e *Engine) recoverRun(ctx context.Context, t tasks.Task, p *Profile, sess 
 	plan.Retried = true
 	return res2, plan
 }
+
+// learnFromStall turns an aborted run into improvement work, so the same stall is less likely next time: when the
+// automatic retry also failed, Metis reviews the agent (soul/tools); when the retry succeeded, Daedalus is asked
+// whether the way it finally worked deserves a reusable skill. System agents are skipped (no loops of maintainers
+// improving maintainers) and each agent is reviewed at most once a day.
+func (e *Engine) learnFromStall(ctx context.Context, t tasks.Task, p *Profile, res *RunResult, plan recovery) {
+	if p.System || plan.Decision == "" {
+		return
+	}
+	worker, title, input := "Metis", "Improve "+p.Name, ""
+	switch {
+	case res.Aborted != "":
+		input = fmt.Sprintf("Task #%d for agent %s stopped early (%s)%s. Analysis: %s Read it with task_transcript(id=%d), work out what the agent kept getting wrong or lacked, and propose a soul/tool improvement with evolve_propose only if the evidence is clear.", t.ID, p.Name, res.Aborted, map[bool]string{true: " even after an automatic retry"}[plan.Retried], plan.Lesson, t.ID)
+	case plan.Retried:
+		worker, title = "Daedalus", "Skill from recovered task #"+fmt.Sprint(t.ID)
+		input = fmt.Sprintf("Task #%d for agent %s first ran out of budget (%s) and then succeeded on a retry with a rewritten instruction. Read it with task_transcript(id=%d); if the approach that worked is a repeatable procedure, distil it into a skill for %s, otherwise do nothing. Why it stalled: %s", t.ID, p.Name, plan.Lesson, t.ID, p.Name, plan.Lesson)
+	default:
+		return
+	}
+	var n int
+	if err := e.DB.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE to_agent=$1 AND title=$2 AND created_at>now()-interval '1 day'`, worker, title).Scan(&n); err != nil || n > 0 {
+		return
+	}
+	_, _ = e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "recovery", ToAgent: worker, Title: title, Input: input})
+}

@@ -3,6 +3,7 @@
   // blockquotes, rules, links, inline code, and code blocks with copy. Fenced json/yaml (or a
   // message that is entirely JSON) becomes a collapsible tree.
   import JsonTree from './JsonTree.svelte';
+  import MediaKeep from './MediaKeep.svelte';
   import { artifactUrl } from '../ws.js';
   import { parseStructured } from './yaml.js';
 
@@ -124,7 +125,7 @@
   }
 </script>
 
-{#snippet inl(v)}{#each inline(v) as tk}{#if tk.t === 'text'}{tk.v}{:else if tk.t === 'link'}<a href={tk.href} target="_blank" rel="noopener noreferrer">{tk.label}</a>{:else if tk.t === 'code'}<code>{tk.v}</code>{:else if tk.t === 'strong'}<strong>{tk.v}</strong>{:else if tk.t === 'del'}<del>{tk.v}</del>{:else if tk.t === 'media'}{#if tk.kind === 'audio'}<audio class="media" controls preload="none" src={artifactUrl(tk.id)}></audio>{:else}<a href={artifactUrl(tk.id)} target="_blank" rel="noopener noreferrer"><img class="media" src={artifactUrl(tk.id)} alt="generated" loading="lazy" /></a>{/if}{:else}<em>{tk.v}</em>{/if}{/each}{/snippet}
+{#snippet inl(v)}{#each inline(v) as tk}{#if tk.t === 'text'}{tk.v}{:else if tk.t === 'link'}<a href={tk.href} target="_blank" rel="noopener noreferrer">{tk.label}</a>{:else if tk.t === 'code'}<code>{tk.v}</code>{:else if tk.t === 'strong'}<strong>{tk.v}</strong>{:else if tk.t === 'del'}<del>{tk.v}</del>{:else if tk.t === 'media'}{#if tk.kind === 'audio'}<audio class="media" controls preload="none" src={artifactUrl(tk.id)}></audio>{:else}<a href={artifactUrl(tk.id)} target="_blank" rel="noopener noreferrer"><img class="media" src={artifactUrl(tk.id)} alt="generated" loading="lazy" /></a><MediaKeep id={tk.id} />{/if}{:else}<em>{tk.v}</em>{/if}{/each}{/snippet}
 
 {#snippet lst(items)}
   {#if items.length}

@@ -228,6 +228,9 @@ type RunResult struct {
 	// any point. Callers that log this run's text to memory's raw bank must carry it through, or a fact
 	// distilled later has no way to know it rests on unverified ground.
 	Tainted bool
+	// Sources are the web hosts this run read (see tools.Sources); the chat uses them to decide which image links in
+	// an answer may be fetched and shown.
+	Sources *tools.Sources
 }
 
 const (
@@ -363,6 +366,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		Activate: activate,
 		Sources:  &tools.Sources{},
 	}
+	res.Sources = env.Sources
 	if spec.Task != nil {
 		env.TaskID = spec.Task.ID
 	}
@@ -1077,8 +1081,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		out += "\n" + warn
 	}
 	res = toolResult{text: out}
-	if tool.Untrusted && err == nil {
+	if (tool.Untrusted || marked) && err == nil { // marked: a delegate's answer that rests on web content
 		env.Sources.Note(tc.Arguments, out) // which sites this turn has really seen
+		env.Sources.NoteResult(out)         // and which exact addresses
 	}
 	if marked {
 		res.untrusted = "agent"
