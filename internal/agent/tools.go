@@ -33,6 +33,7 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolEvolvePropose(),
 		e.toolAskColleague(),
 		e.toolAgentPerformance(),
+		e.toolEvolutionAudit(),
 		e.toolTaskTranscript(),
 	)
 }
@@ -876,6 +877,53 @@ func (e *Engine) toolTaskCancel() *tools.Tool {
 				return "", err
 			}
 			return fmt.Sprintf("Cancelled task #%d (%s). What it had produced so far is kept.", t.ID, t.ToAgent), nil
+		},
+	}
+}
+
+// toolEvolutionAudit lists recent evolution proposals with what happened to the agent's tasks before and after
+// each applied change, so the evolvers themselves can be checked.
+func (e *Engine) toolEvolutionAudit() *tools.Tool {
+	return &tools.Tool{
+		Name: "evolution_audit", Category: "evolution", Risk: tools.RiskRead, Deferred: true,
+		Description: "Audit of evolution proposals from the last N days (default 7): who they were for, kind, status, rationale, and for applied ones the agent's task success rate in the 14 days before vs after. Use it to judge whether evolutions helped.",
+		Params:      tools.Obj("", tools.Int("days", "look back this many days (default 7)")),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			a, _ := tools.Decode[struct{ Days int }](raw)
+			if a.Days <= 0 {
+				a.Days = 7
+			}
+			rows, err := e.DB.Query(ctx, `SELECT e.id, p.name, e.kind, e.status, left(e.rationale,240), e.created_at, e.decided_at,
+				(SELECT count(*) FILTER (WHERE t.status='done') FROM tasks t WHERE lower(t.to_agent)=lower(p.name) AND t.created_at BETWEEN e.decided_at-interval '14 days' AND e.decided_at),
+				(SELECT count(*) FROM tasks t WHERE lower(t.to_agent)=lower(p.name) AND t.status IN ('done','failed','partial') AND t.created_at BETWEEN e.decided_at-interval '14 days' AND e.decided_at),
+				(SELECT count(*) FILTER (WHERE t.status='done') FROM tasks t WHERE lower(t.to_agent)=lower(p.name) AND t.created_at > e.decided_at),
+				(SELECT count(*) FROM tasks t WHERE lower(t.to_agent)=lower(p.name) AND t.status IN ('done','failed','partial') AND t.created_at > e.decided_at)
+				FROM evolution_proposals e JOIN agent_profiles p ON p.id=e.profile_id
+				WHERE e.created_at > now()-make_interval(days=>$1) ORDER BY e.id`, a.Days)
+			if err != nil {
+				return "", err
+			}
+			defer rows.Close()
+			var sb strings.Builder
+			for rows.Next() {
+				var id int64
+				var agent, kind, status, why string
+				var created time.Time
+				var decided *time.Time
+				var bd, bt, ad, at int
+				if err := rows.Scan(&id, &agent, &kind, &status, &why, &created, &decided, &bd, &bt, &ad, &at); err != nil {
+					return "", err
+				}
+				fmt.Fprintf(&sb, "#%d %s/%s [%s] %s — %s", id, agent, kind, status, created.Format("2006-01-02"), why)
+				if status == "applied" && decided != nil {
+					fmt.Fprintf(&sb, "\n   tasks done before: %d/%d, after: %d/%d", bd, bt, ad, at)
+				}
+				sb.WriteString("\n")
+			}
+			if sb.Len() == 0 {
+				return "No evolution proposals in that period.", nil
+			}
+			return sb.String(), nil
 		},
 	}
 }

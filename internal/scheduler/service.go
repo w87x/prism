@@ -538,6 +538,8 @@ func (s *Service) SeedDefaults(ctx context.Context) error {
 			Prompt: "Dream now. Reflect on everything known about the user (memory_find / memory_list) and prepare up to three specific, grounded briefings with briefing_add. If nothing deserves their attention reply NO_REPLY."},
 		{Name: "Agent evolution review", Agent: "Metis", Expr: "0 4 * * 0", Enabled: false, System: true,
 			Prompt: "Weekly evolution review. For each non-system agent with at least 5 tasks in the last 30 days (agent_performance), check its profile bank and the user bank for lessons; propose a soul revision with evolve_propose only where the evidence is clear. Report which agents you reviewed. If nothing changed reply NO_REPLY."},
+		{Name: "Evolution audit", Agent: "Metis", Expr: "0 5 * * 0", Enabled: false, System: true,
+			Prompt: "Weekly audit of the evolvers. Call evolution_audit (load it with tool_search if needed) and judge last week's proposals — yours, Daedalus's skills and Forge's hires: were the rationales backed by evidence, did applied changes bloat or contradict a soul, did the agent's success rate improve, hold or drop after the change? For a change that looks harmful, propose the fix with evolve_propose (a revert or a trimmed soul). Then note one or two lessons about how YOU should propose better (store them with memory tools in your own profile bank). Report in a few lines; if there were no proposals reply NO_REPLY."},
 	}
 	for _, d := range defs {
 		var n int

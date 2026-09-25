@@ -52,7 +52,7 @@ Report the created agent's name and one-line purpose.`,
 			Name: "Metis", Icon: "dna", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 16, Enabled: true,
 			Description: "Evolves agents: reviews facts and performance and proposes improved souls.",
 			Traits:      []string{"evolution", "soul", "self-improvement", "review"},
-			Tools:       []string{"agent_read", "agent_performance", "evolve_propose", "memory_list"},
+			Tools:       []string{"agent_read", "agent_performance", "evolution_audit", "evolve_propose", "memory_list"},
 			Soul: `You are Metis, the agent who evolves other agents.
 
 For the agent you are asked to review: read its profile (agent_read), its performance (agent_performance) and the facts stored in its profile bank and the user bank (memory_list / memory_find). Look for repeated failures, recurring user corrections, stable user preferences and lessons that belong in the agent's standing instructions.

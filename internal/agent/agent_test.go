@@ -2071,3 +2071,28 @@ func TestStopCancelsDelegatedDescendants(t *testing.T) {
 		t.Fatal("the running descendant must be cancelled")
 	}
 }
+
+func TestEvolutionAuditReportsBeforeAfter(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Scout", Soul: "Line one.", Enabled: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := h.e.Profiles.AddProposal(ctx, p.ID, KindSoul, "Line one, better.", "sources matter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.DB.Exec(ctx, `UPDATE evolution_proposals SET status='applied', decided_at=now()-interval '3 days' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	h.e.DB.Exec(ctx, `INSERT INTO tasks(from_kind,from_name,to_agent,title,input,status,created_at) VALUES('user','user','Scout','a','a','failed',now()-interval '5 days'),('user','user','Scout','b','b','done',now()-interval '1 day')`)
+	tool, ok := h.e.Tools.Get("evolution_audit")
+	if !ok {
+		t.Fatal("evolution_audit not registered")
+	}
+	out, err := tool.Run(ctx, &tools.Env{Agent: "Metis"}, json.RawMessage(`{}`))
+	if err != nil || !strings.Contains(out, "before: 0/1") || !strings.Contains(out, "after: 1/1") {
+		t.Fatalf("%q %v", out, err)
+	}
+}
