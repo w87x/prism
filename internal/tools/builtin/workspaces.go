@@ -264,7 +264,8 @@ func registerWorkspaces(reg *tools.Registry, d Deps) {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("Workspace #%d ready at %s on branch %s (from %s).%s\nWork inside that directory: file_edit / apply_patch / shell (cwd) / git_commit. Show the result with workspace_diff.", w.ID, w.Path, w.Branch, w.Base[:min(8, len(w.Base))], note), nil
+				info := scanRepo(ctx, w.Path).String()
+				return fmt.Sprintf("Workspace #%d ready at %s on branch %s (from %s).%s\nWork inside that directory: file_edit / apply_patch / shell (cwd) / git_commit. Show the result with workspace_diff.\n\nWhat the project looks like (store new facts with memory_store in project:%s if memory does not know them yet):\n%s", w.ID, w.Path, w.Branch, w.Base[:min(8, len(w.Base))], note, filepath.Base(w.Repo), info), nil
 			},
 		},
 		&tools.Tool{

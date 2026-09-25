@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestApplyEditsIsPreciseAndAllOrNothing(t *testing.T) {
@@ -145,4 +146,184 @@ func TestCodeToolsOnARepository(t *testing.T) {
 		t.Fatalf("bad patch: %v", err)
 	}
 	_ = context.Background()
+}
+
+// The workspace lifecycle: an isolated worktree, a diff that includes new files, apply into a clean checkout as
+// staged changes (refused into a dirty one), keep as a branch, and discard.
+func TestWorkspacesIsolateCodingWork(t *testing.T) {
+	reg, deps, _, _ := setup(t)
+	ctx := context.Background()
+	repo := filepath.Join(deps.DataDir, "work", "app")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "add", "a.txt")
+	mustGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+
+	if _, _, err := deps.OpenWorkspace(ctx, filepath.Join(deps.DataDir, "nope"), "", "Coder", 0); err == nil {
+		t.Fatal("a non-repository must be refused")
+	}
+	out, err := run(t, reg, "workspace_open", map[string]any{"repo": repo, "name": "Fix A"})
+	if err != nil || !strings.Contains(out, "Workspace #1") {
+		t.Fatalf("open: %q %v", out, err)
+	}
+	ws, _ := Workspaces(ctx, deps.DB)
+	if len(ws) != 1 || ws[0].Status != "open" || !strings.HasPrefix(ws[0].Branch, "prism/fix-a-") {
+		t.Fatalf("workspaces = %+v", ws)
+	}
+	wt := ws[0].Path
+	if _, err := run(t, reg, "file_edit", map[string]any{"path": filepath.Join(wt, "a.txt"), "old_text": "one", "new_text": "two"}); err != nil {
+		t.Fatalf("editing inside the workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "new.txt"), []byte("brand new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(repo, "a.txt")); string(b) != "one\n" {
+		t.Fatal("the user's checkout must stay untouched while the agent works")
+	}
+	diff, err := run(t, reg, "workspace_diff", map[string]any{"id": 1})
+	if err != nil || !strings.Contains(diff, "+two") || !strings.Contains(diff, "new.txt") {
+		t.Fatalf("diff: %q %v", diff, err)
+	}
+	if out, err := run(t, reg, "git_status", map[string]any{"dir": wt}); err != nil || !strings.Contains(out, "a.txt") || !strings.Contains(out, "new.txt") {
+		t.Fatalf("git_status: %q %v", out, err)
+	}
+	if _, err := run(t, reg, "git_commit", map[string]any{"dir": wt, "message": "change a, add new", "all": true}); err != nil {
+		t.Fatalf("git_commit in the workspace: %v", err)
+	}
+	if out, err := run(t, reg, "git_log", map[string]any{"dir": wt, "n": 2}); err != nil || !strings.Contains(out, "change a, add new") {
+		t.Fatalf("git_log: %q %v", out, err)
+	}
+	// a dirty checkout blocks applying
+	if err := os.WriteFile(filepath.Join(repo, "scratch.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WorkspaceApply(ctx, deps.DB, 1); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+		t.Fatalf("dirty checkout: %v", err)
+	}
+	_ = os.Remove(filepath.Join(repo, "scratch.txt"))
+	msg, err := WorkspaceApply(ctx, deps.DB, 1)
+	if err != nil || !strings.Contains(msg, "staged") {
+		t.Fatalf("apply: %q %v", msg, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(repo, "a.txt")); string(b) != "two\n" {
+		t.Fatalf("changes not applied: %q", b)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("the worktree should be gone after applying")
+	}
+	mustGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "apply")
+
+	// keep: the branch stays in the repo; discard removes it
+	if _, _, err := deps.OpenWorkspace(ctx, repo, "second", "Coder", 0); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ = Workspaces(ctx, deps.DB)
+	var open Workspace
+	for _, w := range ws {
+		if w.Status == "open" {
+			open = w
+		}
+	}
+	if err := os.WriteFile(filepath.Join(open.Path, "k.txt"), []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg, err := WorkspaceKeep(ctx, deps.DB, open.ID); err != nil || !strings.Contains(msg, open.Branch) {
+		t.Fatalf("keep: %q %v", msg, err)
+	}
+	if out, _ := runGit(ctx, repo, 10*time.Second, "", "branch", "--list", open.Branch); !strings.Contains(out, open.Branch) {
+		t.Fatalf("the kept branch must exist: %q", out)
+	}
+	if d, err := WorkspaceDiff(ctx, deps.DB, open.ID, true); err != nil || !strings.Contains(d, "k.txt") {
+		t.Fatalf("kept diff: %q %v", d, err)
+	}
+	if err := WorkspaceDiscard(ctx, deps.DB, open.ID); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := runGit(ctx, repo, 10*time.Second, "", "branch", "--list", open.Branch); strings.TrimSpace(out) != "" {
+		t.Fatalf("the branch must be gone: %q", out)
+	}
+}
+
+func TestGitHubArgumentsAreBuiltSafely(t *testing.T) {
+	args, err := ghReadArgs(ghArgs{Kind: "pr", Action: "list", State: "open", Limit: 5, Author: "octo", Repo: "acme/app"})
+	if err != nil || strings.Join(args, " ") != "pr list --limit 5 --state open --author octo -R acme/app" {
+		t.Fatalf("list: %v %v", args, err)
+	}
+	if args, err := ghReadArgs(ghArgs{Kind: "run", Action: "log", Number: "123"}); err != nil || strings.Join(args, " ") != "run view 123 --log-failed" {
+		t.Fatalf("run log: %v %v", args, err)
+	}
+	for _, bad := range []ghArgs{{Kind: "pr", Action: "view", Number: "1; rm -rf"}, {Kind: "pr", Action: "list", State: "--web"}, {Kind: "pr", Action: "list", Repo: "--repo=x"}, {Kind: "issue", Action: "list", State: "merged"}, {Kind: "nope", Action: "x"}} {
+		if _, err := ghReadArgs(bad); err == nil {
+			t.Fatalf("should refuse %+v", bad)
+		}
+	}
+	args, err = ghWriteArgs(ghArgs{Action: "pr_create", Title: "Fix --draft parsing", Body: "-- body starting with dashes", Base: "main", Draft: true})
+	if err != nil || args[0] != "pr" || args[3] != "Fix --draft parsing" || args[5] != "-- body starting with dashes" || args[len(args)-1] != "--draft" {
+		t.Fatalf("pr_create: %v %v", args, err)
+	}
+	if _, err := ghWriteArgs(ghArgs{Action: "pr_comment", Number: "7"}); err == nil {
+		t.Fatal("an empty comment must be refused")
+	}
+	if args, err := ghWriteArgs(ghArgs{Action: "issue_comment", Number: "7", Body: "thanks"}); err != nil || strings.Join(args, " ") != "issue comment 7 --body thanks" {
+		t.Fatalf("issue_comment: %v %v", args, err)
+	}
+}
+
+// With a fake gh on PATH the tool runs end to end.
+func TestGHToolRunsTheCLI(t *testing.T) {
+	reg, deps, _, _ := setup(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho \"gh called with: $@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_ = deps
+	out, err := run(t, reg, "gh_read", map[string]any{"kind": "pr", "action": "view", "number": "42", "comments": true})
+	if err != nil || !strings.Contains(out, "gh called with: pr view 42 --comments") {
+		t.Fatalf("gh_read: %q %v", out, err)
+	}
+	if tool, _ := reg.Get("gh_read"); !tool.Untrusted {
+		t.Fatal("GitHub content must taint the turn")
+	}
+	if tool, _ := reg.Get("gh_write"); tool.Auto {
+		t.Fatal("writing to GitHub must not be armed silently")
+	}
+}
+
+func TestRepoScanFindsCommandsAndLayout(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module x\n")
+	write("cmd/app/main.go", "package main\n")
+	write("internal/a.go", "package internal\n")
+	write("web/package.json", `{"scripts":{"build":"vite build","test":"vitest"}}`)
+	write("package.json", `{"scripts":{"build":"vite build","test":"vitest","lint":"eslint ."}}`)
+	write("pnpm-lock.yaml", "")
+	write("Makefile", "build:\n\tgo build\ntest:\n\tgo test ./...\nrun:\n\t./x\n")
+	write("README.md", "# X\n\n![badge](x)\n\nX is a tiny tool that does things\nacross lines.\n\nMore.\n")
+	write("AGENTS.md", "rules")
+	mustGit(t, root, "init", "-q")
+	mustGit(t, root, "remote", "add", "origin", "https://user:secret@example.com/acme/x.git")
+	rs := scanRepo(ctx, root)
+	all := strings.Join(rs.Facts(), "\n")
+	for _, want := range []string{"go test ./...", "pnpm build", "pnpm lint", "make test", "make run", "cmd/ internal/ web/", "AGENTS.md", "X is a tiny tool that does things across lines.", "Go (2 files)", "https://example.com/acme/x.git"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("missing %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "secret") {
+		t.Fatal("remote credentials must never reach memory")
+	}
 }

@@ -129,4 +129,29 @@ func (s *Server) registerMisc() {
 		}
 		return out, rows.Err()
 	})
+
+	// code workspaces: isolated worktrees where agents do coding work, reviewed here
+	rpc(s, "workspaces.list", func(ctx context.Context, _ none) ([]builtin.Workspace, error) {
+		return builtin.Workspaces(ctx, a.DB.Pool)
+	})
+	rpc(s, "workspaces.diff", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (string, error) {
+		return builtin.WorkspaceDiff(ctx, a.DB.Pool, r.ID, false)
+	})
+	rpc(s, "workspaces.apply", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (string, error) {
+		return builtin.WorkspaceApply(ctx, a.DB.Pool, r.ID)
+	})
+	rpc(s, "workspaces.keep", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (string, error) {
+		return builtin.WorkspaceKeep(ctx, a.DB.Pool, r.ID)
+	})
+	rpc(s, "workspaces.discard", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, builtin.WorkspaceDiscard(ctx, a.DB.Pool, r.ID)
+	})
 }

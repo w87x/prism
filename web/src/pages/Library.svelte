@@ -16,6 +16,21 @@
   import Icon from '../lib/ui/Icon.svelte';
 
   let tab = $state('bookmarks');
+  // ── code workspaces: isolated git worktrees where agents did coding work ──
+  let wss = $state([]);
+  let wsDiff = $state(null); // { ws, text }
+  let wsBusy = $state(0);
+  const loadWs = async () => (wss = (await call('workspaces.list', {}, { quiet: true })) || []);
+  $effect(() => { if (tab === 'code') loadWs(); });
+  async function viewDiff(w) { const text = await call('workspaces.diff', { id: w.id }); if (text !== undefined) wsDiff = { ws: w, text }; }
+  async function wsAct(w, m, msg) {
+    if (m === 'workspaces.discard' && !(await confirmBox({ title: 'Discard workspace', text: `Throw away ${w.branch} and everything the agent changed in it?`, ok: 'Discard', danger: true }))) return;
+    wsBusy = w.id;
+    const r = await call(m, { id: w.id });
+    wsBusy = 0;
+    if (r !== undefined) { toast(typeof r === 'string' ? r : msg, 'ok'); wsDiff = null; loadWs(); }
+  }
+  const diffClass = (l) => (l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'dm' : l.startsWith('+') ? 'da' : l.startsWith('-') ? 'dd' : l.startsWith('@@') ? 'dh' : '');
   const human = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? (n / 1e3).toFixed(0) + ' KB' : n + ' B');
 
   // bookmarks
@@ -128,7 +143,7 @@
 </script>
 
 <div class="pg">
-  <Tabs tabs={[{ id: 'bookmarks', label: 'Bookmarks', badge: bms.length }, { id: 'downloads', label: 'Downloads', badge: dls.filter((d) => d.status === 'running').length || '' }, { id: 'processes', label: 'Processes', badge: procs.filter((p) => p.status === 'running').length || '' }, { id: 'artifacts', label: 'Artifacts', badge: arts.length }, { id: 'folders', label: 'Folder maps', badge: maps.length || '' }, { id: 'docs', label: 'Documents' }]} bind:active={tab} />
+  <Tabs tabs={[{ id: 'bookmarks', label: 'Bookmarks', badge: bms.length }, { id: 'downloads', label: 'Downloads', badge: dls.filter((d) => d.status === 'running').length || '' }, { id: 'processes', label: 'Processes', badge: procs.filter((p) => p.status === 'running').length || '' }, { id: 'artifacts', label: 'Artifacts', badge: arts.length }, { id: 'folders', label: 'Folder maps', badge: maps.length || '' }, { id: 'code', label: 'Code', badge: wss.filter((w) => w.status === 'open').length || '' }, { id: 'docs', label: 'Documents' }]} bind:active={tab} />
 
   {#if tab === 'bookmarks'}
     <div class="bar"><div class="f"><Input bind:value={bq} size="sm" placeholder="filter…" /></div><span class="grow"></span>
@@ -143,6 +158,26 @@
               <td class="end nowrap"><Button size="sm" variant="ghost" onclick={() => { bm = structuredClone($state.snapshot(b)); bOpen = true; }}>Edit</Button><Button size="sm" variant="ghost" onclick={() => delBm(b)}><Icon name="trash" size={11} /></Button></td></tr>
           {:else}<tr><td colspan="6"><Empty>no bookmarks — agents can add them for fast-dial lookups</Empty></td></tr>{/each}
         </tbody></table></div>
+    </Panel>
+  {:else if tab === 'code'}
+    <div class="bar"><span class="sm mute">When an agent works on a repository it does so in an isolated copy (git worktree) on its own branch — your checkout is never touched. Review what it changed here, then apply it as staged changes, keep the branch, or discard it.</span><span class="grow"></span><Button size="sm" variant="ghost" onclick={loadWs}><Icon name="refresh" size={11} /> Refresh</Button></div>
+    <Panel flush grow>
+      <div class="scroll"><table class="t">
+        <thead><tr><th>Workspace</th><th>Repository</th><th>Agent</th><th>Status</th><th>Changes</th><th style="width:260px"></th></tr></thead>
+        <tbody>
+          {#each wss as w (w.id)}
+            <tr><td><span class="mono">{w.branch}</span><div class="sm mute">{ago(w.created_at)}</div></td><td class="sm">{w.repo}</td><td>{w.agent}{#if w.task_id} <span class="sm mute">task #{w.task_id}</span>{/if}</td>
+              <td><Badge tone={w.status === 'open' ? 'accent' : w.status === 'applied' ? 'ok' : w.status === 'kept' ? 'warn' : 'mute'}>{w.status}</Badge></td>
+              <td class="sm pre">{(w.stat || '').split('\n').slice(-1)[0]}</td>
+              <td class="end">{#if w.status === 'open' || w.status === 'kept'}
+                <Button size="sm" variant="ghost" onclick={() => viewDiff(w)}>Diff</Button>
+                <Button size="sm" variant="accent" loading={wsBusy === w.id} title="Bring the changes into your checkout as staged changes (needs a clean checkout)" onclick={() => wsAct(w, 'workspaces.apply', 'Applied')}>Apply</Button>
+                {#if w.status === 'open'}<Button size="sm" variant="ghost" title="Commit and keep the branch in the repository; merge it yourself" onclick={() => wsAct(w, 'workspaces.keep', 'Kept')}>Keep branch</Button>{/if}
+                <Button size="sm" variant="ghost" onclick={() => wsAct(w, 'workspaces.discard', 'Discarded')}>Discard</Button>
+              {/if}</td></tr>
+          {:else}<tr><td colspan="6" class="mute">no coding workspaces yet — ask an agent to work on a repository (it opens one with workspace_open)</td></tr>{/each}
+        </tbody>
+      </table></div>
     </Panel>
   {:else if tab === 'downloads'}
     <div class="bar"><div class="grow"><Input bind:value={durl} size="sm" placeholder="http(s) URL — magnet/torrent/ftp need aria2c" onenter={startDl} /></div><Button size="sm" variant="primary" disabled={!durl.trim()} onclick={startDl}><Icon name="dl" size={11} /> Download</Button></div>
@@ -272,7 +307,22 @@
   {#snippet footer()}<Button variant="ghost" onclick={() => (mapView = null)}>Close</Button>{/snippet}
 </Modal>
 
+<Modal open={!!wsDiff} title="Changes in {wsDiff?.ws?.branch}" width={980} onclose={() => (wsDiff = null)}>
+  {#if wsDiff}
+    <pre class="patch">{#each wsDiff.text.split('\n') as l}<span class={diffClass(l)}>{l}
+</span>{/each}</pre>
+  {/if}
+  {#snippet footer()}
+    {#if wsDiff}<Button variant="ghost" onclick={() => wsAct(wsDiff.ws, 'workspaces.discard', 'Discarded')}>Discard</Button>
+    {#if wsDiff.ws.status === 'open'}<Button variant="ghost" onclick={() => wsAct(wsDiff.ws, 'workspaces.keep', 'Kept')}>Keep branch</Button>{/if}
+    <Button variant="accent" onclick={() => wsAct(wsDiff.ws, 'workspaces.apply', 'Applied')}>Apply to my checkout</Button>{/if}
+    <Button variant="primary" onclick={() => (wsDiff = null)}>Close</Button>
+  {/snippet}
+</Modal>
+
 <style>
+  .patch { margin: 0; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 62vh; white-space: pre; }
+  .patch .da { color: var(--ok); } .patch .dd { color: var(--err); } .patch .dh { color: var(--accent); } .patch .dm { color: var(--fg-mute); }
   .drop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px dashed var(--line-3); background: var(--bg-1); padding: 8px 12px; color: var(--fg-dim); flex: none; }
   .drop.over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-hi); }
   .ups { flex: none; padding: 2px 4px; display: flex; flex-direction: column; gap: 1px; }

@@ -329,6 +329,7 @@ type profileArgs struct {
 	CanDelegate *bool    `json:"can_delegate"`
 	Team        []string `json:"team"`
 	Enabled     *bool    `json:"enabled"`
+	MaxIter     int      `json:"max_iterations"`
 }
 
 var profileProps = []tools.Prop{
@@ -343,6 +344,7 @@ var profileProps = []tools.Prop{
 	tools.Bool("can_delegate", "may delegate subtasks (max depth 2)"),
 	tools.StrList("team", "names of existing specialists this agent leads: it then delegates only to them, splitting work, waiting for results and consolidating them (implies can_delegate)"),
 	tools.Bool("enabled", "enabled"),
+	tools.Int("max_iterations", "tool-call budget per task (default 24, max 80): raise it (35-60) for agents that do long multi-step work such as coding, research or data processing; keep it low for quick lookups"),
 }
 
 func (e *Engine) unknownTools(names []string) []string {
@@ -381,6 +383,7 @@ func (e *Engine) toolAgentCreate() *tools.Tool {
 				p.CanDelegate = *a.CanDelegate
 			}
 			p.Team = a.Team
+			p.MaxIterations = a.MaxIter
 			saved, err := e.Profiles.Save(ctx, p, "hired by "+env.Agent)
 			if err != nil {
 				return "", err
@@ -441,6 +444,9 @@ func (e *Engine) toolAgentUpdate() *tools.Tool {
 			}
 			if a.Team != nil {
 				p.Team = a.Team
+			}
+			if a.MaxIter > 0 {
+				p.MaxIterations = a.MaxIter
 			}
 			if a.Enabled != nil && !p.System {
 				p.Enabled = *a.Enabled

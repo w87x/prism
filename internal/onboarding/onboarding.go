@@ -27,6 +27,7 @@ type Draft struct {
 	Traits      []string `json:"traits"`
 	Tools       []string `json:"tools"`
 	CanDelegate bool     `json:"can_delegate"`
+	MaxIter     int      `json:"max_iterations"`
 	Exists      bool     `json:"exists"`
 }
 
@@ -60,13 +61,14 @@ Plan %d agents. For each give:
 - "traits": 4-8 lowercase search keywords.
 - "tools": the minimal set of tool names from the list below that the agent really needs (3-9).
 - "can_delegate": true only for agents that coordinate broader work.
+- "max_iterations": how many tool calls one task may use. Default is 24; give 35-60 to agents that will do long, multi-step work (coding, research, data processing, building things), and 10-16 to quick lookup agents. A budget that is too small makes long jobs end half-finished.
 
-Cover the user's stated needs first; avoid overlapping roles; do not create agents for things the built-in staff already do (memory curation, agent hiring, tool selection).
+Cover the user's stated needs first (for coding needs, the built-in Coder and Reviewer agents already exist); avoid overlapping roles; do not create agents for things the built-in staff already do (memory curation, agent hiring, tool selection).
 
 Available tools (name — purpose):
 %s
 
-Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],"tools":[],"can_delegate":false}]}`
+Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],"tools":[],"can_delegate":false,"max_iterations":24}]}`
 
 const soulPrompt = `Write the system prompt ("soul") for an AI agent inside a personal assistant. 120-250 words, plain text, no markdown headings, no code fences: its role, a numbered working method, the output format, and hard rules. Tailor it to what the user needs. Do not list tools. Output ONLY the prompt text, starting with "You are <Name>, ...".`
 
@@ -213,7 +215,7 @@ func Apply(ctx context.Context, ps *agent.ProfileStore, drafts []Draft, replace 
 			return 0, err
 		}
 		for _, p := range all {
-			if !p.System {
+			if !p.System && !agent.IsWellKnown(p.Name) {
 				if err := ps.Delete(ctx, p.ID); err != nil {
 					return 0, err
 				}
@@ -225,7 +227,7 @@ func Apply(ctx context.Context, ps *agent.ProfileStore, drafts []Draft, replace 
 			continue // never overwrite an existing agent
 		}
 		if _, err := ps.Save(ctx, agent.Profile{Name: d.Name, Icon: d.Icon, Group: d.Group, Description: d.Description, Soul: d.Soul, Traits: d.Traits, Tools: d.Tools,
-			CanDelegate: d.CanDelegate, Role: agent.RoleWorker, AutoTools: true, Enabled: true}, "onboarding"); err != nil {
+			CanDelegate: d.CanDelegate, MaxIterations: d.MaxIter, Role: agent.RoleWorker, AutoTools: true, Enabled: true}, "onboarding"); err != nil {
 			return created, err
 		}
 		created++

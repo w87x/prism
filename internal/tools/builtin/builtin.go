@@ -58,6 +58,8 @@ func Register(reg *tools.Registry, d Deps) (*Downloader, *ProcessManager) {
 	registerCode(reg, d)
 	registerGit(reg, d)
 	registerWorkspaces(reg, d)
+	registerGH(reg, d)
+	registerRepoInfo(reg, d)
 	registerRSS(reg, d)
 	dl := registerDownloads(reg, d)
 	registerArtifacts(reg, d)
