@@ -145,23 +145,23 @@
       </Panel>
     {:else}
       <div class="cols">
-        <Panel title="Needs your attention{d.needs_attention.length ? ` (${d.needs_attention.length})` : ''}" flush>
+        <Panel title="Needs your attention{d.needs_attention.length ? ` (${d.needs_attention.length})` : ''}" id="today.needs-your-attention" resizable flush>
           {#if !d.needs_attention.length}<Empty>all clear</Empty>
           {:else}<ul class="list">{#each d.needs_attention as it}{@render attn(it)}{/each}</ul>{/if}
         </Panel>
-        <Panel title="Working on now{d.working_on.length ? ` (${d.working_on.length})` : ''}" flush>
+        <Panel title="Working on now{d.working_on.length ? ` (${d.working_on.length})` : ''}" id="today.working-on-now" resizable flush>
           {#if !d.working_on.length}<Empty>nothing running</Empty>
           {:else}<ul class="list">{#each d.working_on as w}{@render working(w)}{/each}</ul>{/if}
         </Panel>
-        <Panel title="Produced today{d.produced.length ? ` (${d.produced.length})` : ''}" flush>
+        <Panel title="Produced today{d.produced.length ? ` (${d.produced.length})` : ''}" id="today.produced-today" resizable flush>
           {#if !d.produced.length}<Empty>nothing finished in the last day</Empty>
           {:else}<ul class="list">{#each d.produced as it}{@render produced(it)}{/each}</ul>{/if}
         </Panel>
-        <Panel title="Coming up{d.commitments.length ? ` (${d.commitments.length})` : ''}" flush>
+        <Panel title="Coming up{d.commitments.length ? ` (${d.commitments.length})` : ''}" id="today.coming-up" resizable flush>
           {#if !d.commitments.length}<Empty>nothing scheduled in the next 2 days</Empty>
           {:else}<ul class="list">{#each d.commitments as c}{@render coming(c)}{/each}</ul>{/if}
         </Panel>
-        <Panel title="Projects awaiting a next step{d.projects.length ? ` (${d.projects.length})` : ''}" flush>
+        <Panel title="Projects awaiting a next step{d.projects.length ? ` (${d.projects.length})` : ''}" id="today.projects-awaiting-a-next-step" resizable flush>
           {#if !d.projects.length}<Empty>no active project has gone quiet</Empty>
           {:else}<ul class="list">{#each d.projects as p}{@render project(p)}{/each}</ul>{/if}
         </Panel>
@@ -181,7 +181,7 @@
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   .body { flex: 1; min-height: 0; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; align-items: start; }
+  .cols { grid-auto-flow: dense; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; align-items: start; }
   .list { list-style: none; margin: 0; padding: 0; }
   .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
   .row:last-child { border-bottom: none; }

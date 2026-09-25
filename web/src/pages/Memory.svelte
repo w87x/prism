@@ -255,6 +255,12 @@
     const r = await call('memory.import', { dump });
     if (r) { toast(`${r.facts} facts imported (${r.skipped} already known), ${r.links} links`); loadBanks(); loadFacts(); }
   }
+  // when a pass changed nothing, say why per bank (a click that shows nothing looks broken)
+  function skipNote(rs, verb) {
+    if (!rs.length) return `Nothing to ${verb}: no bank has any facts yet`;
+    const l = rs.slice(0, 4).map((r) => `${r.bank}: ${r.skipped || `looked at ${r.considered} facts, nothing new to conclude`}`).join(' · ');
+    return `Nothing to ${verb} — ${l}${rs.length > 4 ? ` · +${rs.length - 4} more` : ''}`;
+  }
   async function reflect() {
     busy = 'reflect';
     const rs = await call('memory.reflect', { bank_id: bank });
@@ -262,7 +268,7 @@
     if (!rs) return;
     const t = rs.reduce((a, r) => ({ n: a.n + r.added, s: a.s + r.strengthened, r: a.r + r.revised + r.retired }), { n: 0, s: 0, r: 0 });
     if (t.n + t.s + t.r) toast(`${t.n} new conclusions, ${t.s} strengthened, ${t.r} revised or retired`);
-    else toast(rs[0]?.skipped ? `Nothing to reflect on: ${rs[0].skipped}` : 'Nothing new to conclude');
+    else toast(skipNote(rs, 'reflect on'));
     loadBanks(); loadFacts();
   }
 
@@ -273,7 +279,7 @@
     if (!rs) return;
     const t = rs.reduce((a, r) => ({ i: a.i + r.insights, s: a.s + r.strengthened + r.revised, c: a.c + r.contradictions, d: a.d + r.duplicates }), { i: 0, s: 0, c: 0, d: 0 });
     if (t.i + t.s + t.c + t.d) toast(`${t.i} new insights, ${t.s} updated, ${t.c} contradictions flagged, ${t.d} duplicates retired`);
-    else toast(rs[0]?.skipped ? `Nothing to analyse: ${rs[0].skipped}` : 'Nothing new found');
+    else toast(skipNote(rs, 'analyse'));
     loadBanks(); loadFacts(); loadHealth();
   }
   async function synthesize() {

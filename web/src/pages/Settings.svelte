@@ -420,26 +420,26 @@
           </Panel>
       </div>
     {:else if tab === 'context'}
-      <div class="mas">
-        <Panel title="Auto-compaction">
+      <div class="cols dense">
+        <Panel title="Auto-compaction" id="set.auto-compaction" collapsible resizable>
           <div class="sm mute">When an agent's context reaches the trigger, stale results are dropped and old turns are summarized down to the target (a fixed template; memory hits are dropped since they can be queried again).</div>
           <div class="two"><Field label="Trigger (% of model window)"><NumberInput value={Math.round(ctx.compact_at * 100)} min={40} max={95} step={5} unit="%" onchange={(v) => (ctx.compact_at = v / 100)} /></Field>
             <Field label="Target (%)"><NumberInput value={Math.round(ctx.target * 100)} min={5} max={60} step={5} unit="%" onchange={(v) => (ctx.target = v / 100)} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('context', ctx, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Model concurrency">
+        <Panel title="Model concurrency" id="set.model-concurrency" collapsible resizable>
           <div class="sm mute">How many model calls run at the same time across all agents. Local models on one GPU usually do best with 1–2: extra parallel calls only queue up inside the server. Applies immediately.</div>
           <div class="two"><Field label="Parallel model calls"><NumberInput bind:value={rt.llm_concurrency} min={1} max={16} step={1} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('runtime', rt, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Guardrails · loops">
+        <Panel title="Guardrails · loops" id="set.guardrails-loops" collapsible resizable>
           <div class="sm mute">Loop detection: when an agent keeps making the identical tool call, or gets stuck regenerating the same text, it is warned once and then the run is stopped rather than left to burn tokens forever.</div>
           <div class="two"><Field label="Warn after (identical tool call)"><NumberInput bind:value={gr.tool_repeat_warn} min={2} max={9} step={1} /></Field>
             <Field label="Stop after"><NumberInput bind:value={gr.tool_repeat_abort} min={2} max={10} step={1} /></Field></div>
           <Field label="Stop after (stuck repeating text)" hint="lower than the tool threshold — regenerating a whole reply is far more expensive than retrying one call"><NumberInput bind:value={gr.text_repeat_abort} min={1} max={5} step={1} /></Field>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Guardrails · long runs">
+        <Panel title="Guardrails · long runs" id="set.guardrails-long-runs" collapsible resizable>
           <div class="sm mute">Autonomous runs (a schedule firing, a standing intent waking its owner) get extra iteration budget over the agent's own limit, since nobody is there to ask for more time.</div>
           <div class="two"><Field label="Extra budget" hint="% added to the agent's own limit"><NumberInput bind:value={gr.autonomous_boost_pct} min={0} max={200} step={10} unit="%" /></Field>
             <Field label="Hard cap (iterations)"><NumberInput bind:value={gr.autonomous_max_iterations} min={10} max={200} step={10} /></Field></div>
@@ -448,7 +448,7 @@
           <Switch checked={!gr.code_review_off} label="when a coding task finishes: run the project's checks and have Reviewer judge the diff (shown in Library → Code)" onchange={(v) => (gr.code_review_off = !v)} />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Memory · digesting">
+        <Panel title="Memory · digesting" id="set.memory-digesting" collapsible resizable>
           <div class="sm mute">Raw conversation is distilled into facts on this cadence; new messages also wake the pipeline sooner.</div>
           <div class="two"><Field label="Digest raw messages every (s)"><NumberInput bind:value={mem.process_every_s} min={30} max={86400} step={30} unit="s" /></Field><Field label="Batch size"><NumberInput bind:value={mem.raw_batch} min={5} max={200} step={5} /></Field></div>
           <Field label="…but only once this many raw messages are waiting" hint="0 = default (6). A smaller backlog is still digested when its oldest message is 20 minutes old. New messages and facts also wake the pipeline within ~20 s instead of waiting for the timer."><NumberInput bind:value={mem.process_min} min={0} max={200} step={1} /></Field>
@@ -456,7 +456,7 @@
           <Switch checked={!mem.auto_merge_off} label="merge near-duplicate banks automatically" onchange={(v) => (mem.auto_merge_off = !v)} />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button><Button onclick={() => call('memory.process').then((n) => n !== undefined && toast(`${n} facts distilled`))}>Digest now</Button><Button onclick={() => call('memory.reindex').then((n) => n !== undefined && toast(`${n} facts re-embedded`))}>Re-embed all facts</Button><Button onclick={() => call('memory.auto_merge').then((rs) => rs && toast(rs.length ? `${rs.length} bank group(s) merged` : 'No near-duplicate banks found'))}>Merge duplicate banks now</Button></div>
         </Panel>
-        <Panel title="Memory · thinking">
+        <Panel title="Memory · thinking" id="set.memory-thinking" collapsible resizable>
           <div class="sm mute">What memory works out from its facts, per bank, once enough new ones have arrived.</div>
           <div class="sm mute">Reflection draws conclusions from facts that agree with each other (each keeps its evidence and is revised when the evidence changes).</div>
           <div class="two"><Switch checked={!mem.reflect_off} label="reflect automatically" onchange={(v) => (mem.reflect_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.reflect_after} min={0} max={100} step={1} /></Field></div>
@@ -468,7 +468,7 @@
           <div class="two"><Switch checked={!mem.entities_off} label="extract entities automatically" onchange={(v) => (mem.entities_off = !v)} /><Field label="…after new facts in a bank" hint="0 = default (8)"><NumberInput bind:value={mem.entities_after} min={0} max={100} step={1} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Memory · upkeep">
+        <Panel title="Memory · upkeep" id="set.memory-upkeep" collapsible resizable>
           <div class="sm mute">Background housekeeping around memory: what to keep, check and summarise.</div>
           <Switch checked={!mem.bookmarks_off} label="bookmark pages the agents visited (the model keeps only reusable references)" onchange={(v) => (mem.bookmarks_off = !v)} />
           <Switch checked={!mem.verify_off} label="have an agent verify unverified web facts and hypotheses (at most every 3 days)" onchange={(v) => (mem.verify_off = !v)} />
@@ -476,17 +476,17 @@
           <div class="two"><Switch checked={!mem.digest_off} label="write a memory digest briefing" onchange={(v) => (mem.digest_off = !v)} /><Field label="…every (days)" hint="0 = default (7). Sums up what memory learned, worked out and doubts."><NumberInput bind:value={mem.digest_days} min={0} max={60} step={1} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Memory · hints">
+        <Panel title="Memory · hints" id="set.memory-hints" collapsible resizable>
           <Field label="Hints for memory" hint="Your own instructions, shown to the model whenever memory distils conversations, draws conclusions or extracts entities. PRISM already tells it your name (General) and that agent names are software, not people. Examples: “Treat the Berlin trip as a project, not a person.” · “Never store prices as facts about me.”"><Textarea bind:value={mem.hints} rows={4} mono={false} placeholder="e.g. I am Danil. Facts about my hardware belong in the user bank." /></Field>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('memory', mem, 'Saved')}>Save</Button></div>
         </Panel>
-        <Panel title="Retention">
+        <Panel title="Retention" id="set.retention" collapsible resizable>
           <div class="sm mute">How long finished tasks (with their agent sessions) and log entries are kept. 0 keeps them forever. Cleanup runs hourly.</div>
           <div class="two"><Field label="Finished tasks"><NumberInput bind:value={ret.tasks_days} min={0} max={3650} step={5} unit="days" /></Field><Field label="Logs"><NumberInput bind:value={ret.logs_days} min={0} max={3650} step={1} unit="days" /></Field></div>
           <Field label="Remove tasks that ended as" hint="none ticked = every finished task. “partial” runs are resumable, so they are kept unless ticked."><div class="row wrap gap-12">{#each retStatuses as st}<Checkbox checked={(ret.task_statuses || []).includes(st)} label={st} onchange={(v) => toggleRetStatus(st, v)} />{/each}</div></Field>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('retention', ret, 'Saved')}>Save</Button><Button loading={cleaning} onclick={cleanNow}>Clean now</Button></div>
         </Panel>
-        <Panel title="Tool selector (Sherpa)">
+        <Panel title="Tool selector (Sherpa)" id="set.tool-selector-sherpa-" collapsible resizable>
           <div class="sm mute">Agents start with a small toolset; Sherpa adds the few extra tools each task needs from the whole repository instead of loading every schema.</div>
           <Switch bind:checked={tools.enabled} label="select tools per task" />
           <Switch bind:checked={tools.use_llm} label="let Sherpa's model refine the candidates (slower, more precise)" />
@@ -496,7 +496,7 @@
       </div>
     {:else if tab === 'notify'}
       <div class="cols">
-        <Panel title="What notifies you">
+        <Panel title="What notifies you" id="set.what-notifies-you" collapsible resizable>
           <div class="sm mute">Notifications appear under the bell in the top bar and as a toast. “Also push” sends them to macOS and Telegram (when those are configured).</div>
           <table class="t nt"><thead><tr><th>Event</th><th>Show</th><th>Also push</th></tr></thead><tbody>
             {#each [['cron', 'A schedule fires', true], ['intent', 'A standing intent / watch triggers', true], ['ask', 'An agent needs you (question or approval)', false], ['error', 'A task fails for good, or a watch gives up', true], ['proposal', 'An agent proposes a change to another agent (needs your review)', true]] as [k, label, ext]}
@@ -613,6 +613,7 @@
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 8px; align-items: start; }
+  .cols.dense { grid-auto-flow: dense; }
   .col { display: flex; flex-direction: column; gap: 8px; }
   /* integrations: panels flow into as many columns as fit and balance their heights. overflow:hidden here
      (not on Panel itself, which relies on its corner-accent glow bleeding slightly elsewhere) because a

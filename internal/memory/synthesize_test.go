@@ -105,3 +105,14 @@ func TestSynthesisLevels(t *testing.T) {
 		t.Fatalf("principle should lose support, pruned %d", n)
 	}
 }
+
+// A manual reflect over all banks reports every bank, with the reason for each skip, instead of returning nothing.
+func TestReflectAllReportsSkips(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	store(t, s, StoreReq{Bank: "user", Text: "Only one fact here"})
+	rs, err := s.ReflectAll(ctx, true, 6)
+	if err != nil || len(rs) == 0 || rs[0].Skipped == "" {
+		t.Fatalf("%+v %v", rs, err)
+	}
+}

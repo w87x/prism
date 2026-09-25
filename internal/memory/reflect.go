@@ -376,3 +376,68 @@ func (s *Service) addEvidence(ctx context.Context, id int64, evidence []int64, l
 	_, _ = s.db.Exec(ctx, `UPDATE memory_facts SET confidence=GREATEST(confidence,$2), last_used=now() WHERE id=$1`, id, float32(conclusionConfidence(llmConf, proof)))
 	return true
 }
+
+// ReflectAll is the manual "reflect everywhere": every active bank is looked at (largest first) and each result, skips
+// with their reason included, is returned, so a click that changes nothing still says why. force reflects even
+// without new facts; at most maxRuns banks actually call the model.
+func (s *Service) ReflectAll(ctx context.Context, force bool, maxRuns int) ([]ReflectResult, error) {
+	ids, err := s.busyBanks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []ReflectResult
+	runs := 0
+	for _, id := range ids {
+		r, err := s.Reflect(ctx, id, force && runs < maxRuns, 0)
+		if err != nil {
+			return out, err
+		}
+		if r.Skipped == "" {
+			runs++
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// AnalyzeAll is ReflectAll for deep analysis (unforced: it only runs where enough is new, and says so elsewhere).
+func (s *Service) AnalyzeAll(ctx context.Context, maxRuns int) ([]AnalyzeResult, error) {
+	ids, err := s.busyBanks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []AnalyzeResult
+	runs := 0
+	for _, id := range ids {
+		if runs >= maxRuns {
+			break
+		}
+		r, err := s.Analyze(ctx, id, false, 0)
+		if err != nil {
+			return out, err
+		}
+		if r.Skipped == "" {
+			runs++
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// busyBanks lists active banks by how many usable facts they hold, most first.
+func (s *Service) busyBanks(ctx context.Context) ([]int64, error) {
+	rows, err := s.db.Query(ctx, `SELECT b.id FROM memory_banks b WHERE b.status='active' ORDER BY
+		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5) DESC, b.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
+}

@@ -1,15 +1,38 @@
 <script>
-  let { title = '', tone = '', collapsible = false, open = $bindable(true), flush = false, right, children, grow = false } = $props();
+  let { title = '', tone = '', collapsible = false, open = $bindable(true), flush = false, right, children, grow = false, id = '', resizable = false } = $props();
+
+  // With an id, the panel remembers (per browser) whether it is folded and, when resizable, how wide it is in a grid:
+  // 1 = one column, 2 = two, 3 = the full row. The parent must be a grid for the width to matter.
+  let span = $state(1);
+  const key = (k) => `prism.panel.${id}.${k}`;
+  if (id) {
+    try {
+      const o = localStorage.getItem(key('open'));
+      if (o !== null && collapsible) open = o === '1';
+      const w = parseInt(localStorage.getItem(key('span')) || '1', 10);
+      if (resizable && w >= 1 && w <= 3) span = w;
+    } catch {}
+  }
+  function toggle() {
+    if (!collapsible) return;
+    open = !open;
+    if (id) try { localStorage.setItem(key('open'), open ? '1' : '0'); } catch {}
+  }
+  function resize() {
+    span = (span % 3) + 1;
+    if (id) try { localStorage.setItem(key('span'), String(span)); } catch {}
+  }
 </script>
 
-<section class="p {tone}" class:grow class:flush>
+<section class="p {tone}" class:grow class:flush class:s2={span === 2} class:s3={span === 3}>
   {#if title || right}
     <header>
-      <button type="button" class="ttl" class:static={!collapsible} onclick={() => collapsible && (open = !open)}>
+      <button type="button" class="ttl" class:static={!collapsible} onclick={toggle}>
         {#if collapsible}<span class="car">{open ? '▾' : '▸'}</span>{/if}{title}
       </button>
       <span class="grow"></span>
       {@render right?.()}
+      {#if resizable}<button type="button" class="rs" title="Width: {span === 1 ? 'one column' : span === 2 ? 'two columns' : 'full row'} — click to change" onclick={resize}>{span === 1 ? '▭' : span === 2 ? '▬' : '▰'}</button>{/if}
     </header>
   {/if}
   {#if open}<div class="body" class:flush>{@render children?.()}</div>{/if}
@@ -22,6 +45,11 @@
   .p:hover { border-color: var(--line-3); }
   .p:hover::before { background: var(--ah); box-shadow: 0 0 8px var(--ah), 0 0 16px color-mix(in srgb, var(--ah) 55%, transparent); }
   .grow { flex: 1 1 auto; }
+  .s2 { grid-column: span 2; }
+  .s3 { grid-column: 1 / -1; }
+  @media (max-width: 820px) { .s2, .s3 { grid-column: auto; } }
+  .rs { background: none; border: 0; padding: 0 2px; color: var(--fg-mute); font-size: var(--fs-sm); line-height: 1; cursor: pointer; }
+  .rs:hover { color: var(--fg-hi); }
   .accent { --c: var(--accent-dim); --a: var(--accent); --ah: var(--accent-hi); }
   .attn { --c: var(--attn-dim); box-shadow: var(--glow-attn); --a: var(--attn); --ah: var(--attn-hi); }
   .err { --c: var(--err-dim); --a: var(--err); --ah: var(--err-hi); }

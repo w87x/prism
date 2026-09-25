@@ -150,7 +150,7 @@ func (s *Server) registerMemory() {
 			res, err = a.Memory.Reflect(ctx, r.BankID, true, 0)
 			rs = []memory.ReflectResult{res}
 		} else {
-			rs, err = a.Memory.ReflectDue(ctx, 0, 6)
+			rs, err = a.Memory.ReflectAll(ctx, true, 6)
 		}
 		for _, x := range rs {
 			a.Logf("info", "memory", "reflection (manual) — %s", x)
@@ -168,7 +168,7 @@ func (s *Server) registerMemory() {
 			res, err = a.Memory.Analyze(ctx, r.BankID, true, 0)
 			rs = []memory.AnalyzeResult{res}
 		} else {
-			rs, err = a.Memory.AnalyzeDue(ctx, 0, 3)
+			rs, err = a.Memory.AnalyzeAll(ctx, 3)
 		}
 		for _, x := range rs {
 			a.Logf("info", "memory", "analysis (manual) — %s", x)
