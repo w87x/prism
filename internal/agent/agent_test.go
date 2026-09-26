@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -2099,7 +2100,7 @@ func TestEvolutionAuditReportsBeforeAfter(t *testing.T) {
 
 type reportSink struct{ msg string }
 
-func (r reportSink) Notice(context.Context, Notice)                       {}
+func (r reportSink) Notice(context.Context, Notice)                         {}
 func (r reportSink) AskUser(context.Context, int64, string, tools.Question) {}
 func (r reportSink) Deliver(context.Context, Notice) (string, error) {
 	return "", errors.New(r.msg)
