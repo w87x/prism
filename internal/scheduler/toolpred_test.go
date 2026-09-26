@@ -33,7 +33,9 @@ func TestToolPredicate(t *testing.T) {
 func TestWatchGuardCapsAndDedupes(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()
-	mk := func(id string) Predicate { return Predicate{Kind: "tool", Tool: "mcp__ds__list", Args: `{"id":"` + id + `"}`, Expect: "done"} }
+	mk := func(id string) Predicate {
+		return Predicate{Kind: "tool", Tool: "mcp__ds__list", Args: `{"id":"` + id + `"}`, Expect: "done"}
+	}
 	for i, id := range []string{"a", "b", "c"} {
 		p := mk(id)
 		if ex, err := s.watchGuard(ctx, "Steward", p); err != nil || ex != 0 {

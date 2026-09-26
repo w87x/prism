@@ -434,6 +434,7 @@
         <Panel title="Model concurrency" id="set.model-concurrency" collapsible resizable>
           <div class="sm mute">How many model calls run at the same time across all agents. Local models on one GPU usually do best with 1–2: extra parallel calls only queue up inside the server. Applies immediately.</div>
           <div class="two"><Field label="Parallel model calls"><NumberInput bind:value={rt.llm_concurrency} min={1} max={16} step={1} /></Field></div>
+          <Switch checked={!rt.keep_awake_off} label="keep the Mac awake while agents are working (macOS)" onchange={(v) => (rt.keep_awake_off = !v)} />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('runtime', rt, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Guardrails · loops" hint="Limits that stop an agent that repeats itself or runs away." id="set.guardrails-loops" collapsible resizable>

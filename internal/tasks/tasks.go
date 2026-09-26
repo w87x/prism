@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"prism/internal/textutil"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,7 @@ func (s *Store) Create(ctx context.Context, t Task, running bool) (Task, error) 
 	if running {
 		status = Running
 	}
+	t.Title, t.Input = textutil.Clean(t.Title), textutil.Clean(t.Input)
 	if t.Title == "" {
 		t.Title = firstLine(t.Input, 80)
 	}
@@ -227,6 +229,7 @@ func (s *Store) AddTokens(ctx context.Context, id int64, in, out int) {
 
 // Finish records the outcome and wakes waiters.
 func (s *Store) Finish(ctx context.Context, id int64, status, result, errMsg, question string) error {
+	result, errMsg, question = textutil.Clean(result), textutil.Clean(errMsg), textutil.Clean(question)
 	var fin any
 	if status == Done || status == Failed || status == Cancelled {
 		fin = time.Now()

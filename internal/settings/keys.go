@@ -138,6 +138,9 @@ type Onboarding struct {
 // Runtime tunes how hard PRISM drives the model server.
 type Runtime struct {
 	LLMConcurrency int `json:"llm_concurrency"` // simultaneous model calls across all agents (local models like 1–2)
+	// KeepAwakeOff lets the Mac go to sleep while agents are working. By default (macOS) PRISM holds a `caffeinate`
+	// assertion while any run is active: a sleeping laptop froze one task for almost two hours mid-run.
+	KeepAwakeOff bool `json:"keep_awake_off"`
 }
 
 func DefaultRuntime() Runtime { return Runtime{LLMConcurrency: 4} }

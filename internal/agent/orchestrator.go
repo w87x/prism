@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"prism/internal/textutil"
 	"strings"
 	"sync"
 	"time"
@@ -217,7 +218,7 @@ func (e *Engine) logChatFull(ctx context.Context, role, agent, text, channel, to
 		m.TaskID = tid
 	}
 	_ = e.DB.QueryRow(ctx, `INSERT INTO chat_messages(role,agent,text,channel,topic,task_id,images,steered) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,created_at`,
-		role, agent, text, channel, topic, tid, m.Images, steered).Scan(&m.ID, &m.CreatedAt)
+		role, agent, textutil.Clean(text), channel, topic, tid, m.Images, steered).Scan(&m.ID, &m.CreatedAt)
 	e.Emit("chat.message", m)
 	return m
 }

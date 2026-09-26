@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"prism/internal/textutil"
 	"sort"
 	"strings"
 	"sync"
@@ -1083,6 +1084,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	default:
 		emit("end", true)
 	}
+	out = textutil.Clean(out)
 	if n := len([]rune(out)); n > maxToolResultChars {
 		r := []rune(out)
 		out = string(r[:maxToolResultChars]) + fmt.Sprintf("\n…[truncated %d chars — narrow the request or page through it]", n-maxToolResultChars)

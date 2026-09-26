@@ -2157,3 +2157,23 @@ func TestDelegateWithInventedTaskIDExplainsItself(t *testing.T) {
 		t.Fatalf("unhelpful message: %q", out)
 	}
 }
+
+// A NUL byte in tool output (a binary file, a web page) used to fail the whole task at the database.
+func TestNULBytesDoNotBreakStoringMessages(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sess, err := h.e.Sessions.Create(ctx, "Atlas", "task", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.Sessions.Append(ctx, sess.ID, Msg{Message: llm.Message{Role: "tool", Name: "shell", Content: "abc\x00def\xff"}}); err != nil {
+		t.Fatalf("content with NUL refused: %v", err)
+	}
+	if _, err := h.e.Sessions.Append(ctx, sess.ID, Msg{Message: llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "1", Name: "shell", Arguments: `{"cmd":"printf 'a\x00b'"}`}}}}); err != nil {
+		t.Fatalf("tool call arguments with NUL refused: %v", err)
+	}
+	ms, _ := h.e.Sessions.Messages(ctx, sess.ID)
+	if len(ms) != 2 || strings.Contains(ms[0].Content, "\x00") {
+		t.Fatalf("%+v", ms)
+	}
+}

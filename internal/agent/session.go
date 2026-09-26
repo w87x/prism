@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"prism/internal/textutil"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -100,8 +101,23 @@ func (s *SessionStore) Messages(ctx context.Context, sessionID int64) ([]Msg, er
 	return out, rows.Err()
 }
 
+// cleanMsg strips what Postgres refuses (NUL bytes, invalid UTF-8) from everything a message stores.
+func cleanMsg(m Msg) Msg {
+	m.Content = textutil.Clean(m.Content)
+	if len(m.ToolCalls) > 0 {
+		tcs := make([]llm.ToolCall, len(m.ToolCalls))
+		copy(tcs, m.ToolCalls)
+		for i := range tcs {
+			tcs[i].Arguments = textutil.Clean(tcs[i].Arguments)
+		}
+		m.ToolCalls = tcs
+	}
+	return m
+}
+
 // Append persists a message and returns its id.
 func (s *SessionStore) Append(ctx context.Context, sessionID int64, m Msg) (int64, error) {
+	m = cleanMsg(m)
 	var tc []byte
 	if len(m.ToolCalls) > 0 {
 		tc, _ = json.Marshal(m.ToolCalls)
@@ -127,6 +143,7 @@ func (s *SessionStore) Replace(ctx context.Context, sessionID int64, ms []Msg) (
 	}
 	out := make([]Msg, len(ms))
 	for i, m := range ms {
+		m = cleanMsg(m)
 		var tc []byte
 		if len(m.ToolCalls) > 0 {
 			tc, _ = json.Marshal(m.ToolCalls)

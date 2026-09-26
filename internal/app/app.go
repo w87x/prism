@@ -226,6 +226,7 @@ func (a *App) build(ctx context.Context) error {
 	go a.memoryLoop(ctx)
 	go a.cleanupLoop(ctx)
 	go a.statusLoop(ctx)
+	go a.keepAwakeLoop(ctx)
 	a.startExtensions(ctx)
 	return nil
 }
