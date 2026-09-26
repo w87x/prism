@@ -142,7 +142,7 @@
 {/if}
 
 <style>
-  .rd { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top); }
+  .rd { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; background: var(--bg); padding: env(safe-area-inset-top) max(0px, env(safe-area-inset-right)) 0 max(0px, env(safe-area-inset-left)); }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); flex: none; }
   .x { background: none; border: 0; color: var(--fg-dim); font-size: 20px; min-width: 44px; min-height: 44px; }
   .pos { color: var(--fg-dim); font-variant-numeric: tabular-nums; font-size: 15px; }

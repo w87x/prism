@@ -44,7 +44,7 @@
 <style>
   .dotbtn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; min-height: 0; background: none; border: 0; }
   .veil { position: fixed; inset: 0; z-index: 130; background: rgba(0, 0, 0, 0.5); border: 0; padding: 0; }
-  .sheet { position: fixed; z-index: 131; left: 0; right: 0; bottom: 0; max-height: 75dvh; overflow-y: auto; background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); padding: 0 0 calc(8px + env(safe-area-inset-bottom)); }
+  .sheet { position: fixed; z-index: 131; left: 0; right: 0; bottom: 0; max-height: 75dvh; overflow-y: auto; background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); padding: 0 max(0px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(0px, env(safe-area-inset-left)); }
   .grip { width: 40px; height: 4px; background: var(--line-3); margin: 8px auto; border-radius: 2px; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 44px; padding: 8px 16px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--fg); text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; }
   .k { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-dim); }

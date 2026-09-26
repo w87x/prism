@@ -218,7 +218,12 @@
   .shell.mobile .wid { display: none; }
   .shell.mobile.sheet .wid { display: flex; position: fixed; z-index: 100; left: 0; right: 0; bottom: 0; top: calc(64px + env(safe-area-inset-top)); background: var(--bg); border-left: 0; border-top: 1px solid var(--line-3); box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); }
   .sheetx { flex: none; align-self: flex-end; background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 3px 12px; }
-  .shell.mobile .main { padding: 4px 4px 2px; }
+  /* iPhone: keep everything off the screen edge — the rounded corners, the edge-swipe back gesture and (in landscape) the notch swallow taps there */
+  .shell.mobile { --gl: max(12px, env(safe-area-inset-left)); --gr: max(12px, env(safe-area-inset-right)); }
+  .shell.mobile .main { padding: 6px var(--gr) 4px var(--gl); }
+  .shell.mobile .top { padding-left: var(--gl); padding-right: var(--gr); }
+  .shell.mobile .tabbar { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: max(env(safe-area-inset-bottom), 4px); }
+  .shell.mobile .more { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   /* iOS zooms into any field under 16px when it is focused */
   .shell.mobile :global(input), .shell.mobile :global(textarea), .shell.mobile :global(select) { font-size: 16px; }
   /* tables become stacked rows on a phone (headers hidden; each row wraps its cells) */

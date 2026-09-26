@@ -96,7 +96,7 @@
   .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-top: 6px; color: var(--fg-mute); font-size: 11px; }
   .empty { padding: 40px; text-align: center; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.12em; }
   .veil { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.55); border: 0; padding: 0; }
-  .sheet { position: fixed; z-index: 91; left: 0; right: 0; bottom: 0; max-height: 82dvh; display: flex; flex-direction: column; background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); }
+  .sheet { position: fixed; z-index: 91; left: 0; right: 0; bottom: 0; max-height: 82dvh; display: flex; flex-direction: column; background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .grip { width: 40px; height: 4px; background: var(--line-3); margin: 8px auto 2px; border-radius: 2px; }
   .head { display: flex; align-items: center; justify-content: space-between; padding: 4px 14px; }
   .x { background: none; border: 0; color: var(--fg-dim); min-width: 40px; min-height: 40px; font-size: 16px; }

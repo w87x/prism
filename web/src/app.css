@@ -58,6 +58,8 @@
 
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
+/* touch screens: no double-tap zoom delay, no rubber-band scroll of the whole page behind the app */
+html { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 @font-face {
   font-family: 'FA';
   font-style: normal;
