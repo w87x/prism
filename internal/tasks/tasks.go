@@ -6,6 +6,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -136,7 +137,11 @@ func firstLine(s string, n int) string {
 }
 
 func (s *Store) Get(ctx context.Context, id int64) (Task, error) {
-	return scan(s.db.QueryRow(ctx, `SELECT `+cols+` FROM tasks WHERE id=$1`, id))
+	t, err := scan(s.db.QueryRow(ctx, `SELECT `+cols+` FROM tasks WHERE id=$1`, id))
+	if errors.Is(err, pgx.ErrNoRows) { // a bare "no rows in result set" tells an agent nothing about what to fix
+		return t, fmt.Errorf("task #%d does not exist: %w", id, err)
+	}
+	return t, err
 }
 
 type Filter struct {

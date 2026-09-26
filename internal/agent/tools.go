@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("agent", "agent name (see the specialists list or agent_find)"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
-			tools.Int("task_id", "continue an earlier task that asked for input"))),
+			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Tasks []struct {
@@ -168,6 +169,9 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	if taskID != 0 { // multi-turn continuation
 		t, err := e.Tasks.Get(ctx, taskID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return t, false, fmt.Errorf("task_id %d does not exist. task_id is only for continuing a task of yours that came back asking for input: leave it out to start new work", taskID)
+			}
 			return t, false, err
 		}
 		if t.ParentID == nil || *t.ParentID != env.TaskID {

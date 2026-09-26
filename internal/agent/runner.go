@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -698,6 +699,8 @@ func sanitizeToolPairs(msgs *[]llm.Message) {
 
 // ── tools ───────────────────────────────────────────────────────────────────
 
+var warnedTools sync.Map // "agent\x00tool" already reported by initialTools
+
 var minimalBase = map[string]bool{"memory_find": true, "memory_banks": true, "memory_store": true, "clock": true, "ask_user": true, "artifact_read": true}
 
 func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map[string]bool {
@@ -728,6 +731,13 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 	}
 	for n := range active {
 		t, ok := e.Tools.Get(n)
+		if !ok {
+			// a profile naming a tool that is not registered (an MCP server that is off, or a renamed tool) would
+			// otherwise just lose it silently and the agent would improvise; say so, once per agent and tool
+			if _, seen := warnedTools.LoadOrStore(p.Name+"\x00"+n, true); !seen {
+				log.Printf("[warn] agent %s lists the tool %q but it is not registered (is its MCP server connected, and is the name exact?)", p.Name, n)
+			}
+		}
 		if !ok || (spec.Restricted && t.Risk == tools.RiskExec) || !t.AllowedFor(p.Name) {
 			delete(active, n)
 		}

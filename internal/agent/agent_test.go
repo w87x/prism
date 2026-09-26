@@ -2143,3 +2143,17 @@ func TestBackgroundNoticeFailureAlerts(t *testing.T) {
 		t.Fatalf("alerts = %v", alerts)
 	}
 }
+
+// A model that invents a task_id gets a message it can act on, not a bare "no rows in result set".
+func TestDelegateWithInventedTaskIDExplainsItself(t *testing.T) {
+	h := newHarness(t)
+	tool, _ := h.e.Tools.Get("delegate")
+	out, err := tool.Run(context.Background(), &tools.Env{Agent: "Atlas", Depth: 0},
+		json.RawMessage(`{"tasks":[{"agent":"Sherpa","instruction":"find tools","task_id":978514}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "no rows in result set") || !strings.Contains(out, "does not exist") || !strings.Contains(out, "leave it out") {
+		t.Fatalf("unhelpful message: %q", out)
+	}
+}
