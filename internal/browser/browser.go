@@ -71,7 +71,7 @@ func (m *Manager) chromeBin(cfg settings.Browser) string {
 			return p
 		}
 	}
-	for _, n := range []string{"google-chrome", "chromium", "chromium-browser", "chrome"} {
+	for _, n := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "brave-browser", "microsoft-edge", "microsoft-edge-stable"} {
 		if p, err := exec.LookPath(n); err == nil {
 			return p
 		}
