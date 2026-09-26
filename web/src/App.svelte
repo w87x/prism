@@ -216,10 +216,16 @@
   .shell.mobile .main { padding: 4px 4px 2px; }
   /* iOS zooms into any field under 16px when it is focused */
   .shell.mobile :global(input), .shell.mobile :global(textarea), .shell.mobile :global(select) { font-size: 16px; }
-  /* wide tables scroll sideways inside their panel instead of squeezing every column */
-  .shell.mobile :global(table.t) { min-width: 620px; }
+  /* tables become stacked rows on a phone (headers hidden; each row wraps its cells) */
+  .shell.mobile :global(table.t), .shell.mobile :global(table.t tbody) { display: block; width: 100%; }
+  .shell.mobile :global(table.t thead) { display: none; }
+  .shell.mobile :global(table.t tr) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .shell.mobile :global(table.t td) { display: block; padding: 0; border: 0; width: auto !important; max-width: 100%; }
+  .shell.mobile :global(table.t td[colspan]) { flex: 1 1 100%; }
+  .shell.mobile :global(table.t td.end) { margin-left: auto; }
   .shell.mobile :global(.scroll) { overflow-x: auto; }
   .shell.mobile :global(.btn), .shell.mobile :global(button.tab) { min-height: 36px; }
+  .shell.mobile :global(.bar) { flex-wrap: wrap; row-gap: 6px; }
   .shell.mobile .nav { display: none; }
   .shell.mobile .nav-old { background: var(--bg); position: fixed; z-index: 120; top: 0; bottom: 0; left: 0; width: 236px; padding-top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: 8px 0 28px rgba(0, 0, 0, 0.6); overflow: auto; }
   .tabbar { grid-area: tabs; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel-bg); border-top: 1px solid var(--line-2); padding-bottom: env(safe-area-inset-bottom); }

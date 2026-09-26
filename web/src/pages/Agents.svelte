@@ -13,7 +13,7 @@
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
 
-  let view = $state('graph');
+  let view = $state(typeof matchMedia === 'function' && matchMedia('(max-width: 820px)').matches ? 'list' : 'graph'); // the force graph is unreadable on a phone
   let filter = $state('');
   let w = $state(700), h = $state(480);
   let canvas = $state();
