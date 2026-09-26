@@ -226,7 +226,6 @@
   .shell.mobile :global(table.t td) { display: block; padding: 0; border: 0; width: auto !important; max-width: 100%; }
   .shell.mobile :global(table.t td[colspan]) { flex: 1 1 100%; }
   .shell.mobile :global(table.t td.end) { margin-left: auto; }
-  .shell.mobile :global(.scroll) { overflow-x: auto; }
   .shell.mobile :global(.btn), .shell.mobile :global(button.tab) { min-height: 36px; }
   .shell.mobile :global(.bar) { flex-wrap: wrap; row-gap: 6px; }
   .shell.mobile .nav { display: none; }
