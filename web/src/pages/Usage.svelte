@@ -156,14 +156,14 @@
   .filters { display: flex; align-items: center; gap: 16px; flex: none; padding: 4px 8px; border: 1px solid var(--line); background: var(--bg-1); }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   .hint { border: 1px solid var(--attn-dim); background: var(--attn-bg); color: var(--attn-hi); padding: 6px 10px; line-height: 1.45; font-size: var(--fs-sm); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px; }
   .tile { border: 1px solid var(--line); background: var(--bg-1); padding: 7px 10px; display: flex; flex-direction: column; gap: 1px; }
   .tile .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-mute); }
   .tile b { font-size: 20px; font-weight: 500; color: var(--fg-hi); }
   .tile b small { font-size: 11px; color: var(--fg-dim); font-weight: 400; }
   .tile .s { font-size: var(--fs-sm); color: var(--fg-dim); }
-  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 8px; align-items: start; }
-  .tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 8px; align-items: start; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 8px; align-items: start; }
+  .tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 8px; align-items: start; }
   .r { text-align: right; }
   .err { color: var(--err); }
   .delegsum { padding: 8px 10px; font-size: var(--fs-sm); color: var(--fg-dim); line-height: 1.5; }

@@ -29,6 +29,7 @@ export const S = $state({
   selectedAgent: null, // agent id shown in the graph inspector
   selectedTool: null, // tool name shown in the tools sidebar
   selectedTask: null, // task id to open in the Tasks page's detail modal (set before go('tasks'))
+  narrow: false, // phone layout in use (set by App)
   autonomyTab: null, // tab the Autonomy page should open on (set before go('autonomy'))
   openBriefing: null, // briefing id to open for reading on arrival
   learnFile: null, // inbox file the Memory page should open in its "learn from document" dialog

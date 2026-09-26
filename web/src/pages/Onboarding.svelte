@@ -346,9 +346,9 @@
   .st.on { color: var(--fg-hi); border-bottom-color: var(--fg); text-shadow: var(--glow-sm); }
   .st.done { color: var(--fg-dim); }
   .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
   .ok-box { border: 1px solid var(--line-2); background: var(--bg); padding: 6px 10px; display: flex; flex-direction: column; gap: 3px; }
-  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; }
   .tst { margin-top: 4px; }
   .list { max-height: 220px; border: 1px solid var(--line); }
   .drafts { display: flex; flex-direction: column; gap: 4px; max-height: 330px; }

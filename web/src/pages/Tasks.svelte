@@ -84,6 +84,37 @@
 </script>
 
 <div class="pg">
+{#if S.narrow}
+  <div class="mchips">
+    {#each [['', 'All'], ['running', 'Running'], ['waiting_input', 'Waiting'], ['partial', 'Stopped'], ['done', 'Done'], ['failed', 'Failed']] as [v, l]}
+      <button type="button" class="mchip" class:on={status === v} onclick={() => (status = v)}>{l}</button>
+    {/each}
+  </div>
+  <div class="mlist scroll" use:nearEnd={loadMore}>
+    {#each roots as t (t.id)}
+      {@const n = kids(t).length}
+      <div class="mcard" role="button" tabindex="0" onclick={() => open(t)} onkeydown={(e) => e.key === 'Enter' && open(t)}>
+        <div class="mtop">
+          <Led state={led(t.status)} pulse={t.status === 'running' || t.status === 'waiting_input'} size={9} />
+          <span class="hi"><Glyph name={t.to_agent} /> {t.to_agent}</span>
+          <span class="dim sm">{t.from_kind === 'agent' ? t.from_name : t.from_kind}</span>
+          {#if n}<span class="mute sm">+{n}</span>{/if}
+          <span class="grow"></span><span class="mute sm">#{t.id} · {ago(t.created_at)}</span>
+        </div>
+        <div class="mtitle">{t.title}</div>
+        {#if t.question}<div class="attn sm mline">? {t.question}</div>
+        {:else if t.status === 'partial'}<div class="attn sm mline">⚠ {t.error}</div>
+        {:else if t.status === 'failed'}<div class="err sm mline">{t.error}</div>{/if}
+        <div class="mbot">
+          <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'} style="font-size:var(--fs-sm)">{t.status.replace('_', ' ')}</span>
+          <span class="mute sm">{fmtTokens(t.tokens_in)}↑ {fmtTokens(t.tokens_out)}↓</span><span class="grow"></span>
+          {#if t.status === 'queued' || t.status === 'running' || t.status === 'waiting_input'}<Button size="sm" variant="danger" onclick={(e) => cancel(t, e)}>Stop</Button>
+          {:else if rerunnable(t)}<Button size="sm" variant="ghost" onclick={(e) => rerun(t, e)}>Rerun</Button>{/if}
+        </div>
+      </div>
+    {:else}<Empty>the queue is empty</Empty>{/each}
+  </div>
+{:else}
   <div class="bar">
     <div class="w"><Select bind:value={status} options={statusOpts} size="sm" /></div>
     <div class="w"><Select bind:value={agent} options={agentOpts} size="sm" searchable /></div>
@@ -123,6 +154,7 @@
       </table>
     </div>
   </Panel>
+{/if}
 </div>
 
 <Modal bind:open={detailOpen} title="Task #{detail?.task?.id} · {detail?.task?.to_agent}" width={860}>
@@ -163,6 +195,16 @@
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={() => { detailOpen = false; load(); }} />
 
 <style>
+  .mchips { display: flex; gap: 6px; overflow-x: auto; flex: none; scrollbar-width: none; }
+  .mchips::-webkit-scrollbar { display: none; }
+  .mchip { flex: none; min-height: 36px; padding: 0 14px; background: var(--bg-1); border: 1px solid var(--line-2); color: var(--fg-dim); font-size: var(--fs-sm); white-space: nowrap; }
+  .mchip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.14), transparent); }
+  .mlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+  .mcard { flex: none; padding: 10px 12px; background: var(--panel-bg); border: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+  .mcard:active { background: var(--bg-2); }
+  .mtop, .mbot { display: flex; align-items: center; gap: 8px; }
+  .mtitle { color: var(--fg-hi); line-height: 1.4; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .mline { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   .w { width: 190px; }

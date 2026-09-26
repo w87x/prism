@@ -26,6 +26,7 @@
   let cmds = $state([]);
   let sel = $state(0);
   let menuOff = $state(false);
+  let moreBtns = $state(false);
   let listOpen = $state(false); // narrow screens: the chat list is a drawer
   const busy = $derived(!!S.chatBusy[S.chatTopic]);
   const topic = $derived(S.chatTopic);
@@ -241,7 +242,7 @@
     {#if unread > 0}<button class="pill" onclick={toBottom}>↓ {unread} new</button>{/if}
   </div>
 
-  <ThinkingPanel />
+  {#if !S.narrow}<ThinkingPanel />{/if}
 
   <div class="input">
     {#if showMenu}
@@ -281,15 +282,16 @@
       </div>
       <div class="grow">
         <Textarea bind:this={ta} bind:value={text} autosize rows={1} maxRows={7} mono={false} {onkey} {onpaste}
-          placeholder={busy ? 'Atlas is working — messages you send now steer the current turn…' : 'Message Atlas   (Enter to send · Shift+Enter new line · / for commands)'}
+          placeholder={busy ? (S.narrow ? 'Atlas is working — send to steer…' : 'Atlas is working — messages you send now steer the current turn…') : (S.narrow ? 'Message Atlas' : 'Message Atlas   (Enter to send · Shift+Enter new line · / for commands)')}
           onenter={send} />
       </div>
       <div class="send">
         {#if busy}<Button variant="danger" onclick={() => call('chat.stop', { topic })}><Icon name="stop" size={12} /> Stop</Button>{/if}
-        <Button variant="primary" disabled={(!text.trim() && !atts.length && !docs.length && !paths.length) || sending} onclick={send}><Icon name="send" size={12} /> Send</Button>
+        <Button variant="primary" disabled={(!text.trim() && !atts.length && !docs.length && !paths.length) || sending} onclick={send}><Icon name="send" size={12} />{#if !S.narrow} Send{/if}</Button>
+        {#if S.narrow}<Button variant="ghost" class="iconbtn" title="More" onclick={() => (moreBtns = !moreBtns)}>⋯</Button>{/if}
       </div>
     </div>
-    <div class="btns">
+    <div class="btns" class:hide={S.narrow && !moreBtns}>
       <div class="mode" title="Show what other agents are doing inside the conversation">
         <span>activity</span><Segmented size="sm" value={S.activityMode} options={modes} onchange={setActivityMode} />
       </div>
@@ -394,6 +396,19 @@
   .vsep { width: 1px; height: 14px; background: var(--line-2); margin: 0 2px; }
   .input { position: relative; display: flex; flex-direction: column; gap: 5px; flex: none; }
   .btns { display: flex; gap: 6px; align-items: center; }
+  @media (max-width: 820px) {
+    .btns { flex-wrap: wrap; }
+    .btns.hide { display: none; }
+    .mode { flex-basis: 100%; }
+    .ts { display: none; }
+    .user { margin-left: 0; }
+    .log { padding: 6px 8px 8px; }
+    .row { gap: 4px; }
+    .row :global(.iconbtn) { width: 40px; height: 40px; }
+    .send :global(.btn) { height: 40px; min-width: 44px; }
+    .m { gap: 6px; }
+    .who { font-size: 12px; }
+  }
   .menu { position: absolute; left: 0; bottom: 100%; margin-bottom: 4px; min-width: min(380px, 92vw); max-width: 100%; background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7); z-index: 20; }
   .cm { display: flex; gap: 10px; align-items: baseline; padding: 3px 10px; cursor: pointer; }
   .cm.on { background: var(--bg-4); }

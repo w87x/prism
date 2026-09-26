@@ -27,6 +27,8 @@
   import Autonomy from './pages/Autonomy.svelte';
   import Library from './pages/Library.svelte';
   import Trackers from './pages/Trackers.svelte';
+  import MToday from './mobile/MToday.svelte';
+  import MMemory from './mobile/MMemory.svelte';
   import Hint from './lib/ui/Hint.svelte';
   import { PAGE_HELP } from './lib/help.js';
   import Knowledge from './pages/Knowledge.svelte';
@@ -42,14 +44,21 @@
 
   // phone-sized: the sidebar becomes a slide-in drawer, the right widget rail is dropped, pages get the full width
   const mq = typeof matchMedia === 'function' ? matchMedia('(max-width: 820px)') : null;
-  let narrow = $state(!!mq?.matches);
-  let drawer = $state(false);
-  $effect(() => { if (!mq) return; const f = () => { narrow = mq.matches; if (!narrow) drawer = false; }; mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); });
+  let small = $state(!!mq?.matches); // the viewport is phone-sized
+  let desktopView = $state((() => { try { return localStorage.getItem('prism.desktopView') === '1'; } catch { return false; } })());
+  const narrow = $derived(small && !desktopView);
+  let drawer = $state(false); // the "More" sheet on a phone
+  $effect(() => { if (!mq) return; const f = () => { small = mq.matches; if (!small) drawer = false; }; mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); });
   $effect(() => { S.page; drawer = false; });
+  $effect(() => { S.narrow = narrow; });
+  function setDesktopView(on) { desktopView = on; drawer = false; try { localStorage.setItem('prism.desktopView', on ? '1' : '0'); } catch {} }
+  // bottom bar on a phone: the four things used all day; everything else lives under "More"
+  const tabs = ['today', 'chat', 'tasks', 'memory'];
+  const moreOn = $derived(!tabs.includes(S.page));
   // on a phone the right rail (agent / tool inspector) is a bottom sheet, shown only while something is selected
   const sheet = $derived(narrow && ((S.page === 'agents' && S.selectedAgent) || (S.page === 'tools' && S.selectedTool)));
   const closeSheet = () => { S.selectedAgent = null; S.selectedTool = null; };
-  const menu = () => (narrow ? (drawer = !drawer) : toggleNav());
+  const menu = () => toggleNav();
 
   const pages = [
     { id: 'today', label: 'Today', icon: 'today' },
@@ -75,7 +84,7 @@
 {#if !wallOnly}
 <div class="shell" class:mobile={narrow} class:sheet class:drawer class:nav-c={!narrow && !S.navOpen} class:w-c={!narrow && (!S.widgetOpen || S.page === 'trackers')}>
   <header class="top">
-    <button class="ico" onclick={menu} title="Toggle menu"><Icon name="menu" /></button>
+    {#if !narrow}<button class="ico" onclick={menu} title="Toggle menu"><Icon name="menu" /></button>{/if}
     <div class="brand"><Logo size={24} /><span class="wm">PRISM</span></div>
     <span class="sep"></span>
     <span class="pg">{cur.label}</span>
@@ -85,10 +94,10 @@
     <EditorBadge />
     <button class="ico" onclick={() => (S.searchOpen = true)} title="Search everything (⌘K)"><Icon name="search" /></button>
     <NotifyBell />
+    {#if small && desktopView}<button class="ico" onclick={() => setDesktopView(false)} title="Back to the phone layout"><Icon name="panel" /></button>{/if}
     {#if !narrow}<button class="ico" onclick={toggleWidget} title="Toggle widgets"><Icon name="panel" /></button>{/if}
   </header>
 
-  {#if narrow && drawer}<button type="button" class="backdrop" aria-label="close menu" onclick={() => (drawer = false)}></button>{/if}
   <nav class="nav">
     {#each pages as p}
       <button class="ni" class:on={S.page === p.id} onclick={() => go(p.id)} title={p.label}>
@@ -107,11 +116,11 @@
     <div class="pagebox">
       {#if setup}
         <PageInfo />
-      {:else if S.page === 'today'}<Today />
+      {:else if S.page === 'today'}{#if narrow}<MToday />{:else}<Today />{/if}
       {:else if S.page === 'chat'}<Chat />
       {:else if S.page === 'agents'}<Agents />
       {:else if S.page === 'tasks'}<Tasks />
-      {:else if S.page === 'memory'}<Memory />
+      {:else if S.page === 'memory'}{#if narrow}<MMemory />{:else}<Memory />{/if}
       {:else if S.page === 'kb'}<Knowledge />
       {:else if S.page === 'tools'}<Tools />
       {:else if S.page === 'autonomy'}<Autonomy />
@@ -132,6 +141,33 @@
     {/if}
   </aside>
 
+  {#if narrow}
+    <nav class="tabbar" aria-label="main">
+      {#each tabs as id}
+        {@const p = pages.find((x) => x.id === id)}
+        <button type="button" class="tb" class:on={S.page === id} onclick={() => go(id)}>
+          <Icon name={p.icon} size={20} /><span>{p.label}</span>
+          {#if id === 'chat' && S.asks.length}<i class="dot"></i>{/if}
+        </button>
+      {/each}
+      <button type="button" class="tb" class:on={moreOn || drawer} onclick={() => (drawer = !drawer)}>
+        <Icon name="menu" size={20} /><span>More</span>
+        {#if S.proposals > 0}<i class="dot"></i>{/if}
+      </button>
+    </nav>
+    {#if drawer}
+      <button type="button" class="backdrop" aria-label="close" onclick={() => (drawer = false)}></button>
+      <div class="more" role="menu">
+        {#each pages.filter((p) => !tabs.includes(p.id)) as p}
+          <button type="button" class="mi" class:on={S.page === p.id} onclick={() => go(p.id)}>
+            <Icon name={p.icon} size={20} /><span>{p.label}</span>
+            {#if p.id === 'agents' && S.proposals > 0}<i class="dot"></i>{/if}
+          </button>
+        {/each}
+        <button type="button" class="mi wide" onclick={() => setDesktopView(true)}><Icon name="panel" size={20} /><span>Desktop view</span></button>
+      </div>
+    {/if}
+  {/if}
   <StatusBar />
 </div>
 {/if}
@@ -171,14 +207,28 @@
   .w-c .wid { display: none; }
   /* ── phone layout ── */
   .backdrop { position: fixed; inset: 0; z-index: 110; background: rgba(0, 0, 0, 0.6); border: 0; padding: 0; }
-  .shell.mobile { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(42px + env(safe-area-inset-top)) minmax(0, 1fr) auto; grid-template-areas: 'top' 'main' 'sb'; height: 100dvh; }
+  .shell.mobile { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(42px + env(safe-area-inset-top)) minmax(0, 1fr) auto auto; grid-template-areas: 'top' 'main' 'tabs' 'sb'; height: 100dvh; }
   .shell.mobile .top { padding-top: env(safe-area-inset-top); gap: 8px; }
   .shell.mobile .brand .wm, .shell.mobile .sep, .shell.mobile .act { display: none; }
   .shell.mobile .wid { display: none; }
   .shell.mobile.sheet .wid { display: flex; position: fixed; z-index: 100; left: 0; right: 0; bottom: 0; top: calc(64px + env(safe-area-inset-top)); background: var(--bg); border-left: 0; border-top: 1px solid var(--line-3); box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); }
   .sheetx { flex: none; align-self: flex-end; background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 3px 12px; }
   .shell.mobile .main { padding: 4px 4px 2px; }
-  .shell.mobile .nav { background: var(--bg); position: fixed; z-index: 120; top: 0; bottom: 0; left: 0; width: 236px; padding-top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: 8px 0 28px rgba(0, 0, 0, 0.6); overflow: auto; }
-  .shell.mobile.drawer .nav { transform: none; }
+  /* iOS zooms into any field under 16px when it is focused */
+  .shell.mobile :global(input), .shell.mobile :global(textarea), .shell.mobile :global(select) { font-size: 16px; }
+  /* wide tables scroll sideways inside their panel instead of squeezing every column */
+  .shell.mobile :global(table.t) { min-width: 620px; }
+  .shell.mobile :global(.scroll) { overflow-x: auto; }
+  .shell.mobile :global(.btn), .shell.mobile :global(button.tab) { min-height: 36px; }
+  .shell.mobile .nav { display: none; }
+  .shell.mobile .nav-old { background: var(--bg); position: fixed; z-index: 120; top: 0; bottom: 0; left: 0; width: 236px; padding-top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: 8px 0 28px rgba(0, 0, 0, 0.6); overflow: auto; }
+  .tabbar { grid-area: tabs; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel-bg); border-top: 1px solid var(--line-2); padding-bottom: env(safe-area-inset-bottom); }
+  .tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px; padding: 6px 2px; background: none; border: 0; border-top: 2px solid transparent; color: var(--fg-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tb.on { color: var(--fg-hi); border-top-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.1), transparent); }
+  .tb .dot, .mi .dot { position: absolute; top: 6px; right: 26%; }
+  .more { position: fixed; z-index: 120; left: 0; right: 0; bottom: calc(52px + 24px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); }
+  .mi { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 76px; padding: 8px 4px; background: var(--bg); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .mi.on { color: var(--fg-hi); background: var(--bg-2); }
+  .mi.wide { grid-column: 1 / -1; min-height: 52px; flex-direction: row; gap: 10px; color: var(--fg-mute); }
   .shell.mobile .ni { padding: 11px 16px; font-size: 12px; }
 </style>

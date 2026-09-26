@@ -616,7 +616,7 @@
 <style>
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 8px; align-items: start; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 8px; align-items: start; }
   .cols.dense { grid-auto-flow: dense; }
   .col { display: flex; flex-direction: column; gap: 8px; }
   /* integrations: panels flow into as many columns as fit and balance their heights. overflow:hidden here
@@ -629,7 +629,7 @@
   .row { flex-wrap: wrap; } /* button rows wrap instead of overflowing a narrow panel */
   .kv { display: flex; justify-content: space-between; color: var(--fg-dim); }
   .kv b { color: var(--fg-hi); font-weight: 500; }
-  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
   .tst { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   .prov { border: 1px solid var(--line); padding: 6px 8px; display: flex; flex-direction: column; gap: 5px; background: var(--bg); }
   .keys td { padding: 1px 6px; }

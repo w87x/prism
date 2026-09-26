@@ -191,7 +191,7 @@
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   .body { flex: 1; min-height: 0; }
-  .cols { grid-auto-flow: dense; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; align-items: start; }
+  .cols { grid-auto-flow: dense; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 8px; align-items: start; }
   .list { list-style: none; margin: 0; padding: 0; }
   .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
   .row:last-child { border-bottom: none; }

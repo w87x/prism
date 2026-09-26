@@ -153,7 +153,7 @@
 <style>
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; padding: 8px; overflow: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; padding: 8px; overflow: auto; }
   .card { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r); padding: 8px 10px; cursor: pointer; }
   .card:hover { border-color: var(--fg-dim); }
   .row1 { display: flex; align-items: center; gap: 6px; }

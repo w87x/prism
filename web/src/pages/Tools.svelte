@@ -419,7 +419,7 @@
 </Modal>
 
 <style>
-  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 8px; }
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
   .gcard { display: flex; flex-direction: column; gap: 3px; text-align: left; background: var(--bg-1); border: 1px solid var(--line-2); padding: 8px 10px; color: inherit; }
   .gcard:hover { border-color: var(--fg); background: var(--bg-2); }
   .code { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); max-height: 44vh; overflow: auto; white-space: pre; font-size: 12px; line-height: 1.5; color: var(--fg-hi); }
@@ -439,7 +439,7 @@
   td.nm.defer { font-style: italic; }
   .legend .nmb { color: var(--accent-hi); font-weight: 500; } .legend .nme { color: var(--attn-hi); font-weight: 500; } .legend i { color: var(--fg-dim); }
   tr.grp td { background: var(--bg-2); color: var(--fg-hi); text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--fs-sm); padding-top: 4px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; align-content: start; flex: 1; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 8px; align-content: start; flex: 1; }
   .two { flex: 1; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 6px; min-height: 0; }
   .hub { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px dotted var(--line); }
   .rl { max-height: 55vh; border: 1px solid var(--line); }

@@ -10,8 +10,8 @@
   }
 </script>
 
-<button type="button" class="eb" class:master title={master ? 'This window is the master (can change things)' : 'View-only window — click to make it the master'} onclick={click}>
-  <span class="dot"></span>{master ? 'master' : 'view only'}
+<button type="button" class="eb" class:master class:dotonly={S.narrow && master} title={master ? 'This window is the master (can change things)' : 'View-only window — click to make it the master'} onclick={click}>
+  <span class="dot"></span>{#if !(S.narrow && master)}{master ? 'master' : S.narrow ? 'view only · tap to control' : 'view only'}{/if}
 </button>
 
 <style>
@@ -19,5 +19,7 @@
   .eb .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; }
   .eb.master { border-color: var(--line-2); color: var(--fg-dim); }
   .eb.master .dot { color: var(--fg); }
+  .eb { min-height: 0; height: 22px; }
+  .eb.dotonly { width: 22px; padding: 0; justify-content: center; border-color: transparent; }
   .eb:hover { border-color: currentColor; }
 </style>
