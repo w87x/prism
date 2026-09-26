@@ -723,6 +723,14 @@ func (b *Bot) topic(ctx context.Context, c settings.Telegram, name, by, purpose 
 		ThreadID int64 `json:"message_thread_id"`
 	}
 	if err := b.call(ctx, c.Token, "createForumTopic", map[string]any{"chat_id": c.GroupID, "name": name}, &res); err != nil {
+		switch m := err.Error(); {
+		case strings.Contains(m, "not enough rights"):
+			err = fmt.Errorf("%w — make the bot an admin of the group with the \"Manage Topics\" right switched on (Group → Administrators → the bot → Manage Topics)", err)
+		case strings.Contains(m, "not a forum"):
+			err = fmt.Errorf("%w — turn on Topics in the group settings (Group → Edit → Topics)", err)
+		case strings.Contains(m, "chat not found"):
+			err = fmt.Errorf("%w — the group id must be the supergroup id (starts with -100…) and the bot must be a member", err)
+		}
 		return 0, err
 	}
 	if len([]rune(purpose)) > 300 {
