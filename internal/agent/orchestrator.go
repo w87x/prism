@@ -31,6 +31,29 @@ type ReportingSink interface {
 	Deliver(ctx context.Context, n Notice) (string, error)
 }
 
+// ErrSinkInactive is what a ReportingSink returns when its channel is simply switched off or offline — normal, not
+// worth alerting about.
+var ErrSinkInactive = errors.New("channel not connected")
+
+var (
+	alertMu   sync.Mutex
+	alertSeen = map[string]time.Time{}
+)
+
+// alertDelivery tells the user in the app that a background notice never reached an external channel, at most once
+// every ten minutes per distinct reason (a broken channel would otherwise raise one alert per notice).
+func (e *Engine) alertDelivery(ctx context.Context, err error) {
+	key := err.Error()
+	alertMu.Lock()
+	if t, ok := alertSeen[key]; ok && time.Since(t) < 10*time.Minute {
+		alertMu.Unlock()
+		return
+	}
+	alertSeen[key] = time.Now()
+	alertMu.Unlock()
+	e.Emit("notice", Notice{Agent: "PRISM", Level: "warning", Text: "A notice could not be delivered: " + key})
+}
+
 // NoticeSink delivers notices and asks to an external channel (Telegram, macOS…).
 type NoticeSink interface {
 	Notice(ctx context.Context, n Notice)
@@ -587,6 +610,14 @@ func (e *Engine) Notify(ctx context.Context, n Notice) {
 	}
 	e.Emit("notice", n)
 	for _, s := range e.Sinks {
+		if rs, ok := s.(ReportingSink); ok {
+			go func() {
+				if _, err := rs.Deliver(context.WithoutCancel(ctx), n); err != nil && !errors.Is(err, ErrSinkInactive) {
+					e.alertDelivery(ctx, err)
+				}
+			}()
+			continue
+		}
 		go s.Notice(context.WithoutCancel(ctx), n)
 	}
 }

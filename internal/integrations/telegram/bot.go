@@ -681,7 +681,7 @@ func (b *Bot) Notice(ctx context.Context, n agent.Notice) { _, _ = b.Deliver(ctx
 func (b *Bot) Deliver(ctx context.Context, n agent.Notice) (string, error) {
 	c, ok := b.active(ctx)
 	if !ok {
-		return "", errors.New("Telegram is not connected (disabled, no owner set, or the bot is offline)")
+		return "", fmt.Errorf("%w: Telegram is disabled, has no owner set, or the bot is offline", agent.ErrSinkInactive)
 	}
 	prefix := ""
 	if n.Level == "attention" || n.Level == "warning" || n.Level == "error" {

@@ -18,6 +18,7 @@
   import Empty from '../lib/ui/Empty.svelte';
   import Icon from '../lib/ui/Icon.svelte';
   import Hint from '../lib/ui/Hint.svelte';
+  import Tip from '../lib/ui/Tip.svelte';
   import { AUTONOMY_HELP } from '../lib/help.js';
 
   let tab = $state('intents');
@@ -167,7 +168,7 @@
               <tr class:off={i.status === 'cancelled'}>
                 <td><Led state={iLed(i.status)} pulse={i.status === 'active'} size={8} title={i.status} /></td>
                 <td class="hi">{i.description} <Badge tone={i.type === 'watch' ? 'accent' : 'ok'}>{i.type}</Badge>{#if i.repeat}<Badge tone="mute">repeat</Badge>{/if}</td>
-                <td class="dim sm ellipsis" style="max-width:220px" title={pred(i)}>{pred(i)}</td>
+                <td class="dim sm"><Tip text={pred(i)} max={220} /></td>
                 <td class="dim">{i.owner}</td>
                 <td class="sm {i.last_error ? 'err' : 'mute'}" style="max-width:220px">{i.last_error || i.progress}{#if i.fraction != null}<div class="mbar" title="{Math.round(i.fraction * 100)}%"><i style="width:{Math.round(i.fraction * 100)}%"></i></div>{/if}{#if i.expires_at}<div class="mon">{monNote(i)}</div>{/if}</td>
                 <td class="mute sm">{i.cadence_s}s</td>
@@ -202,7 +203,7 @@
               <tr>
                 <td class="hi">{#if c.system}<Badge tone="accent">built-in</Badge> {/if}{c.name}</td>
                 <td class="dim">{c.agent}</td><td class="mute nowrap">{c.expr}</td>
-                <td class="dim sm ellipsis" style="max-width:280px" title={c.prompt}>{c.prompt}</td>
+                <td class="dim sm"><Tip text={c.prompt} max={280} /></td>
                 <td class="mute sm">{c.enabled ? until(c.next_run) : '—'}</td><td class="mute sm">{ago(c.last_run)}</td>
                 <td><Switch bind:checked={c.enabled} onchange={() => toggleCron(c)} /></td>
                 <td class="end nowrap">

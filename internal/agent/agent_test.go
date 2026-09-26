@@ -2103,6 +2103,9 @@ type reportSink struct{ msg string }
 func (r reportSink) Notice(context.Context, Notice)                         {}
 func (r reportSink) AskUser(context.Context, int64, string, tools.Question) {}
 func (r reportSink) Deliver(context.Context, Notice) (string, error) {
+	if r.msg == ErrSinkInactive.Error() {
+		return "", ErrSinkInactive
+	}
 	return "", errors.New(r.msg)
 }
 
@@ -2114,5 +2117,29 @@ func TestNotifyUserReportsTopicFailure(t *testing.T) {
 	out, err := tool.Run(context.Background(), &tools.Env{Agent: "Atlas"}, json.RawMessage(`{"text":"hi","topic":"Briefings"}`))
 	if err != nil || !strings.Contains(out, "not enough rights") || strings.HasPrefix(out, "Delivered") {
 		t.Fatalf("%q %v", out, err)
+	}
+}
+
+// A background notice that a channel rejects raises one in-app warning; a channel that is merely off raises none.
+func TestBackgroundNoticeFailureAlerts(t *testing.T) {
+	h := newHarness(t)
+	var mu sync.Mutex
+	var alerts []string
+	h.e.Emit = func(typ string, data any) {
+		if n, ok := data.(Notice); ok && typ == "notice" && n.Agent == "PRISM" {
+			mu.Lock()
+			alerts = append(alerts, n.Text)
+			mu.Unlock()
+		}
+	}
+	h.e.Sinks = []NoticeSink{reportSink{"rejected by the channel"}}
+	h.e.Notify(context.Background(), Notice{Agent: "Atlas", Text: "hello"})
+	h.e.Sinks = []NoticeSink{reportSink{ErrSinkInactive.Error()}}
+	h.e.Notify(context.Background(), Notice{Agent: "Atlas", Text: "hello again"})
+	time.Sleep(300 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(alerts) != 1 || !strings.Contains(alerts[0], "rejected") {
+		t.Fatalf("alerts = %v", alerts)
 	}
 }
