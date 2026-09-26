@@ -113,7 +113,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 	if profiles, err := a.Profiles.List(ctx); err == nil {
 		for _, p := range profiles {
 			if p.Probation {
-				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "hire", Title: "Confirm hiring " + p.Name, Sub: p.Description, Ref: "agents", At: p.CreatedAt})
+				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "hire", Title: "Confirm hiring " + p.Name, Sub: p.Description, Ref: fmt.Sprintf("hire:%d", p.ID), At: p.CreatedAt})
 			}
 		}
 	}

@@ -1,5 +1,5 @@
 <script>
-  import { S, call, go, ago, loadNotifs, openProposal } from './store.svelte.js';
+  import { S, call, go, ago, loadNotifs, openRef } from './store.svelte.js';
   import Icon from './ui/Icon.svelte';
   import Led from './ui/Led.svelte';
   import Empty from './ui/Empty.svelte';
@@ -10,10 +10,7 @@
 
   async function pick(n) {
     if (!n.read) { n.read = true; S.notifs.unread = Math.max(0, S.notifs.unread - 1); call('notifications.read', { id: n.id }, { quiet: true }); }
-    if (n.ref?.startsWith('ask:')) { go('chat'); open = false; }
-    else if (n.ref?.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(n.ref.slice(5)); open = false; }
-    else if (n.ref?.startsWith('proposal:')) { go('agents'); open = false; openProposal(Number(n.ref.slice(9))); }
-    else if (n.ref) { go(n.ref); open = false; }
+    if (n.ref) { openRef(n.ref); open = false; }
   }
   async function readAll() { await call('notifications.read', { id: 0 }); loadNotifs(); }
   async function clear() { await call('notifications.clear'); loadNotifs(); }

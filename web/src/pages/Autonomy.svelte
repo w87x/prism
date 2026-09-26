@@ -158,7 +158,7 @@
     <Switch bind:checked={cfg.dream_enabled} label="dreams" onchange={saveCfg} title="Oneiros reflects daily and prepares briefings" />
     <Switch bind:checked={cfg.auto_evolve} label="auto-apply soul evolution" tone="attn" onchange={saveCfg} title="Otherwise proposals wait for your review" />
     <Hint title="Schedule, intent, watch, tracker — what's the difference?">
-      <table class="cmp">{#each AUTONOMY_HELP.compare as [n, k, t]}<tr><td><b>{n}</b><br /><span class="mute">{k}</span></td><td>{t}</td></tr>{/each}</table>
+      <table class="cmp"><tbody>{#each AUTONOMY_HELP.compare as [n, k, t]}<tr><td><b>{n}</b><br /><span class="mute">{k}</span></td><td>{t}</td></tr>{/each}</tbody></table>
     </Hint>
     <span class="sm mute" title="How many agents other agents (Forge) may hire per week. Each starts on probation without exec tools until you confirm it. 0 forbids hiring.">auto-hires per week</span>
     <div style="width:78px"><NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} /></div>

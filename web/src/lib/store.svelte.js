@@ -391,3 +391,15 @@ export function lastLine(buf) {
   const ls = String(buf || '').split('\n').map((l) => l.trim()).filter(Boolean);
   return ls.length ? ls[ls.length - 1] : '';
 }
+
+/** Open whatever a `ref` from Today, the side rail or a notification points at (task:, briefing:, ingest:, hire:, proposal:, a page id). */
+export function openRef(ref) {
+  if (!ref) return;
+  if (ref.startsWith('task:')) { S.selectedTask = Number(ref.slice(5)); go('tasks'); }
+  else if (ref.startsWith('briefing:')) { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
+  else if (ref.startsWith('ingest:')) { S.learnFile = ref.slice(7); go('memory'); }
+  else if (ref.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(ref.slice(5)); }
+  else if (ref.startsWith('proposal:')) { go('agents'); openProposal(Number(ref.slice(9))); }
+  else if (ref.startsWith('ask:')) go('chat');
+  else go(ref);
+}

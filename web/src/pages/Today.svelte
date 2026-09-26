@@ -1,5 +1,5 @@
 <script>
-  import { S, call, listen, go, ago, until, openProposal } from '../lib/store.svelte.js';
+  import { S, call, listen, go, ago, until, openProposal, openRef } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Icon from '../lib/ui/Icon.svelte';
@@ -40,15 +40,6 @@
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
   const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 
-  function openRef(ref) {
-    if (!ref) return;
-    if (ref.startsWith('task:')) { go('tasks'); S.selectedTask = Number(ref.slice(5)); }
-    else if (ref.startsWith('briefing:')) { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
-    else if (ref.startsWith('ingest:')) { S.learnFile = ref.slice(7); go('memory'); }
-    else if (ref.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(ref.slice(5)); }
-    else if (ref.startsWith('proposal:')) { go('agents'); openProposal(Number(ref.slice(9))); }
-    else go(ref);
-  }
   function openProject(p) { S.memoryBank = p.bank_id; go('memory'); }
 
   const empty = $derived(d && !d.needs_attention?.length && !d.working_on?.length && !d.produced?.length && !d.commitments?.length && !d.projects?.length);
