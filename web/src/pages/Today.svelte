@@ -36,6 +36,16 @@
     for (const it of d?.needs_attention || []) { if (!m.has(it.kind)) m.set(it.kind, []); m.get(it.kind).push(it); }
     return [...m].map(([kind, items]) => ({ kind, label: kindLabel[kind] || kind, items }));
   });
+  // what was produced, grouped by where it came from: autonomous work, briefings, and the requests you made (many are
+  // one-line chat exchanges, so that group is shortened until asked for)
+  const originLabel = { auto: 'Autonomous work', briefing: 'Briefings', request: 'Your requests' };
+  const prodGroups = $derived.by(() => {
+    const m = { auto: [], briefing: [], request: [] };
+    for (const it of d?.produced || []) (m[it.origin] || m.auto).push(it);
+    return ['auto', 'briefing', 'request'].filter((k) => m[k].length).map((k) => ({ key: k, label: originLabel[k], items: m[k] }));
+  });
+  let prodOpen = $state({});
+  const PROD_SHOW = 4;
   let reviewId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
   const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
@@ -80,10 +90,17 @@
         <span class="when mute sm">{ago(w.started)}</span>
       </li>
     {/snippet}
+    {#snippet prodGroup(g)}
+      <li class="ghead">{g.label} <span class="mute">{g.items.length}</span></li>
+      {#each prodOpen[g.key] ? g.items : g.items.slice(0, PROD_SHOW) as it}{@render produced(it)}{/each}
+      {#if g.items.length > PROD_SHOW}
+        <li class="more"><button type="button" class="lnk" onclick={() => (prodOpen[g.key] = !prodOpen[g.key])}>{prodOpen[g.key] ? 'show fewer' : `show ${g.items.length - PROD_SHOW} more`}</button></li>
+      {/if}
+    {/snippet}
     {#snippet produced(it)}
       <li class="row click" onclick={() => openRef(it.ref)}>
         <span class="ic"><Icon name={kindIcon[it.kind] || 'check'} size={13} /></span>
-        <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.sub}</span>{/if}</div>
+        <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.origin === 'request' ? '↳ ' : ''}{it.sub}</span>{/if}</div>
         <span class="when mute sm">{ago(it.at)}</span>
       </li>
     {/snippet}
@@ -122,7 +139,7 @@
           {/if}
           {#if d.produced.length}
             <li class="shead">Produced today <span class="mute">{d.produced.length}</span></li>
-            {#each d.produced as it}{@render produced(it)}{/each}
+            {#each prodGroups as g}{@render prodGroup(g)}{/each}
           {/if}
           {#if d.commitments.length}
             <li class="shead">Coming up <span class="mute">{d.commitments.length}</span></li>
@@ -146,7 +163,7 @@
         </Panel>
         <Panel title="Produced today{d.produced.length ? ` (${d.produced.length})` : ''}" id="today.produced-today" resizable flush>
           {#if !d.produced.length}<Empty>nothing finished in the last day</Empty>
-          {:else}<ul class="list">{#each d.produced as it}{@render produced(it)}{/each}</ul>{/if}
+          {:else}<ul class="list">{#each prodGroups as g}{@render prodGroup(g)}{/each}</ul>{/if}
         </Panel>
         <Panel title="Coming up{d.commitments.length ? ` (${d.commitments.length})` : ''}" id="today.coming-up" resizable flush>
           {#if !d.commitments.length}<Empty>nothing scheduled in the next 2 days</Empty>
@@ -164,6 +181,8 @@
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={load} />
 
 <style>
+  .more { list-style: none; padding: 4px 10px 6px; }
+  .lnk { background: none; border: 0; padding: 0; color: var(--accent-hi); font-size: var(--fs-sm); cursor: pointer; }
   .ghead { list-style: none; padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); border-top: 1px solid var(--line-2); }
   .ghead:first-child { border-top: 0; }
   .shead { list-style: none; padding: 9px 10px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--fg-dim); background: var(--bg-1); border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }

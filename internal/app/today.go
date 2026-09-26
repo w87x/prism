@@ -30,6 +30,10 @@ type TodayItem struct {
 	Sub   string    `json:"sub,omitempty"`
 	Ref   string    `json:"ref"`
 	At    time.Time `json:"at"`
+	// Origin groups "produced" items: request (you asked: chat, Telegram), auto (a schedule, intent or another
+	// agent started it), briefing.
+	Origin string `json:"origin,omitempty"`
+	Agent  string `json:"agent,omitempty"`
 }
 
 type TodayWorking struct {
@@ -149,7 +153,11 @@ func (a *App) GetToday(ctx context.Context) Today {
 			if d.FinishedAt == nil || d.FinishedAt.Before(since) || d.Depth != 0 {
 				continue // only top-level results — a delegated sub-task's own "done" is noise here
 			}
-			t.Produced = append(t.Produced, TodayItem{Kind: "task", Title: d.Title, Sub: trim(d.Result, 140), Ref: fmt.Sprintf("task:%d", d.ID), At: *d.FinishedAt})
+			origin := "auto"
+			if d.FromKind == "user" || d.FromKind == "telegram" || d.FromKind == "whatsapp" {
+				origin = "request"
+			}
+			t.Produced = append(t.Produced, TodayItem{Kind: "task", Title: d.Title, Sub: trim(d.Result, 140), Ref: fmt.Sprintf("task:%d", d.ID), At: *d.FinishedAt, Origin: origin, Agent: d.ToAgent})
 		}
 	}
 	if a.Ext.Sched != nil {
@@ -158,7 +166,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 				if b.CreatedAt.Before(since) {
 					continue
 				}
-				t.Produced = append(t.Produced, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt})
+				t.Produced = append(t.Produced, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt, Origin: "briefing", Agent: b.Agent})
 			}
 		}
 	}
