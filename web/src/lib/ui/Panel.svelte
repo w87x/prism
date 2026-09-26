@@ -1,5 +1,6 @@
 <script>
-  let { title = '', tone = '', collapsible = false, open = $bindable(true), flush = false, right, children, grow = false, id = '', resizable = false } = $props();
+  import Hint from './Hint.svelte';
+  let { title = '', tone = '', collapsible = false, open = $bindable(true), flush = false, right, children, grow = false, id = '', resizable = false, hint = '' } = $props();
 
   // With an id, the panel remembers (per browser) whether it is folded and, when resizable, how wide it is in a grid:
   // 1 = one column, 2 = two, 3 = the full row. The parent must be a grid for the width to matter.
@@ -30,6 +31,7 @@
       <button type="button" class="ttl" class:static={!collapsible} onclick={toggle}>
         {#if collapsible}<span class="car">{open ? '▾' : '▸'}</span>{/if}{title}
       </button>
+      {#if hint}<Hint {title} text={hint} />{/if}
       <span class="grow"></span>
       {@render right?.()}
       {#if resizable}<button type="button" class="rs" title="Width: {span === 1 ? 'one column' : span === 2 ? 'two columns' : 'full row'} — click to change" onclick={resize}>{span === 1 ? '▭' : span === 2 ? '▬' : '▰'}</button>{/if}

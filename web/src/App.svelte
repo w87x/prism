@@ -27,6 +27,8 @@
   import Autonomy from './pages/Autonomy.svelte';
   import Library from './pages/Library.svelte';
   import Trackers from './pages/Trackers.svelte';
+  import Hint from './lib/ui/Hint.svelte';
+  import { PAGE_HELP } from './lib/help.js';
   import Knowledge from './pages/Knowledge.svelte';
   import Settings from './pages/Settings.svelte';
   import Usage from './pages/Usage.svelte';
@@ -77,6 +79,7 @@
     <div class="brand"><Logo size={24} /><span class="wm">PRISM</span></div>
     <span class="sep"></span>
     <span class="pg">{cur.label}</span>
+    {#if PAGE_HELP[cur.id]}<Hint title={cur.label} text={PAGE_HELP[cur.id]} />{/if}
     <span class="grow"></span>
     {#if S.status?.thinking}<span class="act"><Led state="ok" pulse size={8} /> {S.status.thinking} agent{S.status.thinking > 1 ? 's' : ''} working</span>{/if}
     <EditorBadge />

@@ -17,6 +17,8 @@
   import Segmented from '../lib/ui/Segmented.svelte';
   import Empty from '../lib/ui/Empty.svelte';
   import Icon from '../lib/ui/Icon.svelte';
+  import Hint from '../lib/ui/Hint.svelte';
+  import { AUTONOMY_HELP } from '../lib/help.js';
 
   let tab = $state('intents');
   let cfg = $state({ enabled: true, dream_enabled: true, auto_evolve: false, hire_limit: 3 });
@@ -144,6 +146,9 @@
     <Switch bind:checked={cfg.enabled} label="autonomy" onchange={saveCfg} />
     <Switch bind:checked={cfg.dream_enabled} label="dreams" onchange={saveCfg} title="Oneiros reflects daily and prepares briefings" />
     <Switch bind:checked={cfg.auto_evolve} label="auto-apply soul evolution" tone="attn" onchange={saveCfg} title="Otherwise proposals wait for your review" />
+    <Hint title="Schedule, intent, watch, tracker — what's the difference?">
+      <table class="cmp">{#each AUTONOMY_HELP.compare as [n, k, t]}<tr><td><b>{n}</b><br /><span class="mute">{k}</span></td><td>{t}</td></tr>{/each}</table>
+    </Hint>
     <span class="sm mute" title="How many agents other agents (Forge) may hire per week. Each starts on probation without exec tools until you confirm it. 0 forbids hiring.">auto-hires per week</span>
     <div style="width:78px"><NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} /></div>
   </div>
@@ -374,6 +379,9 @@
 </Modal>
 
 <style>
+  .cmp { border-collapse: collapse; }
+  .cmp td { vertical-align: top; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+  .cmp tr:last-child td { border-bottom: 0; }
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .ctl { display: flex; align-items: center; gap: 16px; flex: none; padding: 4px 8px; border: 1px solid var(--line); background: var(--bg-1); }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
