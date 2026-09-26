@@ -27,6 +27,7 @@
   import Autonomy from './pages/Autonomy.svelte';
   import Library from './pages/Library.svelte';
   import Trackers from './pages/Trackers.svelte';
+  import StatusSheet from './lib/StatusSheet.svelte';
   import MToday from './mobile/MToday.svelte';
   import MMemory from './mobile/MMemory.svelte';
   import Hint from './lib/ui/Hint.svelte';
@@ -91,8 +92,9 @@
     {#if PAGE_HELP[cur.id]}<Hint title={cur.label} text={PAGE_HELP[cur.id]} />{/if}
     <span class="grow"></span>
     {#if S.status?.thinking}<span class="act"><Led state="ok" pulse size={8} /> {S.status.thinking} agent{S.status.thinking > 1 ? 's' : ''} working</span>{/if}
-    <EditorBadge />
+    {#if !(narrow && S.editor.editor)}<EditorBadge />{/if}
     <button class="ico" onclick={() => (S.searchOpen = true)} title="Search everything (⌘K)"><Icon name="search" /></button>
+    {#if narrow}<StatusSheet />{/if}
     <NotifyBell />
     {#if small && desktopView}<button class="ico" onclick={() => setDesktopView(false)} title="Back to the phone layout"><Icon name="panel" /></button>{/if}
     {#if !narrow}<button class="ico" onclick={toggleWidget} title="Toggle widgets"><Icon name="panel" /></button>{/if}
@@ -168,7 +170,7 @@
       </div>
     {/if}
   {/if}
-  <StatusBar />
+  {#if !narrow}<StatusBar />{/if}
 </div>
 {/if}
 
@@ -186,7 +188,8 @@
   .shell.w-c { grid-template-columns: 158px minmax(0, 1fr) 0; }
   .shell.nav-c.w-c { grid-template-columns: 42px minmax(0, 1fr) 0; }
   .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--line-2); box-shadow: 0 1px 12px rgba(62, 232, 166, 0.06); }
-  .ico { background: none; border: 0; color: var(--ico); padding: 3px; display: flex; } .ico:hover { color: var(--ico-hi); }
+  /* centred both ways: on a phone every button has a 30px minimum height, which left the icon stuck at the top of it */
+  .ico { background: none; border: 0; color: var(--ico); padding: 3px; display: flex; align-items: center; justify-content: center; } .ico:hover { color: var(--ico-hi); }
   .brand { display: flex; align-items: center; gap: 8px; }
   .wm { font-weight: 700; letter-spacing: 0.32em; font-size: 15px; background: linear-gradient(90deg, #3ee8a6, #4499ee); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 4px rgba(62, 232, 166, 0.45)); }
   .sep { width: 1px; height: 18px; background: var(--line-2); }
@@ -207,7 +210,7 @@
   .w-c .wid { display: none; }
   /* ── phone layout ── */
   .backdrop { position: fixed; inset: 0; z-index: 110; background: rgba(0, 0, 0, 0.6); border: 0; padding: 0; }
-  .shell.mobile { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(42px + env(safe-area-inset-top)) minmax(0, 1fr) auto auto; grid-template-areas: 'top' 'main' 'tabs' 'sb'; height: 100dvh; }
+  .shell.mobile { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(38px + env(safe-area-inset-top)) minmax(0, 1fr) auto; grid-template-areas: 'top' 'main' 'tabs'; height: 100dvh; }
   .shell.mobile .top { padding-top: env(safe-area-inset-top); gap: 8px; }
   .shell.mobile .brand .wm, .shell.mobile .sep, .shell.mobile .act { display: none; }
   .shell.mobile .wid { display: none; }
@@ -229,10 +232,10 @@
   .shell.mobile .nav { display: none; }
   .shell.mobile .nav-old { background: var(--bg); position: fixed; z-index: 120; top: 0; bottom: 0; left: 0; width: 236px; padding-top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: 8px 0 28px rgba(0, 0, 0, 0.6); overflow: auto; }
   .tabbar { grid-area: tabs; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel-bg); border-top: 1px solid var(--line-2); padding-bottom: env(safe-area-inset-bottom); }
-  .tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px; padding: 6px 2px; background: none; border: 0; border-top: 2px solid transparent; color: var(--fg-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 46px; padding: 4px 2px; background: none; border: 0; border-top: 2px solid transparent; color: var(--fg-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
   .tb.on { color: var(--fg-hi); border-top-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.1), transparent); }
   .tb .dot, .mi .dot { position: absolute; top: 6px; right: 26%; }
-  .more { position: fixed; z-index: 120; left: 0; right: 0; bottom: calc(52px + 24px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); }
+  .more { position: fixed; z-index: 120; left: 0; right: 0; bottom: calc(46px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); }
   .mi { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 76px; padding: 8px 4px; background: var(--bg); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
   .mi.on { color: var(--fg-hi); background: var(--bg-2); }
   .mi.wide { grid-column: 1 / -1; min-height: 52px; flex-direction: row; gap: 10px; color: var(--fg-mute); }

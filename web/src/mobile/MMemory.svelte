@@ -43,11 +43,10 @@
     <input type="search" placeholder="Search what PRISM knows…" bind:value={q} oninput={typing} enterkeyhint="search" />
   </div>
   <div class="chips" role="tablist">
-    <button type="button" class="chip" class:on={bank === 0} onclick={() => (bank = 0)}>All</button>
+    {#each [['', 'Everything'], ['fact', 'Facts'], ['conclusion', 'Conclusions']] as [v, l]}<button type="button" class="chip kind" class:on={kind === v} onclick={() => (kind = v)}>{l}</button>{/each}
+    <span class="sep"></span>
+    <button type="button" class="chip" class:on={bank === 0} onclick={() => (bank = 0)}>All banks</button>
     {#each banks as b (b.id)}<button type="button" class="chip" class:on={bank === b.id} onclick={() => (bank = b.id)}>{label(b)}<i>{b.facts ?? ''}</i></button>{/each}
-  </div>
-  <div class="chips kinds">
-    {#each [['', 'Everything'], ['fact', 'Facts'], ['conclusion', 'Conclusions']] as [v, l]}<button type="button" class="chip sm" class:on={kind === v} onclick={() => (kind = v)}>{l}</button>{/each}
   </div>
 
   <div class="list">
@@ -86,6 +85,8 @@
   .chips::-webkit-scrollbar { display: none; }
   .chip { flex: none; min-height: 36px; padding: 0 12px; background: var(--bg-1); border: 1px solid var(--line-2); color: var(--fg-dim); font-size: var(--fs-sm); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
   .chip i { font-style: normal; color: var(--fg-mute); }
+  .sep { flex: none; width: 1px; background: var(--line-3); margin: 4px 2px; }
+  .chip.kind { border-style: dashed; }
   .chip.sm { min-height: 30px; font-size: 11px; }
   .chip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.14), transparent); }
   .list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }

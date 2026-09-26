@@ -41,7 +41,7 @@
 
 <style>
   .nb { position: relative; }
-  .bell { position: relative; background: none; border: 0; color: var(--ico); padding: 3px; display: flex; } .bell:hover { color: var(--ico-hi); }
+  .bell { position: relative; background: none; border: 0; color: var(--ico); padding: 3px; display: flex; align-items: center; justify-content: center; } .bell:hover { color: var(--ico-hi); }
   .bell.on { color: var(--attn); filter: drop-shadow(0 0 4px var(--attn)); }
   .ct { position: absolute; top: -3px; right: -5px; min-width: 14px; height: 14px; padding: 0 3px; background: var(--attn); color: #000; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
   .dd { position: absolute; right: 0; top: 30px; width: 380px; max-width: 92vw; background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.75); z-index: 1500; }

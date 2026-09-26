@@ -15,11 +15,11 @@
 </button>
 
 <style>
-  .eb { display: inline-flex; align-items: center; gap: 5px; background: none; border: 1px solid var(--attn-dim); color: var(--attn-hi); padding: 1px 8px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 10px; }
+  .eb { align-self: center; display: inline-flex; align-items: center; gap: 5px; background: none; border: 1px solid var(--attn-dim); color: var(--attn-hi); padding: 1px 8px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 10px; }
   .eb .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; }
   .eb.master { border-color: var(--line-2); color: var(--fg-dim); }
   .eb.master .dot { color: var(--fg); }
   .eb { min-height: 0; height: 22px; }
-  .eb.dotonly { width: 22px; padding: 0; justify-content: center; border-color: transparent; }
+  .eb.dotonly { width: 32px; height: 32px; padding: 0; justify-content: center; border-color: transparent; }
   .eb:hover { border-color: currentColor; }
 </style>

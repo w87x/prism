@@ -36,8 +36,6 @@
 </script>
 
 <div class="mt">
-  <div class="top"><span class="mute sm">{d ? new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : ''}</span><button type="button" class="rf" aria-label="refresh" onclick={load}><Icon name="refresh" size={14} /></button></div>
-
   {#if !d}
     <div class="empty">loading…</div>
   {:else}

@@ -396,7 +396,8 @@
   .cmp td { vertical-align: top; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
   .cmp tr:last-child td { border-bottom: 0; }
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
-  .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex: none; padding: 4px 8px; border: 1px solid var(--line); background: var(--bg-1); }
+  .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex: none;
+    /* phone: one scrolling line instead of a tall wrapped block */ padding: 4px 8px; border: 1px solid var(--line); background: var(--bg-1); }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   tr.off td { opacity: 0.45; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 8px; align-content: start; flex: 1; }
@@ -415,4 +416,5 @@
   .brow.gone { opacity: 0.5; }
   .pre-full { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55vh; overflow: auto; margin: 0; padding: 8px; background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg); font: inherit; line-height: 1.45; }
   .soul { max-height: 52vh; }
+  @media (max-width: 820px) { .ctl { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; white-space: nowrap; } .ctl::-webkit-scrollbar { display: none; } }
 </style>
