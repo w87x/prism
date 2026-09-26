@@ -25,6 +25,12 @@ type pendingAsk struct {
 	Since time.Time `json:"since"`
 }
 
+// ReportingSink is a NoticeSink that can say what happened to a notice (used when an agent asks for a topic).
+type ReportingSink interface {
+	NoticeSink
+	Deliver(ctx context.Context, n Notice) (string, error)
+}
+
 // NoticeSink delivers notices and asks to an external channel (Telegram, macOS…).
 type NoticeSink interface {
 	Notice(ctx context.Context, n Notice)
@@ -583,6 +589,35 @@ func (e *Engine) Notify(ctx context.Context, n Notice) {
 	for _, s := range e.Sinks {
 		go s.Notice(context.WithoutCancel(ctx), n)
 	}
+}
+
+// NotifyReport is Notify for callers that must tell the truth about delivery: sinks that can report are called
+// in-line and their outcome is returned. Without any such sink the notice still reaches the web UI.
+func (e *Engine) NotifyReport(ctx context.Context, n Notice) string {
+	if n.Agent == "" {
+		n.Agent = "Atlas"
+	}
+	if n.Topic == "" {
+		e.logChat(ctx, "agent", n.Agent, n.Text, "web", "", 0)
+		e.NoteToChat(ctx, "web", n.Agent, n.Text)
+	}
+	e.Emit("notice", n)
+	var out []string
+	for _, s := range e.Sinks {
+		if rs, ok := s.(ReportingSink); ok && n.Topic != "" {
+			msg, err := rs.Deliver(context.WithoutCancel(ctx), n)
+			if err != nil {
+				msg = "Error: " + err.Error()
+			}
+			out = append(out, msg)
+			continue
+		}
+		go s.Notice(context.WithoutCancel(ctx), n)
+	}
+	if len(out) == 0 {
+		return "Delivered."
+	}
+	return strings.Join(out, " ")
 }
 
 // ── tasks: dispatcher, execution, delegation ──────────────────────────────

@@ -674,38 +674,54 @@ func (b *Bot) active(ctx context.Context) (settings.Telegram, bool) {
 }
 
 // Notice delivers an agent-initiated message to the DM or to a named forum topic.
-func (b *Bot) Notice(ctx context.Context, n agent.Notice) {
+func (b *Bot) Notice(ctx context.Context, n agent.Notice) { _, _ = b.Deliver(ctx, n) }
+
+// Deliver is Notice that says what actually happened, so an agent asking for a topic is told the truth: where the
+// message went, or why it did not go where it was asked to.
+func (b *Bot) Deliver(ctx context.Context, n agent.Notice) (string, error) {
 	c, ok := b.active(ctx)
 	if !ok {
-		return
+		return "", errors.New("Telegram is not connected (disabled, no owner set, or the bot is offline)")
 	}
 	prefix := ""
 	if n.Level == "attention" || n.Level == "warning" || n.Level == "error" {
 		prefix = map[string]string{"attention": "🟠 ", "warning": "🟡 ", "error": "🔴 "}[n.Level]
 	}
 	text := fmt.Sprintf("%s**%s:** %s", prefix, n.Agent, n.Text)
+	why := ""
 	if n.Topic != "" && c.GroupID != 0 {
 		thread, err := b.topic(ctx, c, n.Topic, n.Agent, n.Text)
 		if err == nil {
 			if _, err := b.send(ctx, c.Token, c.GroupID, thread, text, nil); err == nil {
 				b.Engine.NoteToChat(ctx, agent.ChatKey("telegram", strconv.FormatInt(thread, 10)), n.Agent, n.Text)
-				return
+				return fmt.Sprintf("Delivered to the Telegram topic %q.", n.Topic), nil
 			} else {
+				why = fmt.Sprintf("could not post in topic %q: %v", n.Topic, err)
 				b.logf("warn", "topic send failed: %v", err)
 			}
 		} else {
+			why = fmt.Sprintf("could not open topic %q: %v", n.Topic, err)
 			b.logf("warn", "cannot open topic %q: %v", n.Topic, err)
 		}
 		text = fmt.Sprintf("[%s] %s", n.Topic, text) // fall back to the DM
 	} else if n.Topic != "" {
+		why = "no Telegram group is configured, so topics are unavailable"
 		text = fmt.Sprintf("[%s] %s", n.Topic, text)
 	}
 	if !c.MirrorNotices {
-		return
+		if why != "" {
+			return "", errors.New("NOT delivered: " + why + " (and DM mirroring of notices is off)")
+		}
+		return "Not sent: mirroring notices to Telegram is switched off.", nil
 	}
-	if _, err := b.send(ctx, c.Token, c.OwnerID, 0, text, nil); err == nil {
-		b.Engine.NoteToChat(ctx, "tg:dm", n.Agent, n.Text)
+	if _, err := b.send(ctx, c.Token, c.OwnerID, 0, text, nil); err != nil {
+		return "", fmt.Errorf("NOT delivered: %s%v", map[bool]string{true: why + "; DM failed too: "}[why != ""], err)
 	}
+	b.Engine.NoteToChat(ctx, "tg:dm", n.Agent, n.Text)
+	if why != "" {
+		return "Sent to the owner's DM instead of the topic, because " + why + ".", nil
+	}
+	return "Delivered to the Telegram DM.", nil
 }
 
 // topic finds or creates a forum topic by name.

@@ -536,7 +536,7 @@ func (e *Engine) toolNotify() *tools.Tool {
 	return &tools.Tool{
 		Name: "notify_user", Category: "agents", Risk: tools.RiskWrite, Auto: true,
 		Description: "Proactively send the user a message outside the normal reply flow (result of a background job, something they asked to be told about). " +
-			"Optionally route it to a named Telegram topic so the main chat stays clean; if the user replies there, that topic's context is used. Rate-limited.",
+			"Optionally route it to a named Telegram topic so the main chat stays clean; if the user replies there, that topic's context is used. Rate-limited. The result states where the message really went; if it says it was not delivered or went elsewhere, tell the user so instead of claiming success.",
 		Params: tools.Obj("text",
 			tools.Str("text", "the message"),
 			tools.Str("topic", "optional Telegram topic name to route to (created on demand)"),
@@ -563,8 +563,7 @@ func (e *Engine) toolNotify() *tools.Tool {
 			if a.Level == "" {
 				a.Level = "info"
 			}
-			e.Notify(ctx, Notice{Agent: env.Agent, Text: a.Text, Level: a.Level, Topic: a.Topic})
-			return "Delivered.", nil
+			return e.NotifyReport(ctx, Notice{Agent: env.Agent, Text: a.Text, Level: a.Level, Topic: a.Topic}), nil
 		},
 	}
 }

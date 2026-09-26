@@ -2096,3 +2096,22 @@ func TestEvolutionAuditReportsBeforeAfter(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 }
+
+type reportSink struct{ msg string }
+
+func (r reportSink) Notice(context.Context, Notice)                       {}
+func (r reportSink) AskUser(context.Context, int64, string, tools.Question) {}
+func (r reportSink) Deliver(context.Context, Notice) (string, error) {
+	return "", errors.New(r.msg)
+}
+
+// notify_user with a topic reports what the channel really did instead of always claiming delivery.
+func TestNotifyUserReportsTopicFailure(t *testing.T) {
+	h := newHarness(t)
+	h.e.Sinks = append(h.e.Sinks, reportSink{"not enough rights to create a topic"})
+	tool, _ := h.e.Tools.Get("notify_user")
+	out, err := tool.Run(context.Background(), &tools.Env{Agent: "Atlas"}, json.RawMessage(`{"text":"hi","topic":"Briefings"}`))
+	if err != nil || !strings.Contains(out, "not enough rights") || strings.HasPrefix(out, "Delivered") {
+		t.Fatalf("%q %v", out, err)
+	}
+}
