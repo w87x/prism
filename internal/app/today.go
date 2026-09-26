@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"prism/internal/memory"
@@ -101,7 +102,8 @@ func (a *App) GetToday(ctx context.Context) Today {
 	if a.Ext.Sched != nil {
 		if briefs, err := a.Ext.Sched.Briefings(ctx, ""); err == nil {
 			for _, b := range briefs {
-				if b.Status == "dismissed" {
+				// unread ones, and ones that ask a question nobody answered yet; reading (or answering) clears the rest
+				if b.Status == "dismissed" || (b.Status != "new" && !(b.Reply == "" && strings.Contains(b.Body, "?"))) {
 					continue
 				}
 				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt})

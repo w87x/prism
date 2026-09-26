@@ -29,6 +29,8 @@ export const S = $state({
   selectedAgent: null, // agent id shown in the graph inspector
   selectedTool: null, // tool name shown in the tools sidebar
   selectedTask: null, // task id to open in the Tasks page's detail modal (set before go('tasks'))
+  autonomyTab: null, // tab the Autonomy page should open on (set before go('autonomy'))
+  openBriefing: null, // briefing id to open for reading on arrival
   learnFile: null, // inbox file the Memory page should open in its "learn from document" dialog
   selectedFact: null, // memory fact id to open (set before go('memory'), e.g. from the search palette)
   selectedTrackerName: null, // tracker name to open (set before go('trackers'))

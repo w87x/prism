@@ -80,7 +80,17 @@
   let briefs = $state([]);
   let showDismissed = $state(false);
   let readB = $state(null); // the briefing open in the "Read" modal
-  async function loadB() { briefs = (await call('briefings.list', {}, { quiet: true })) || []; }
+  async function loadB() { briefs = (await call('briefings.list', {}, { quiet: true })) || []; arrive(); }
+  // arriving from Today: jump to the right tab and open the briefing that was clicked
+  function arrive() {
+    if (S.autonomyTab) { tab = S.autonomyTab; S.autonomyTab = null; }
+    if (S.openBriefing) {
+      const b = briefs.find((x) => x.id === S.openBriefing);
+      S.openBriefing = null;
+      if (b) { tab = 'brief'; openRead(b); }
+    }
+  }
+  arrive();
   $effect(() => { loadB(); return listen('briefing.new', loadB); });
   const shown = $derived(briefs.filter((b) => showDismissed || b.status !== 'dismissed'));
   // cards (as before) or a compact grouped list — by day or by agent — remembered per browser

@@ -43,7 +43,7 @@
   function openRef(ref) {
     if (!ref) return;
     if (ref.startsWith('task:')) { go('tasks'); S.selectedTask = Number(ref.slice(5)); }
-    else if (ref.startsWith('briefing:')) { go('autonomy'); }
+    else if (ref.startsWith('briefing:')) { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
     else if (ref.startsWith('ingest:')) { S.learnFile = ref.slice(7); go('memory'); }
     else if (ref.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(ref.slice(5)); }
     else if (ref.startsWith('proposal:')) { go('agents'); openProposal(Number(ref.slice(9))); }
@@ -97,7 +97,7 @@
       </li>
     {/snippet}
     {#snippet coming(c)}
-      <li class="row click" onclick={() => go('autonomy')}>
+      <li class="row click" onclick={() => { S.autonomyTab = c.kind === 'cron' ? 'cron' : 'intents'; go('autonomy'); }}>
         <span class="ic"><Icon name={c.kind === 'cron' ? 'compact' : 'auto'} size={13} /></span>
         <div class="txt"><span class="hi">{c.title}</span></div>
         <span class="when mute sm">{until(c.due)}</span>
