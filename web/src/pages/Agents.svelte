@@ -13,7 +13,7 @@
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
 
-  let view = $state(typeof matchMedia === 'function' && matchMedia('(max-width: 820px)').matches ? 'list' : 'graph'); // the force graph is unreadable on a phone
+  let view = $state('graph'); // the force graph is unreadable on a phone
   let filter = $state('');
   let w = $state(700), h = $state(480);
   let canvas = $state();
@@ -53,10 +53,12 @@
     for (const [key, ns] of Object.entries(byOrbit)) ns.forEach((n, i) => { if (!old.has(n.id)) n.ang = (i / ns.length) * Math.PI * 2 + key.length; });
   });
 
-  const spec = () => { const cx = w / 2, cy = h / 2; return { cx, cy, ex: Math.max(80, w / 2 - 70), ey: Math.max(80, h / 2 - 60) }; };
+  const spec = () => { const cx = w / 2, cy = h / 2, mx = w < 560 ? 26 : 70, my = w < 560 ? 30 : 60; return { cx, cy, ex: Math.max(80, w / 2 - mx), ey: Math.max(80, h / 2 - my) }; };
   const orbitOf = (key) => orbits.find((o) => o.key === key);
   // small by default so the orbits stay readable; the hovered agent swells (eased per node in draw())
-  const BASE = (a) => (a.role === 'entry' ? 19 : 12);
+  // phone-sized canvas: smaller nodes, and names only for the agent you touch (see draw)
+  const compact = () => w < 560;
+  const BASE = (a) => (compact() ? (a.role === 'entry' ? 13 : 8) : a.role === 'entry' ? 19 : 12);
   const R = (n) => BASE(n.a) * (n.k || 1);
   const nodeByName = (name) => nodes.find((n) => n.a.name === name);
 
@@ -103,7 +105,7 @@
       ctx.globalAlpha = 0.55; ctx.setLineDash([2, 6]);
       ctx.beginPath(); ctx.ellipse(cx, cy, o.k * ex, o.k * ey, 0, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 0.6;
-      ctx.fillText(o.label.toUpperCase(), cx + o.k * ex * Math.cos(-0.5) + 4, cy + o.k * ey * Math.sin(-0.5));
+      if (!compact()) ctx.fillText(o.label.toUpperCase(), cx + o.k * ex * Math.cos(-0.5) + 4, cy + o.k * ey * Math.sin(-0.5));
     }
     ctx.globalAlpha = 1;
 
@@ -151,7 +153,9 @@
       ctx.strokeStyle = blocked ? colors.err : col; ctx.lineWidth = blocked ? 1.6 + 1.4 * (0.5 + 0.5 * Math.sin(t / 220)) : selected ? 2.6 : 1.6; ctx.stroke();
       ctx.fillStyle = col; ctx.font = `900 ${r * 0.9}px FA`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(iconOf(a.name), 0, 1);
       if (blocked) { ctx.fillStyle = colors.err; ctx.font = '800 13px monospace'; ctx.fillText('!', 0, -r - 8); }
-      ctx.textBaseline = 'alphabetic'; ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? '#4d6058' : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
+      ctx.textBaseline = 'alphabetic';
+      if (compact() && !(hovered || selected || active || blocked || a.role === 'entry')) { ctx.restore(); continue; }
+      ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? '#4d6058' : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
       ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.fillText((a.probation ? 'on probation' : a.role === 'entry' ? 'entry' : a.role === 'maint' ? 'staff' : a.group).toUpperCase(), 0, r + 25);
       ctx.restore();
     }
@@ -160,7 +164,7 @@
   // ── interaction ──
   const local = (e) => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
   const hit = (x, y) => { for (let i = nodes.length - 1; i >= 0; i--) { const n = nodes[i]; if (Math.hypot(n.x - x, n.y - y) <= Math.max(R(n), BASE(n.a) * 1.4) + 4) return n; } return null; };
-  function onDown(e) { const p = local(e), n = hit(p.x, p.y); if (!n) { S.selectedAgent = null; return; } gesture = { n, sx: p.x, sy: p.y, moved: false }; canvas.setPointerCapture?.(e.pointerId); }
+  function onDown(e) { const p = local(e), n = hit(p.x, p.y); if (!n) { S.selectedAgent = null; return; } hoverId = n.id; gesture = { n, sx: p.x, sy: p.y, moved: false }; canvas.setPointerCapture?.(e.pointerId); }
   function onMove(e) {
     const p = local(e);
     if (gesture) {
@@ -172,7 +176,7 @@
   }
   function onUp() {
     if (!gesture) return;
-    const { n, moved } = gesture; gesture = null;
+    const { n, moved } = gesture; gesture = null; hoverId = null;
     if (!moved) { S.selectedAgent = n.a.id; return; }
     // released: the orbit captures it again where it was let go
     if (n.a.role !== 'entry') { const { cx, cy, ex, ey } = spec(), o = orbitOf(n.orbit); n.ang = Math.atan2((n.y - cy) / (o ? o.k * ey : ey), (n.x - cx) / (o ? o.k * ex : ex)); }

@@ -29,6 +29,8 @@ export const S = $state({
   selectedAgent: null, // agent id shown in the graph inspector
   selectedTool: null, // tool name shown in the tools sidebar
   selectedTask: null, // task id to open in the Tasks page's detail modal (set before go('tasks'))
+  reader: { open: false, id: null }, // the full-screen briefing reader
+  briefRev: 0, // bumped when the reader changes a briefing, so other views reload
   narrow: false, // phone layout in use (set by App)
   autonomyTab: null, // tab the Autonomy page should open on (set before go('autonomy'))
   openBriefing: null, // briefing id to open for reading on arrival
@@ -397,7 +399,11 @@ export function lastLine(buf) {
 export function openRef(ref) {
   if (!ref) return;
   if (ref.startsWith('task:')) { S.selectedTask = Number(ref.slice(5)); go('tasks'); }
-  else if (ref.startsWith('briefing:')) { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
+  else if (ref.startsWith('briefing:')) {
+    // tablets and phones read briefings full-screen; a desktop window keeps the Autonomy tab and its dialog
+    if (typeof innerWidth === 'number' && innerWidth <= 1180) { S.reader.id = Number(ref.slice(9)); S.reader.open = true; }
+    else { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
+  }
   else if (ref.startsWith('ingest:')) { S.learnFile = ref.slice(7); go('memory'); }
   else if (ref.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(ref.slice(5)); }
   else if (ref.startsWith('proposal:')) { go('agents'); openProposal(Number(ref.slice(9))); }

@@ -28,6 +28,7 @@
   import Library from './pages/Library.svelte';
   import Trackers from './pages/Trackers.svelte';
   import StatusSheet from './lib/StatusSheet.svelte';
+  import BriefingReader from './lib/BriefingReader.svelte';
   import MToday from './mobile/MToday.svelte';
   import MMemory from './mobile/MMemory.svelte';
   import Hint from './lib/ui/Hint.svelte';
@@ -175,6 +176,7 @@
 {/if}
 
 {#if showOb}<Onboarding />{/if}
+<BriefingReader />
 <CommandPalette />
 <ThinkingWall />
 <Toasts />

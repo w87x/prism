@@ -94,6 +94,7 @@
   }
   arrive();
   $effect(() => { loadB(); return listen('briefing.new', loadB); });
+  $effect(() => { S.briefRev; if (S.briefRev) loadB(); }); // the full-screen reader changed one
   const shown = $derived(briefs.filter((b) => showDismissed || b.status !== 'dismissed'));
   // cards (as before) or a compact grouped list — by day or by agent — remembered per browser
   const lsg = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
@@ -234,6 +235,7 @@
       {#if briefs.some((b) => b.status === 'dismissed')}<Checkbox bind:checked={showDismissed} label="show dismissed ({briefs.filter((b) => b.status === 'dismissed').length})" />{/if}
       <Segmented size="sm" bind:value={bView} options={[{ value: 'cards', label: 'cards' }, { value: 'list', label: 'list' }]} />
       {#if bView === 'list'}<Segmented size="sm" bind:value={bGroup} options={[{ value: 'day', label: 'by day' }, { value: 'agent', label: 'by agent' }]} />{/if}
+      <Button size="sm" onclick={() => { S.reader.id = null; S.reader.open = true; }} title="Read them one at a time, full screen"><Icon name="edit" size={11} /> Reader</Button>
       <Button size="sm" variant="accent" onclick={dream}>Dream now</Button></div>
     {#if bView === 'list'}
       <Panel flush grow>

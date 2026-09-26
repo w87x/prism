@@ -158,7 +158,9 @@
     concept: { form: 'circle', outline: true }, person: { form: 'circle', outline: false },
     entity: { form: 'square', outline: true },
   };
-  const r = (n) => (n.type === 'entity' ? 3.5 + Math.min(n.mentions, 8) * 0.7 : 2.5 + Math.min(n.rank, 3) * 0.9);
+  // phone-sized canvas: smaller nodes, and text only for the node you touch and its neighbours
+  const compact = () => W < 560;
+  const r = (n) => (n.type === 'entity' ? 3.5 + Math.min(n.mentions, 8) * 0.7 : 2.5 + Math.min(n.rank, 3) * 0.9) * (compact() ? 0.7 : 1);
   const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 
   // canvas can't read CSS variables, so resolve them once per load/theme
@@ -265,7 +267,7 @@
     const forced = new Set(focus >= 0 ? [focus, ...near] : []);
     if (hlOn) for (let i = 0; i < nodes.length; i++) if (lit[i]) forced.add(i);
     for (const i of forced) say(i, true);
-    for (const i of order) if (!forced.has(i)) { if (focus >= 0 && dense) continue; say(i, false); }
+    for (const i of order) if (!forced.has(i)) { if (compact() || (focus >= 0 && dense)) continue; say(i, false); }
     // relation labels of the focused node's edges
     ctx.font = `9px ${colors.font}`; ctx.fillStyle = colors.mute;
     if (focus >= 0) for (const ei of adj[focus]) {
