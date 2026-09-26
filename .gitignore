@@ -2,7 +2,7 @@
 bin/
 web/node_modules/
 web/dist/*
-!web/dist/index.html
+!web/dist/.gitkeep
 
 # runtime state, config and secrets
 .prism/

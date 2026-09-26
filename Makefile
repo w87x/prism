@@ -14,7 +14,7 @@ deps:          ## install everything PRISM can use via Homebrew (see Brewfile)
 ui:            ## build the Svelte UI into web/dist (embedded into the binary)
 	cd web && npm install --no-audit --no-fund && npm run build
 
-build:         ## build the backend binary (run `make ui` first for the embedded UI)
+build: ui      ## build the UI, then the backend binary (embeds web/dist)
 	go build -o bin/prism ./cmd/prism
 
 run: all       ## build everything and start PRISM on http://127.0.0.1:7777

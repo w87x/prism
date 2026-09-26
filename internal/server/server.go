@@ -76,6 +76,16 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// a missing asset or file must be a 404: answering with index.html makes the browser reject it with a baffling
+	// "not a valid JavaScript/CSS MIME type" (what a binary built without the UI, or with a stale one, shows)
+	if strings.HasPrefix(p, "assets/") || path.Ext(p) != "" {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := s.UI.Open("index.html"); err != nil {
+		http.Error(w, "The web UI is not built into this binary. Run `make ui` and then `make build`, and restart PRISM.", http.StatusServiceUnavailable)
+		return
+	}
 	// SPA fallback
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFileFS(w, r, s.UI, "index.html")
