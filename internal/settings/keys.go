@@ -161,6 +161,15 @@ type Guardrails struct {
 	// MaxIterations increased by this percentage (nobody is watching to ask for more time), capped here.
 	AutonomousBoostPct      int `json:"autonomous_boost_pct"`
 	AutonomousMaxIterations int `json:"autonomous_max_iterations"`
+	// ToolFailWarn / ToolFailBlock: a tool that keeps failing inside one run (any arguments) is called out to the model
+	// after this many failures since its last success, and refused for the rest of the run after ToolFailBlock, so the
+	// agent reports the problem instead of burning its budget on variations.
+	ToolFailWarn  int `json:"tool_fail_warn"`
+	ToolFailBlock int `json:"tool_fail_block"`
+	// StallOff / StallMin: notify when a running task (and everything it delegated) shows no sign of life — no model
+	// call, tool call or tokens — for StallMin minutes.
+	StallOff bool `json:"stall_off"`
+	StallMin int  `json:"stall_min"`
 	// AutoRetryOff stops the engine from analysing a run that exhausted its budget and retrying it once with a
 	// rewritten instruction (see agent/recover.go).
 	AutoRetryOff bool `json:"auto_retry_off"`
@@ -169,7 +178,7 @@ type Guardrails struct {
 }
 
 func DefaultGuardrails() Guardrails {
-	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60}
+	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60, ToolFailWarn: 3, ToolFailBlock: 6, StallMin: 20}
 }
 
 func DefaultContext() Context { return Context{CompactAt: 0.8, Target: 0.2} }

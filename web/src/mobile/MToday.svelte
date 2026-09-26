@@ -62,7 +62,7 @@
         {#each d.working_on as w}
           <div class="it" role="button" tabindex="0" onclick={() => { S.selectedTask = w.task_id; S.page = 'tasks'; }} onkeydown={(e) => e.key === 'Enter' && (S.page = 'tasks')}>
             <span class="ic ok"><Glyph name={w.agent} size={16} /></span>
-            <div class="tx"><div class="t">{w.title || 'working…'}</div><div class="w">{w.agent} · {ago(w.started)}</div></div>
+            <div class="tx"><div class="t">{w.title || 'working…'}</div><div class="w">{w.agent} · {ago(w.started)}{#if w.idle_s > 300} · <span class="quiet">quiet {Math.round(w.idle_s / 60)}m</span>{/if}</div></div>
           </div>
         {/each}
       </section>
@@ -110,6 +110,7 @@
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={load} />
 
 <style>
+  .quiet { color: var(--attn); }
   .mt { height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; -webkit-overflow-scrolling: touch; }
   .top { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px; }
   .rf { background: none; border: 0; color: var(--fg-mute); min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }

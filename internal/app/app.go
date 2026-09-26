@@ -227,6 +227,7 @@ func (a *App) build(ctx context.Context) error {
 	go a.cleanupLoop(ctx)
 	go a.statusLoop(ctx)
 	go a.keepAwakeLoop(ctx)
+	go a.stallLoop(ctx)
 	a.startExtensions(ctx)
 	return nil
 }

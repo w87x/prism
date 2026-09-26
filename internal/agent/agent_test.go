@@ -2177,3 +2177,53 @@ func TestNULBytesDoNotBreakStoringMessages(t *testing.T) {
 		t.Fatalf("%+v", ms)
 	}
 }
+
+// A tool that keeps failing is warned about, then refused; a success resets the streak; other tools are unaffected.
+func TestToolHealthGuard(t *testing.T) {
+	g := &loopGuard{failWarnAt: 3, failBlockAt: 5}
+	for i := 1; i <= 2; i++ {
+		if w := g.failed("mcp__x__move"); w != "" {
+			t.Fatalf("failure %d warned too early: %s", i, w)
+		}
+	}
+	if w := g.failed("mcp__x__move"); !strings.Contains(w, "Stop retrying") {
+		t.Fatalf("third failure should warn: %q", w)
+	}
+	g.failed("mcp__x__move")
+	if g.blocked("mcp__x__move") != "" {
+		t.Fatal("blocked too early")
+	}
+	g.failed("mcp__x__move")
+	if !strings.Contains(g.blocked("mcp__x__move"), "switched off") {
+		t.Fatal("fifth failure should switch the tool off")
+	}
+	if g.blocked("mcp__x__list") != "" {
+		t.Fatal("another tool must not be affected")
+	}
+	g.succeeded("mcp__x__move")
+	if g.blocked("mcp__x__move") != "" {
+		t.Fatal("a success resets the streak")
+	}
+}
+
+// A run that has been silent past the limit is reported as stalled — unless it is waiting for the user, a chat turn,
+// or one of its delegates is still active.
+func TestStalledRuns(t *testing.T) {
+	h := newHarness(t)
+	old := time.Now().Add(-30 * time.Minute).UnixMilli()
+	mk := func(id, parent int64, at int64, chat bool) *activeRun {
+		ar := &activeRun{Info: RunInfo{ID: id, ParentRun: parent, Agent: "A", IsChat: chat}, started: time.Now()}
+		ar.lastActive.Store(at)
+		return ar
+	}
+	h.e.mu.Lock()
+	h.e.runs[1] = mk(1, 0, old, false)                    // silent, alone: stalled
+	h.e.runs[2] = mk(2, 0, old, false)                    // silent parent…
+	h.e.runs[3] = mk(3, 2, time.Now().UnixMilli(), false) // …whose delegate is alive: not stalled
+	h.e.runs[4] = mk(4, 0, old, true)                     // a chat turn: never reported
+	h.e.mu.Unlock()
+	got := h.e.StalledRuns(20 * time.Minute)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("stalled = %+v", got)
+	}
+}

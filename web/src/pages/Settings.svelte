@@ -61,7 +61,7 @@
   let ret = $state({ logs_days: 14, tasks_days: 30, task_statuses: ['done', 'failed', 'cancelled'] });
   const retStatuses = ['done', 'failed', 'cancelled', 'partial'];
   const toggleRetStatus = (s, on) => { const cur = new Set(ret.task_statuses || []); on ? cur.add(s) : cur.delete(s); ret.task_statuses = [...cur]; };
-  let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
+  let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, tool_fail_warn: 3, tool_fail_block: 6, stall_off: false, stall_min: 20, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
   let nf = $state({ cron: { show: true, external: false }, intent: { show: true, external: true }, ask: { show: true, external: false }, error: { show: true, external: true }, proposal: { show: true, external: true } });
   let cleaning = $state(false);
   async function cleanNow() {
@@ -445,6 +445,11 @@
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Guardrails · long runs" hint="What happens when a task uses its whole iteration budget: automatic analysis and one retry, and how long tasks may run." id="set.guardrails-long-runs" collapsible resizable>
+          <div class="sm mute">A tool that keeps failing inside one run (whatever the arguments) is called out to the agent, and switched off for that run, so it reports the problem instead of burning its budget on variations.</div>
+          <div class="two"><Field label="Warn after failures in a row" hint="Default 3"><NumberInput bind:value={gr.tool_fail_warn} min={2} max={9} step={1} /></Field>
+            <Field label="Switch off after" hint="Default 6"><NumberInput bind:value={gr.tool_fail_block} min={3} max={20} step={1} /></Field></div>
+          <div class="sm mute">Stalled tasks: you are notified when a running task shows no sign of life (no model call, tool call or output) for this long. It only tells you; stopping is your call.</div>
+          <div class="two"><Switch checked={!gr.stall_off} label="notify about stalled tasks" onchange={(v) => (gr.stall_off = !v)} /><Field label="…after minutes idle" hint="Default 20"><NumberInput bind:value={gr.stall_min} min={5} max={240} step={5} /></Field></div>
           <div class="sm mute">Autonomous runs (a schedule firing, a standing intent waking its owner) get extra iteration budget over the agent's own limit, since nobody is there to ask for more time.</div>
           <div class="two"><Field label="Extra budget" hint="% added to the agent's own limit"><NumberInput bind:value={gr.autonomous_boost_pct} min={0} max={200} step={10} unit="%" /></Field>
             <Field label="Hard cap (iterations)"><NumberInput bind:value={gr.autonomous_max_iterations} min={10} max={200} step={10} /></Field></div>

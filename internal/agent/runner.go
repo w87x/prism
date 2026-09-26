@@ -120,10 +120,14 @@ type activeRun struct {
 	tokensIn, tokensOut atomic.Int64
 	ctxTokens, window   atomic.Int64
 	task                atomic.Value // string: brief current task
+	lastActive          atomic.Int64 // unix ms of the last sign of life: a model call, a tool call, tokens
 	approved            sync.Map     // tool name → true: user chose "allow for this task"
 	imgMu               sync.Mutex
 	pendingImages       []int64 // pictures sent while the run was working, delivered with the next steering message
 }
+
+// touch records a sign of life; the stall watchdog reads it.
+func (ar *activeRun) touch() { ar.lastActive.Store(time.Now().UnixMilli()) }
 
 func (ar *activeRun) addImages(ids []int64) {
 	ar.imgMu.Lock()
@@ -168,6 +172,8 @@ type ActiveRun struct {
 	Window    int64  `json:"window"`
 	Task      string `json:"task_text"`
 	Started   int64  `json:"started"`
+	// LastActive is the unix ms of the run's last sign of life (see activeRun.touch).
+	LastActive int64 `json:"last_active"`
 }
 
 func (e *Engine) ActiveRuns() []ActiveRun {
@@ -177,7 +183,7 @@ func (e *Engine) ActiveRuns() []ActiveRun {
 	for _, r := range e.runs {
 		t, _ := r.task.Load().(string)
 		out = append(out, ActiveRun{RunInfo: r.Info, TokensIn: r.tokensIn.Load(), TokensOut: r.tokensOut.Load(),
-			Context: r.ctxTokens.Load(), Window: r.window.Load(), Task: t, Started: r.started.UnixMilli()})
+			Context: r.ctxTokens.Load(), Window: r.window.Load(), Task: t, Started: r.started.UnixMilli(), LastActive: r.lastActive.Load()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -248,6 +254,7 @@ func (e *Engine) register(spec RunSpec) *activeRun {
 		return spec.Run
 	}
 	ar := &activeRun{steer: spec.Steer, started: time.Now()}
+	ar.touch()
 	kind := spec.Kind
 	if kind == "" && spec.Leaf {
 		kind = "ask"
@@ -406,7 +413,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 			maxIter = cap
 		}
 	}
-	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort}
+	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort, failWarnAt: grCfg.ToolFailWarn, failBlockAt: grCfg.ToolFailBlock}
 	calib := 1.0
 	compactedThisRun := 0
 	ctxCfg := settings.Load(ctx, e.Settings, settings.KeyContext, settings.DefaultContext())
@@ -462,6 +469,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		}
 		res.TokensIn += resp.Usage.Prompt
 		res.TokensOut += resp.Usage.Completion
+		ar.touch()
 		ar.tokensIn.Add(int64(resp.Usage.Prompt))
 		ar.tokensOut.Add(int64(resp.Usage.Completion))
 		e.Sessions.AddTokens(ctx, sess.ID, resp.Usage.Prompt, resp.Usage.Completion)
@@ -610,6 +618,7 @@ func drainPeek(ch chan string) bool { return ch != nil && len(ch) > 0 }
 func (e *Engine) chat(ctx context.Context, modelRef, system string, history []Msg, specs []llm.ToolSpec, ar *activeRun, agent string, calib *float64, onOverflow func()) (*llm.Response, error) {
 	var lastErr error
 	overflowed := false
+	ar.touch()
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			select {
@@ -777,6 +786,54 @@ type loopGuard struct {
 	toolWarnAt  int // identical tool call: warn once it's been made this many times (default 3)
 	toolAbortAt int // …and hard-abort at this many (default 5)
 	textAbortAt int // stuck-repeating text: hard-abort after this many occurrences (default 2)
+	failWarnAt  int // a tool failed this many times since its last success: tell the model to stop retrying (default 3)
+	failBlockAt int // …and refuse it for the rest of the run at this many (default 6)
+	fails       map[string]int
+}
+
+// blocked says why a tool may not be called any more in this run ("" = fine).
+func (g *loopGuard) blocked(tool string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	at := g.failBlockAt
+	if at <= 0 {
+		at = 6
+	}
+	if g.fails[tool] >= at {
+		return fmt.Sprintf("[tool-health] %s has failed %d times in this run and is switched off for it. Do not try to call it again: use a different tool, or finish and report exactly what could not be done and the error it gave.", tool, g.fails[tool])
+	}
+	return ""
+}
+
+// failed notes one failed call of a tool and returns a warning once it keeps failing.
+func (g *loopGuard) failed(tool string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.fails == nil {
+		g.fails = map[string]int{}
+	}
+	g.fails[tool]++
+	warn, block := g.failWarnAt, g.failBlockAt
+	if warn <= 0 {
+		warn = 3
+	}
+	if block <= 0 {
+		block = 6
+	}
+	switch n := g.fails[tool]; {
+	case n >= block:
+		return fmt.Sprintf("[tool-health] %s has now failed %d times in a row: it is switched off for the rest of this run.", tool, n)
+	case n >= warn:
+		return fmt.Sprintf("[tool-health] %s has failed %d times in a row, whatever the arguments. Stop retrying variations: try a different tool, or report what failed and the error.", tool, n)
+	}
+	return ""
+}
+
+// succeeded resets a tool's failure streak.
+func (g *loopGuard) succeeded(tool string) {
+	g.mu.Lock()
+	delete(g.fails, tool)
+	g.mu.Unlock()
 }
 
 func (g *loopGuard) note(sig string) (warn string) {
@@ -939,6 +996,8 @@ func (e *Engine) execTools(ctx context.Context, spec RunSpec, ar *activeRun, env
 
 func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc llm.ToolCall, tainted bool, guard *loopGuard, steer chan string, spec RunSpec) (res toolResult) {
 	start := time.Now()
+	ar.touch()
+	defer ar.touch()
 	emit := func(phase string, ok bool, why ...string) {
 		ev := map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": brief(tc.Arguments, 140),
 			"phase": phase, "ok": ok, "ms": time.Since(start).Milliseconds()}
@@ -967,6 +1026,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	if !st.Enabled {
 		emit("denied", false)
 		return toolResult{text: fmt.Sprintf("Error: tool %q is disabled by the user.", tc.Name)}
+	}
+	if msg := guard.blocked(tc.Name); msg != "" {
+		emit("denied", false, msg)
+		return toolResult{text: msg}
 	}
 	warn := guard.note(sig(tc))
 	if tool.Risk != tools.RiskRead {
@@ -1081,8 +1144,12 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	case err != nil:
 		out = "Error: " + err.Error()
 		emit("end", false, err.Error())
+		if w := guard.failed(tc.Name); w != "" {
+			warn = strings.TrimSpace(warn + "\n" + w)
+		}
 	default:
 		emit("end", true)
+		guard.succeeded(tc.Name)
 	}
 	out = textutil.Clean(out)
 	if n := len([]rune(out)); n > maxToolResultChars {
@@ -1145,4 +1212,59 @@ func (e *Engine) interruptedText(ctx context.Context, tool string, taskID int64,
 		}
 	}
 	return txt + ". Tell the user it is still running if they ask."
+}
+
+// RootActivity maps each top-level run to the latest sign of life among itself and everything it delegated (unix ms),
+// and reports which of them are waiting for a user's answer.
+func (e *Engine) RootActivity() (latest map[int64]int64, asking map[int64]bool, runs map[int64]ActiveRun) {
+	list := e.ActiveRuns()
+	runs = map[int64]ActiveRun{}
+	for _, r := range list {
+		runs[r.ID] = r
+	}
+	waiting := map[int64]bool{}
+	e.mu.Lock()
+	for _, pa := range e.asks {
+		waiting[pa.Run.ID] = true
+	}
+	e.mu.Unlock()
+	root := func(r ActiveRun) int64 {
+		for i := 0; r.ParentRun != 0 && i < 16; i++ {
+			p, ok := runs[r.ParentRun]
+			if !ok {
+				break
+			}
+			r = p
+		}
+		return r.ID
+	}
+	latest, asking = map[int64]int64{}, map[int64]bool{}
+	for _, r := range list {
+		id := root(r)
+		if r.LastActive > latest[id] {
+			latest[id] = r.LastActive
+		}
+		if waiting[r.ID] {
+			asking[id] = true
+		}
+	}
+	return latest, asking, runs
+}
+
+// StalledRuns lists top-level runs that, together with everything they delegated, have shown no sign of life for at
+// least idle — no model call, tool call or tokens. A run waiting for the user's answer is not stalled.
+func (e *Engine) StalledRuns(idle time.Duration) []ActiveRun {
+	latest, asking, byID := e.RootActivity()
+	var out []ActiveRun
+	now := time.Now().UnixMilli()
+	for id, at := range latest {
+		r := byID[id]
+		if r.IsChat || asking[id] || at == 0 || time.Duration(now-at)*time.Millisecond < idle {
+			continue
+		}
+		r.LastActive = at
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }

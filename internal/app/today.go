@@ -41,6 +41,7 @@ type TodayWorking struct {
 	Agent   string    `json:"agent"`
 	Title   string    `json:"title"`
 	Started time.Time `json:"started"`
+	IdleS   int64     `json:"idle_s"` // seconds since its last sign of life (model call, tool call, tokens)
 }
 
 type TodayCommitment struct {
@@ -136,6 +137,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 		}
 	}
 
+	latest, _, _ := a.Engine.RootActivity()
 	for _, r := range a.Engine.ActiveRuns() {
 		if r.TaskID == 0 {
 			continue // a bare chat run, not a task someone is waiting on
@@ -144,7 +146,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 		if title == "" {
 			title = r.Title
 		}
-		t.WorkingOn = append(t.WorkingOn, TodayWorking{TaskID: r.TaskID, Agent: r.Agent, Title: title, Started: time.UnixMilli(r.Started)})
+		t.WorkingOn = append(t.WorkingOn, TodayWorking{TaskID: r.TaskID, Agent: r.Agent, Title: title, Started: time.UnixMilli(r.Started), IdleS: idleSeconds(max(r.LastActive, latest[r.ID]))})
 	}
 
 	since := time.Now().Add(-24 * time.Hour)
@@ -215,4 +217,11 @@ func (a *App) GetToday(ctx context.Context) Today {
 	}
 
 	return t
+}
+
+func idleSeconds(lastActiveMS int64) int64 {
+	if lastActiveMS == 0 {
+		return 0
+	}
+	return max(0, (time.Now().UnixMilli()-lastActiveMS)/1000)
 }
