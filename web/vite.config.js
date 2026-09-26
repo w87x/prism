@@ -8,7 +8,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/ws': { target: 'ws://127.0.0.1:7777', ws: true },
+      // the backend only accepts its own origin, so present it as one (the dev page itself is on :5173)
+      '/ws': { target: 'ws://127.0.0.1:7777', ws: true, changeOrigin: true, headers: { origin: 'http://127.0.0.1:7777' } },
       '/artifacts': 'http://127.0.0.1:7777',
     },
   },

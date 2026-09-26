@@ -18,8 +18,10 @@
 </span>
 
 <style>
-  .hint { position: relative; display: inline-flex; align-items: center; }
-  .q { width: 15px; height: 15px; padding: 0; border-radius: 50%; border: 1px solid var(--line-3); background: none; color: var(--fg-mute); font-size: 10px; line-height: 1; cursor: pointer; }
+  .hint { position: relative; display: inline-flex; align-items: center; flex: none; }
+  .q { flex: none; box-sizing: border-box; width: 18px; min-width: 18px; height: 18px; min-height: 18px; aspect-ratio: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 50%; border: 1px solid var(--line-3); background: none; color: var(--fg-mute); font-size: 10px; line-height: 1; cursor: pointer; }
+  /* the app gives every button a 30px minimum height on phones, which turned the circle into an ellipse: size both sides alike */
+  @media (max-width: 820px), (pointer: coarse) { .q { width: 26px; min-width: 26px; height: 26px; min-height: 26px; font-size: 13px; } }
   .q:hover, .q.on { color: var(--accent-hi); border-color: var(--accent); }
   .veil { position: fixed; inset: 0; background: none; border: 0; padding: 0; cursor: default; z-index: 40; }
   .pop { position: absolute; top: 22px; left: 0; z-index: 41; width: min(420px, 86vw); background: var(--bg-2); border: 1px solid var(--line-3); padding: 8px 10px; color: var(--fg-dim); font-size: var(--fs-sm); line-height: 1.45; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4); text-transform: none; letter-spacing: 0; font-weight: 400; }

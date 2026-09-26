@@ -80,6 +80,8 @@
   let briefs = $state([]);
   let showDismissed = $state(false);
   let readB = $state(null); // the briefing open in the "Read" modal
+  // total shown (not dismissed), with the unread ones called out — a bare unread count read "0" once everything was opened
+  const briefBadge = $derived.by(() => { const live = briefs.filter((b) => b.status !== 'dismissed').length, n = briefs.filter((b) => b.status === 'new').length; return n ? `${n} new · ${live}` : live; });
   async function loadB() { briefs = (await call('briefings.list', {}, { quiet: true })) || []; arrive(); }
   // arriving from Today: jump to the right tab and open the briefing that was clicked
   function arrive() {
@@ -164,7 +166,7 @@
     <div style="width:78px"><NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} /></div>
   </div>
   <Tabs tabs={[{ id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
-    { id: 'brief', label: 'Briefings', badge: briefs.filter((b) => b.status === 'new').length }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
+    { id: 'brief', label: 'Briefings', badge: briefBadge }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
     { id: 'audit', label: 'Audit' }]} bind:active={tab} />
 
   {#if tab === 'intents'}
