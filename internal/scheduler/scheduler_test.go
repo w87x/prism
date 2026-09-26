@@ -63,8 +63,8 @@ func TestCronEnqueuesAndWatchesNotify(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs, _ := s.Crons(ctx)
-	if len(cs) != 3 {
-		t.Fatalf("expected 3 default crons, got %d", len(cs))
+	if len(cs) != 4 {
+		t.Fatalf("expected 4 default crons, got %d", len(cs))
 	}
 	// make the memory cron due
 	if _, err := s.DB.Exec(ctx, `UPDATE crons SET next_run = now() - interval '1 minute' WHERE agent='Mnemosyne'`); err != nil {

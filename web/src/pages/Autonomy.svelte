@@ -80,8 +80,8 @@
   let briefs = $state([]);
   let showDismissed = $state(false);
   let readB = $state(null); // the briefing open in the "Read" modal
-  // total shown (not dismissed), with the unread ones called out — a bare unread count read "0" once everything was opened
-  const briefBadge = $derived.by(() => { const live = briefs.filter((b) => b.status !== 'dismissed').length, n = briefs.filter((b) => b.status === 'new').length; return n ? `${n} new · ${live}` : live; });
+  // every briefing, dismissed ones included, with the unread ones called out — a bare unread count read "0" once everything was opened
+  const briefBadge = $derived.by(() => { const n = briefs.filter((b) => b.status === 'new').length; return n ? `${n} new · ${briefs.length}` : briefs.length; });
   async function loadB() { briefs = (await call('briefings.list', {}, { quiet: true })) || []; arrive(); }
   // arriving from Today: jump to the right tab and open the briefing that was clicked
   function arrive() {
