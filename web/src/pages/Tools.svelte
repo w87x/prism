@@ -252,6 +252,24 @@
         <Empty>no MCP servers — tools from MCP servers appear as deferred tools and load on demand</Empty>
       {/each}
     </div>
+  {:else if tab === 'plugins'}
+    <div class="bar"><span class="sm mute">Agents can write small Python tools when nothing else fits. Each one waits here until you read its code and approve it; it then runs offline in a sandbox (no network unless it says so, no writes outside its own folder, no access to your secrets).</span></div>
+    {#if !plInfo.sandboxed}<div class="sm err">The macOS sandbox is not available on this machine, so plugins are switched off.</div>{/if}
+    <Panel flush grow>
+      <div class="scroll"><table class="t">
+        <thead><tr><th>Plugin</th><th>What it does</th><th>Access</th><th>By</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {#each plugins as p (p.id)}
+            <tr class="click" onclick={() => viewPl(p)}>
+              <td class="hi">plugin_{p.name}</td><td class="dim">{p.description}</td>
+              <td>{#if p.network}<Badge tone="attn">network</Badge>{:else}<Badge tone="mute">offline</Badge>{/if}</td>
+              <td class="dim">{p.created_by || '—'}</td><td><Badge tone={plTone[p.status]}>{p.status}</Badge></td>
+              <td class="end nowrap"><Button size="sm" variant={p.status === 'pending' ? 'primary' : 'ghost'}>{p.status === 'pending' ? 'Review' : 'View'}</Button></td>
+            </tr>
+          {:else}<tr><td colspan="6"><Empty>no plugins yet — an agent proposes one when it needs a tool that does not exist</Empty></td></tr>{/each}
+        </tbody>
+      </table></div>
+    </Panel>
   {:else}
     <div class="two">
       <Panel title="Installed skills" grow flush>
@@ -296,24 +314,6 @@
         </Field>
       </Panel>
     </div>
-  {:else if tab === 'plugins'}
-    <div class="bar"><span class="sm mute">Agents can write small Python tools when nothing else fits. Each one waits here until you read its code and approve it; it then runs offline in a sandbox (no network unless it says so, no writes outside its own folder, no access to your secrets).</span></div>
-    {#if !plInfo.sandboxed}<div class="sm err">The macOS sandbox is not available on this machine, so plugins are switched off.</div>{/if}
-    <Panel flush grow>
-      <div class="scroll"><table class="t">
-        <thead><tr><th>Plugin</th><th>What it does</th><th>Access</th><th>By</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          {#each plugins as p (p.id)}
-            <tr class="click" onclick={() => viewPl(p)}>
-              <td class="hi">plugin_{p.name}</td><td class="dim">{p.description}</td>
-              <td>{#if p.network}<Badge tone="attn">network</Badge>{:else}<Badge tone="mute">offline</Badge>{/if}</td>
-              <td class="dim">{p.created_by || '—'}</td><td><Badge tone={plTone[p.status]}>{p.status}</Badge></td>
-              <td class="end nowrap"><Button size="sm" variant={p.status === 'pending' ? 'primary' : 'ghost'}>{p.status === 'pending' ? 'Review' : 'View'}</Button></td>
-            </tr>
-          {:else}<tr><td colspan="6"><Empty>no plugins yet — an agent proposes one when it needs a tool that does not exist</Empty></td></tr>{/each}
-        </tbody>
-      </table></div>
-    </Panel>
   {/if}
 </div>
 
