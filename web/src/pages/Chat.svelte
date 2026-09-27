@@ -1,7 +1,6 @@
 <script>
   import { onMount } from 'svelte';
   import { S, call, toast, clock, stamp, setActivityMode } from '../lib/store.svelte.js';
-  import ChatList from '../lib/ChatList.svelte';
   import ChatHeader from '../lib/ChatHeader.svelte';
   import { artifactUrl } from '../lib/ws.js';
   import { prepareImage, imagesFrom, MAX_IMAGES } from '../lib/image.js';
@@ -27,7 +26,6 @@
   let sel = $state(0);
   let menuOff = $state(false);
   let moreBtns = $state(false);
-  let listOpen = $state(false); // narrow screens: the chat list is a drawer
   const busy = $derived(!!S.chatBusy[S.chatTopic]);
   const topic = $derived(S.chatTopic);
 
@@ -206,11 +204,8 @@
 
 <svelte:window onpointerdown={outsideAttach} />
 
-<div class="shell" class:open={listOpen}>
-<div class="drawer"><ChatList onpick={() => (listOpen = false)} /></div>
-{#if listOpen}<button type="button" class="scrim" aria-label="close the chat list" onclick={() => (listOpen = false)}></button>{/if}
 <div class="page" class:drag={dragging} role="presentation" {ondragover} ondragleave={() => (dragging = false)} {ondrop}>
-  <ChatHeader onlist={() => (listOpen = !listOpen)} />
+  <ChatHeader />
   <div class="log-wrap">
     <div class="log scroll" role="log" bind:this={list} onscroll={onScroll} onpointerenter={() => (hover = true)} onpointerleave={() => { hover = false; if (unread > 0) toBottom(); }}>
       {#each feed as it (it.k === 'msg' ? 'm' + it.m.id : it.k === 'day' ? 'd' + it.ts : 'a' + it.ts + it.a.run + (it.a.tool || it.a.kind))}
@@ -304,7 +299,6 @@
     </div>
   </div>
 </div>
-</div>
 
 <PathPicker bind:open={pathOpen} onpick={addPaths} />
 
@@ -337,15 +331,7 @@
 </Modal>
 
 <style>
-  .shell { display: flex; gap: 6px; height: 100%; min-height: 0; }
   .page { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; flex: 1; min-width: 0; }
-  .drawer { display: flex; min-height: 0; }
-  .scrim { display: none; }
-  @media (max-width: 820px) {
-    .drawer { position: fixed; left: 0; top: 0; bottom: 0; z-index: 60; transform: translateX(-105%); transition: transform 0.18s; }
-    .shell.open .drawer { transform: none; }
-    .shell.open .scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.5); border: 0; }
-  }
   .log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
   .log { flex: 1; border: 1px solid var(--line); background: var(--panel-bg); padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
   .m { display: flex; gap: 8px; align-items: baseline; }

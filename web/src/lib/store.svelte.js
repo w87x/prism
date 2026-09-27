@@ -17,7 +17,7 @@ export const S = $state({
   runs: {}, // run id → live run
   askTrail: [], // finished ask_colleague requests, kept a few seconds so the graph can show the answer coming back
   chats: [], // the user's web chats (main first); see loadChats
-  chatTopic: lsGet('prism.chatTopic', ''), // the chat shown on the Chat page ('' = main)
+  chatTopic: '', // single-chat mode: always the main thread
   chatBusy: {}, // topic -> an Atlas turn is running in that chat
   chatUnread: {}, // topic -> new messages seen while another chat was open
   chatRead: lsGet('prism.chatRead', {}), // topic -> id of the last message the user has seen
@@ -297,39 +297,18 @@ export async function refreshAll() {
   loadProposals();
 }
 
-// ── several web chats ──
+// ── the one chat (single-chat mode: S.chatTopic is always '') ──
 export function markRead(topic, id) {
   S.chatUnread[topic] = 0;
   if (id && (S.chatRead[topic] || 0) < id) { S.chatRead[topic] = id; lsSet('prism.chatRead', $state.snapshot(S.chatRead)); }
 }
+// still one call: chats.list also carries the main chat's own settings (title, project focus, remember) that
+// ChatHeader reads and updates via chats.update.
 export async function loadChats() {
   const r = await call('chats.list', {}, { quiet: true });
   if (!r) return;
   S.chats = r;
   for (const c of r) if (c.busy) S.chatBusy[c.topic] = true;
-  if (!r.find((c) => c.topic === S.chatTopic)) S.chatTopic = ''; // the open chat was deleted
-}
-/** A chat other than the open one has something the user has not seen yet. */
-export function chatHasNew(c) {
-  if (c.topic === S.chatTopic) return false;
-  if ((S.chatUnread[c.topic] || 0) > 0) return true;
-  const seen = S.chatRead[c.topic];
-  return seen !== undefined && c.last_msg_id > seen;
-}
-export async function selectChat(topic) {
-  if (topic === S.chatTopic) return;
-  S.chatTopic = topic;
-  lsSet('prism.chatTopic', topic);
-  S.chat = [];
-  const hist = await call('chat.history', { limit: 120, topic }, { quiet: true });
-  if (S.chatTopic !== topic) return; // the user moved on while it loaded
-  S.chat = hist || [];
-  markRead(topic, S.chat.length ? S.chat[S.chat.length - 1].id : 0);
-}
-export async function newChat(title = '', projectBankId = 0) {
-  const c = await call('chats.create', { title, project_bank_id: projectBankId });
-  if (c) { await loadChats(); await selectChat(c.topic); }
-  return c;
 }
 
 export async function loadNotifs() {
