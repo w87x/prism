@@ -44,6 +44,20 @@
   const wallOnly = new URLSearchParams(location.search).get('view') === 'wall';
   if (wallOnly) S.wallOpen = true;
 
+  // iOS: env(safe-area-inset-top) is correct on its own on a notched/Dynamic-Island phone opened as a home-screen
+  // app, but a plain Safari tab reports 0 there even once its own address bar has collapsed and the notch now
+  // overlaps the page — the top row then sits partly under it, unreachable. There is no way to measure that
+  // collapsed-chrome case from CSS, so this is a fixed floor, applied only for iOS in a normal browser tab (not
+  // standalone, which already gets a real inset) and only below the width a phone actually has, not just any
+  // narrow window.
+  if (typeof navigator !== 'undefined' && typeof matchMedia === 'function') {
+    const iOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+    if (iOS && !standalone && innerWidth <= 500) {
+      document.documentElement.style.setProperty('--ios-safari-top-floor', '20px');
+    }
+  }
+
   // phone-sized: the sidebar becomes a slide-in drawer, the right widget rail is dropped, pages get the full width
   const mq = typeof matchMedia === 'function' ? matchMedia('(max-width: 820px)') : null;
   let small = $state(!!mq?.matches); // the viewport is phone-sized
@@ -212,11 +226,11 @@
   .w-c .wid { display: none; }
   /* ── phone layout ── */
   .backdrop { position: fixed; inset: 0; z-index: 110; background: rgba(0, 0, 0, 0.6); border: 0; padding: 0; }
-  .shell.mobile { grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(38px + env(safe-area-inset-top)) minmax(0, 1fr) auto; grid-template-areas: 'top' 'main' 'tabs'; height: 100dvh; }
-  .shell.mobile .top { padding-top: env(safe-area-inset-top); gap: 8px; }
+  .shell.mobile { --sat: max(env(safe-area-inset-top), var(--ios-safari-top-floor, 0px)); grid-template-columns: minmax(0, 1fr); grid-template-rows: calc(38px + var(--sat)) minmax(0, 1fr) auto; grid-template-areas: 'top' 'main' 'tabs'; height: 100dvh; }
+  .shell.mobile .top { padding-top: var(--sat); gap: 8px; }
   .shell.mobile .brand .wm, .shell.mobile .sep, .shell.mobile .act { display: none; }
   .shell.mobile .wid { display: none; }
-  .shell.mobile.sheet .wid { display: flex; position: fixed; z-index: 100; left: 0; right: 0; bottom: 0; top: calc(64px + env(safe-area-inset-top)); background: var(--bg); border-left: 0; border-top: 1px solid var(--line-3); box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); }
+  .shell.mobile.sheet .wid { display: flex; position: fixed; z-index: 100; left: 0; right: 0; bottom: 0; top: calc(64px + var(--sat)); background: var(--bg); border-left: 0; border-top: 1px solid var(--line-3); box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.6); padding-bottom: env(safe-area-inset-bottom); }
   .sheetx { flex: none; align-self: flex-end; background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 3px 12px; }
   /* iPhone: keep everything off the screen edge — the rounded corners, the edge-swipe back gesture and (in landscape) the notch swallow taps there */
   .shell.mobile { --gl: max(12px, env(safe-area-inset-left)); --gr: max(12px, env(safe-area-inset-right)); }

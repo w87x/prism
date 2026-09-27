@@ -99,15 +99,18 @@
     const { cx, cy, ex, ey } = spec();
     const atlas = nodes.find((n) => n.a.role === 'entry');
 
-    // orbits
-    ctx.lineWidth = 1; ctx.strokeStyle = colors.line; ctx.fillStyle = colors.mute; ctx.font = '9px monospace'; ctx.textAlign = 'left';
-    for (const o of orbits) {
-      ctx.globalAlpha = 0.55; ctx.setLineDash([2, 6]);
-      ctx.beginPath(); ctx.ellipse(cx, cy, o.k * ex, o.k * ey, 0, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]); ctx.globalAlpha = 0.6;
-      if (!compact()) ctx.fillText(o.label.toUpperCase(), cx + o.k * ex * Math.cos(-0.5) + 4, cy + o.k * ey * Math.sin(-0.5));
+    // orbits: on a phone-sized canvas these are just visual clutter around already-tiny nodes — the nodes still
+    // sit at the same radius (see spec()/orbitOf), only the guide rings and their labels are skipped
+    if (!compact()) {
+      ctx.lineWidth = 1; ctx.strokeStyle = colors.line; ctx.fillStyle = colors.mute; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+      for (const o of orbits) {
+        ctx.globalAlpha = 0.55; ctx.setLineDash([2, 6]);
+        ctx.beginPath(); ctx.ellipse(cx, cy, o.k * ex, o.k * ey, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 0.6;
+        ctx.fillText(o.label.toUpperCase(), cx + o.k * ex * Math.cos(-0.5) + 4, cy + o.k * ey * Math.sin(-0.5));
+      }
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
     // spokes from Atlas; live ones (delegation in progress) run bright and dashed
