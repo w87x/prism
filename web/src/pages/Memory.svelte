@@ -734,7 +734,7 @@
 
 <style>
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
-  .bar { display: flex; align-items: center; gap: 8px; flex: none; }
+  .bar { display: flex; flex-wrap: wrap; row-gap: 6px; align-items: center; gap: 8px; flex: none; }
   .srch { width: 320px; }
   @media (max-width: 820px) { .srch { width: 100%; } .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); } .banks { max-height: 120px; } }
   .body { flex: 1; display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 6px; min-height: 0; }

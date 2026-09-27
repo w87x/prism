@@ -223,6 +223,9 @@
   .pagebox { flex: 1; min-height: 0; }
   .askbar { flex: none; border: 1px solid var(--attn); background: var(--attn-bg); box-shadow: var(--glow-attn); padding: 5px 8px; display: flex; flex-direction: column; gap: 6px; }
   .wid { grid-area: wid; min-width: 0; min-height: 0; background: transparent; border-left: 1px solid var(--line-2); padding: 6px; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+  /* the right panel is a fixed, narrow column: a button row built for a wider page (e.g. AgentWidget's Save/
+     Revert/Evolve/Delete) must wrap here instead of quietly overflowing past its own edge */
+  .wid :global(.row), .wid :global(.actions) { flex-wrap: wrap; row-gap: 6px; }
   .w-c .wid { display: none; }
   /* ── phone layout ── */
   .backdrop { position: fixed; inset: 0; z-index: 110; background: rgba(0, 0, 0, 0.6); border: 0; padding: 0; }

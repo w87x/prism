@@ -97,6 +97,11 @@ type Service struct {
 	// ChatProject names the project bank a web chat is focused on ("" when none); set by the app. Distillation uses
 	// it to file facts about the work in that project by default.
 	ChatProject func(ctx context.Context, channel, topic string) string
+	// AskUser delivers a genuinely important open question deep analysis raised (see analyze.go's "question"
+	// insights) the same way a briefing is delivered — title, full body (with its supporting facts) and 1-5
+	// importance — but as its own kind, so it can get its own Telegram topic. Set by the app; nil skips it
+	// (the question still exists as an insight, just without the proactive push).
+	AskUser func(ctx context.Context, bank, title, body string, importance int) error
 	// VectorOn makes similarity search run inside Postgres (pgvector) instead of in-process.
 	VectorOn bool
 }

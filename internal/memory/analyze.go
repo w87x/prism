@@ -35,14 +35,14 @@ Think like a careful analyst. Look for:
 - "trend": how something changed over time (use the dates): a growing interest, an abandoned plan, a shifted preference.
 - "preference": a stable like, dislike or working style that several facts show.
 - "risk": something likely to go wrong, be forgotten or become a problem, judging from the facts.
-- "question": an important thing the memory does NOT know but that would matter (gap). Write it as a question.
+- "question": an important thing the memory does NOT know but that would matter (gap). Write it as a question. Also give "importance" 1-5: 5 = a genuine, specific ambiguity you cannot confidently act on (e.g. conflicting signals about which of two named options the user prefers), 1 = mild curiosity with no real consequence. Only importance 4-5 interrupts the user; most gaps are NOT worth that and should be scored low. Every other insight type: omit importance or leave it 0.
 Also report:
 - "contradictions": pairs of FACT ids that cannot both be true now (not just different topics). Say why.
 - "duplicates": groups of FACT ids that say the same thing; keep the best-worded one.
 - "card": a compact profile of what this bank is about (for the user's bank: who they are, what they do, what they care about, how they like to work) — plain sentences, max 700 characters, only what the facts support. Return "" if nothing changed.
 
 Rules: never invent; cite only fact ids you were given, and never a conclusion or insight id as evidence; every insight is one self-contained sentence in the third person; do not restate a single fact or an existing conclusion; prefer a few sharp insights over many vague ones (at most 8 changes). Insight actions: "new", "strengthen" (id of an existing insight + only the NEW evidence ids), "revise" (id + corrected text + evidence), "retire" (id). "confidence" is 0.0-1.0.
-Answer JSON only: {"insights":[{"action":"new|strengthen|revise|retire","id":null,"type":"pattern|deduction|hypothesis|trend|preference|risk|question","text":"...","evidence":[ids],"confidence":0.0}],"contradictions":[{"a":1,"b":2,"note":"..."}],"duplicates":[{"keep":1,"drop":[2]}],"card":"..."}`
+Answer JSON only: {"insights":[{"action":"new|strengthen|revise|retire","id":null,"type":"pattern|deduction|hypothesis|trend|preference|risk|question","text":"...","evidence":[ids],"confidence":0.0,"importance":0}],"contradictions":[{"a":1,"b":2,"note":"..."}],"duplicates":[{"keep":1,"drop":[2]}],"card":"..."}`
 
 type AnalyzeResult struct {
 	Bank           string `json:"bank"`
@@ -240,6 +240,7 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 			Text       string  `json:"text"`
 			Evidence   []int64 `json:"evidence"`
 			Confidence float64 `json:"confidence"`
+			Importance int     `json:"importance"`
 		} `json:"insights"`
 		Contradictions []struct {
 			A    int64  `json:"a"`
@@ -290,6 +291,21 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 			}
 			if _, err := s.insertDerived(ctx, bankID, text, ev, ch.Confidence, nil, "analysis", []string{"insight", typ}, capConf); err == nil {
 				res.Insights++
+				if typ == "question" && ch.Importance >= 4 && s.AskUser != nil {
+					var lines []string
+					for _, fid := range ev {
+						for _, f := range facts {
+							if f.id == fid {
+								lines = append(lines, "- "+f.text)
+							}
+						}
+					}
+					body := text
+					if len(lines) > 0 {
+						body += "\n\nBased on:\n" + strings.Join(lines, "\n")
+					}
+					_ = s.AskUser(ctx, b.Label(), text, body, ch.Importance)
+				}
 			}
 		case "strengthen":
 			if ch.ID == nil || own[*ch.ID] == nil || len(ev) == 0 {

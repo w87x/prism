@@ -381,7 +381,7 @@
   .send :global(.btn) { height: 26px; }
   .vsep { width: 1px; height: 14px; background: var(--line-2); margin: 0 2px; }
   .input { position: relative; display: flex; flex-direction: column; gap: 5px; flex: none; }
-  .btns { display: flex; gap: 6px; align-items: center; }
+  .btns { display: flex; flex-wrap: wrap; row-gap: 4px; gap: 6px; align-items: center; }
   @media (max-width: 820px) {
     .btns { flex-wrap: wrap; }
     .btns.hide { display: none; }

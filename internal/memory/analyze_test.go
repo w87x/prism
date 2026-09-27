@@ -422,3 +422,50 @@ func TestDistillationFollowsAChatsProjectFocus(t *testing.T) {
 		t.Fatalf("project facts %+v, user facts %+v", pf, uf)
 	}
 }
+
+// A "question" insight that clears the importance bar is pushed via AskUser with its supporting fact quoted in
+// the body; one below the bar is stored (still visible in review) but never pushed — mirrors AddBriefing's
+// importance>=4 "deliver immediately" rule, just routed through memory's own callback instead of the scheduler.
+func TestAnalyzeAsksUserOnlyForImportantQuestions(t *testing.T) {
+	ctx := context.Background()
+	s, fake := newSvc(t)
+	f1 := store(t, s, StoreReq{Bank: "user", Text: "User mentioned liking both the blue and the red jacket"})
+	store(t, s, StoreReq{Bank: "user", Text: "Distinct filler fact one about an unrelated topic"})
+	store(t, s, StoreReq{Bank: "user", Text: "Distinct filler fact two about an unrelated topic"})
+	store(t, s, StoreReq{Bank: "user", Text: "Distinct filler fact three about an unrelated topic"})
+	bank, err := s.BankBySpec(ctx, "user", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []struct {
+		bank, title, body string
+		importance        int
+	}
+	s.AskUser = func(ctx context.Context, bank, title, body string, importance int) error {
+		asked = append(asked, struct {
+			bank, title, body string
+			importance        int
+		}{bank, title, body, importance})
+		return nil
+	}
+
+	fake.Handler = analysisReply(t, fmt.Sprintf(`{"insights":[{"action":"new","type":"question","text":"Does the user prefer the blue or the red jacket?","evidence":[%d],"confidence":0.6,"importance":5}]}`, f1.ID))
+	if _, err := s.Analyze(ctx, bank.ID, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].title != "Does the user prefer the blue or the red jacket?" || asked[0].importance != 5 || !strings.Contains(asked[0].body, "blue and the red jacket") {
+		t.Fatalf("asked = %+v", asked)
+	}
+
+	// a second bank's low-importance question must not be pushed
+	f2 := store(t, s, StoreReq{Bank: "user", Text: "User mentioned liking coffee in the morning sometimes"})
+	_ = f2
+	asked = nil
+	fake.Handler = analysisReply(t, fmt.Sprintf(`{"insights":[{"action":"new","type":"question","text":"Does the user always drink coffee?","evidence":[%d],"confidence":0.6,"importance":2}]}`, f2.ID))
+	if _, err := s.Analyze(ctx, bank.ID, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 0 {
+		t.Fatalf("a low-importance question must not be pushed: %+v", asked)
+	}
+}

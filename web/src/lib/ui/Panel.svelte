@@ -55,7 +55,9 @@
   .accent { --c: var(--accent-dim); --a: var(--accent); --ah: var(--accent-hi); }
   .attn { --c: var(--attn-dim); box-shadow: var(--glow-attn); --a: var(--attn); --ah: var(--attn-hi); }
   .err { --c: var(--err-dim); --a: var(--err); --ah: var(--err-hi); }
-  header { display: flex; align-items: center; gap: 7px; padding: 2px 8px; border-bottom: 1px solid var(--c); background: color-mix(in srgb, var(--bg-2) 85%, transparent); min-height: 22px; flex: none; }
+  /* a header with a busy right-side button row (several actions on one panel) wraps to a second line instead of
+     silently overflowing past the panel's edge; a header that fits stays exactly as it was on one line. */
+  header { display: flex; flex-wrap: wrap; row-gap: 2px; align-items: center; gap: 7px; padding: 2px 8px; border-bottom: 1px solid var(--c); background: color-mix(in srgb, var(--bg-2) 85%, transparent); min-height: 22px; flex: none; }
   .ttl { background: none; border: 0; padding: 0; text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--fs-sm); font-weight: 600; color: var(--fg-dim); display: flex; align-items: center; gap: 5px; }
   .ttl.static { cursor: default; }
   .car { color: var(--fg-mute); }

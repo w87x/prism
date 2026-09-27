@@ -78,6 +78,9 @@ type Briefing struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	Reply      string     `json:"reply"`
 	RepliedAt  *time.Time `json:"replied_at"`
+	// Kind: "briefing" (a dream/digest, the default) or "question" (something memory analysis needs from the
+	// user to resolve a genuine ambiguity — see AddBriefing) — same table and reply flow, its own Telegram topic.
+	Kind string `json:"kind"`
 }
 
 type Service struct {
@@ -495,7 +498,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 // ── briefings ───────────────────────────────────────────────────────────────
 
 func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at FROM briefings WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 200`, status)
+	rows, err := s.DB.Query(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind FROM briefings WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 200`, status)
 	if err != nil {
 		return nil, err
 	}
@@ -503,7 +506,7 @@ func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, err
 	var out []Briefing
 	for rows.Next() {
 		var b Briefing
-		if err := rows.Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -514,8 +517,8 @@ func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, err
 // Briefing fetches a single briefing by id (for the "save to Obsidian" / "read" actions).
 func (s *Service) Briefing(ctx context.Context, id int64) (Briefing, error) {
 	var b Briefing
-	err := s.DB.QueryRow(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at FROM briefings WHERE id=$1`, id).
-		Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt)
+	err := s.DB.QueryRow(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind FROM briefings WHERE id=$1`, id).
+		Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return b, fmt.Errorf("briefing #%d does not exist", id)
 	}
@@ -523,6 +526,17 @@ func (s *Service) Briefing(ctx context.Context, id int64) (Briefing, error) {
 }
 
 func (s *Service) AddBriefing(ctx context.Context, agentName, title, body string, importance int) (int64, error) {
+	return s.addBriefing(ctx, agentName, title, body, importance, "briefing")
+}
+
+// AddQuestion is AddBriefing for a genuine open question memory analysis needs the user to resolve (see
+// internal/memory's AskUser callback, wired in internal/app/ext.go): same table, list and reply flow, but its own
+// Telegram topic ("Questions") so it never gets lost among ordinary dream/digest briefings.
+func (s *Service) AddQuestion(ctx context.Context, agentName, title, body string, importance int) (int64, error) {
+	return s.addBriefing(ctx, agentName, title, body, importance, "question")
+}
+
+func (s *Service) addBriefing(ctx context.Context, agentName, title, body string, importance int, kind string) (int64, error) {
 	if importance < 1 {
 		importance = 1
 	}
@@ -530,13 +544,17 @@ func (s *Service) AddBriefing(ctx context.Context, agentName, title, body string
 		importance = 5
 	}
 	var id int64
-	err := s.DB.QueryRow(ctx, `INSERT INTO briefings(agent,title,body,importance) VALUES($1,$2,$3,$4) RETURNING id`, agentName, title, body, importance).Scan(&id)
+	err := s.DB.QueryRow(ctx, `INSERT INTO briefings(agent,title,body,importance,kind) VALUES($1,$2,$3,$4,$5) RETURNING id`, agentName, title, body, importance, kind).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
 	s.emit("briefing.new", map[string]any{"id": id, "title": title})
 	if importance >= 4 { // deliver immediately
-		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body, Topic: "Briefings"})
+		topic := "Briefings"
+		if kind == "question" {
+			topic = "Questions"
+		}
+		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body, Topic: topic})
 		_, _ = s.DB.Exec(ctx, `UPDATE briefings SET status='delivered' WHERE id=$1`, id)
 	}
 	return id, nil

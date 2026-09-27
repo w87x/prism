@@ -87,7 +87,7 @@
   let sx = 0;
   const down = (e) => { sx = e.clientX; };
   const up = (e) => { const dx = e.clientX - sx; if (Math.abs(dx) > 90 && e.pointerType === 'touch') go(dx < 0 ? 1 : -1); };
-  const asks = (b) => !b.reply && /\?/.test(b.body);
+  const asks = (b) => b.kind === 'question' || (!b.reply && /\?/.test(b.body));
 </script>
 
 <svelte:window onkeydown={key} />

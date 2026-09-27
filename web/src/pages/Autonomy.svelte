@@ -117,7 +117,9 @@
   }
   let replyText = $state('');
   let replying = $state(false);
-  const asks = (b) => !b.reply && /\?/.test(b.body);
+  // b.kind === 'question' is the reliable signal (memory analysis explicitly raised it); the old body-sniffing
+  // heuristic stays as a fallback for anything else that happens to read as a question (e.g. a dream briefing).
+  const asks = (b) => b.kind === 'question' || (!b.reply && /\?/.test(b.body));
   async function sendReply() {
     replying = true;
     const ok = await call('briefings.reply', { id: readB.id, text: replyText });
@@ -164,7 +166,7 @@
       <table class="cmp"><tbody>{#each AUTONOMY_HELP.compare as [n, k, t]}<tr><td><b>{n}</b><br /><span class="mute">{k}</span></td><td>{t}</td></tr>{/each}</tbody></table>
     </Hint>
     <span class="sm mute" title="How many agents other agents (Forge) may hire per week. Each starts on probation without exec tools until you confirm it. 0 forbids hiring.">auto-hires per week</span>
-    <div style="width:78px"><NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} /></div>
+    <NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} />
   </div>
   <Tabs tabs={[{ id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
     { id: 'brief', label: 'Briefings', badge: briefBadge }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
@@ -231,7 +233,7 @@
       </div>
     </Panel>
   {:else if tab === 'brief'}
-    <div class="bar"><span class="sm mute">Oneiros dreams over everything known about you and drops briefings here; importance 4+ is pushed to you immediately.</span><span class="grow"></span>
+    <div class="bar"><span class="sm mute">Oneiros dreams over everything known about you and drops briefings here; importance 4+ is pushed to you immediately. Genuine open questions from memory analysis (e.g. an unresolved preference between two named options) land here too, marked "question", in their own Telegram topic.</span><span class="grow"></span>
       {#if briefs.some((b) => b.status === 'dismissed')}<Checkbox bind:checked={showDismissed} label="show dismissed ({briefs.filter((b) => b.status === 'dismissed').length})" />{/if}
       <Segmented size="sm" bind:value={bView} options={[{ value: 'cards', label: 'cards' }, { value: 'list', label: 'list' }]} />
       {#if bView === 'list'}<Segmented size="sm" bind:value={bGroup} options={[{ value: 'day', label: 'by day' }, { value: 'agent', label: 'by agent' }]} />{/if}

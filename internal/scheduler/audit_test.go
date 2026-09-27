@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/tasks"
 )
 
@@ -165,5 +166,43 @@ func TestReplyingToABriefingRecordsItAndTasksTheAuthor(t *testing.T) {
 	b, _ := s.Briefing(ctx, id)
 	if b.Reply != "No, I am staying home in May." || b.RepliedAt == nil || b.Status != "delivered" {
 		t.Fatalf("briefing = %+v", b)
+	}
+}
+
+// AddQuestion is AddBriefing under the hood but stores kind='question' and, once important enough to deliver
+// immediately, routes to the "Questions" Telegram topic instead of "Briefings".
+func TestAddQuestionRoutesToItsOwnTopic(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	var notices []agent.Notice
+	s.Engine.Emit = func(typ string, data any) {
+		if n, ok := data.(agent.Notice); ok && typ == "notice" {
+			notices = append(notices, n)
+		}
+	}
+	id, err := s.AddQuestion(ctx, "Mnemosyne", "Which do you prefer?", "Coffee or tea in the morning?", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Briefing(ctx, id)
+	if err != nil || b.Kind != "question" || b.Status != "delivered" {
+		t.Fatalf("briefing: %+v err=%v", b, err)
+	}
+	if len(notices) != 1 || notices[0].Topic != "Questions" {
+		t.Fatalf("notices = %+v", notices)
+	}
+
+	// a low-importance question is stored but not pushed
+	notices = nil
+	id2, err := s.AddQuestion(ctx, "Mnemosyne", "Minor curiosity", "Does it matter which mug you use?", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := s.Briefing(ctx, id2)
+	if err != nil || b2.Kind != "question" || b2.Status != "new" {
+		t.Fatalf("briefing2: %+v err=%v", b2, err)
+	}
+	if len(notices) != 0 {
+		t.Fatalf("a low-importance question must not be pushed: %+v", notices)
 	}
 }

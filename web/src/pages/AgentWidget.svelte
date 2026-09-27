@@ -179,7 +179,7 @@
   .form { display: flex; flex-direction: column; gap: 9px; }
   .two { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
   .sw { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-  .actions { display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; margin-top: auto; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; margin-top: auto; }
   .props { border: 1px solid var(--attn-dim); background: var(--attn-bg); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
   .props h4 { color: var(--attn); }
   .hv pre { max-height: 200px; }

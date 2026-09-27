@@ -161,6 +161,10 @@ func (a *App) buildExtensions(ctx context.Context) error {
 	x.Sched = &scheduler.Service{DB: a.DB.Pool, Engine: a.Engine, Settings: a.Settings, Emit: a.Emit, Logf: a.Logf}
 	x.Sched.Notify = a.Notify
 	x.Sched.DeleteTopic = x.Telegram.DeleteTopic
+	a.Memory.AskUser = func(ctx context.Context, bank, title, body string, importance int) error {
+		_, err := x.Sched.AddQuestion(ctx, "Mnemosyne", "Question — "+brief(title, 70), body, importance)
+		return err
+	}
 	x.Sched.Env = scheduler.Env{
 		LLM: a.LLM,
 		CallTool: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
