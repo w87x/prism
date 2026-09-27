@@ -188,8 +188,8 @@
                 <td class="mute sm">{i.status === 'active' ? until(i.next_due) : i.status}</td>
                 <td class="end nowrap">
                   {#if i.expires_at}
-                    <Button size="sm" variant="ghost" title="check twice as often" onclick={() => faster(i)}>⏩</Button>
-                    <Button size="sm" variant="ghost" title="check half as often" onclick={() => slower(i)}>⏪</Button>
+                    <Button size="sm" variant="ghost" title="check twice as often" onclick={() => faster(i)}><Icon name="ff" size={11} /></Button>
+                    <Button size="sm" variant="ghost" title="check half as often" onclick={() => slower(i)}><Icon name="rw" size={11} /></Button>
                     <Button size="sm" variant="ghost" title="give it another hour" onclick={() => extend(i, 60)}>+1h</Button>
                   {/if}
                   {#if i.status === 'expired'}<Button size="sm" variant="ghost" onclick={() => extend(i, 60)}>Resume</Button>

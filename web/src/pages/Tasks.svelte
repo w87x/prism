@@ -93,7 +93,7 @@
   <div class="mlist scroll" use:nearEnd={loadMore}>
     {#each roots as t (t.id)}
       {@const n = kids(t).length}
-      <div class="mcard" role="button" tabindex="0" onclick={() => open(t)} onkeydown={(e) => e.key === 'Enter' && open(t)}>
+      <div class="mcard" class:userReq={t.from_kind === 'user'} role="button" tabindex="0" onclick={() => open(t)} onkeydown={(e) => e.key === 'Enter' && open(t)}>
         <div class="mtop">
           <Led state={led(t.status)} pulse={t.status === 'running' || t.status === 'waiting_input'} size={9} />
           <span class="hi"><Glyph name={t.to_agent} /> {t.to_agent}</span>
@@ -130,12 +130,12 @@
         <tbody>
           {#each rows as { t, lvl } (t.id)}
             {@const n = lvl === 0 ? kids(t).length : 0}
-            <tr class="click" class:sel={detail?.task?.id === t.id && detailOpen} onclick={() => open(t)}>
+            <tr class="click" class:sel={detail?.task?.id === t.id && detailOpen} class:userReq={t.from_kind === 'user'} onclick={() => open(t)}>
               <td class="mute">
                 {#if n}<button class="car" onclick={(e) => { e.stopPropagation(); collapsed[t.id] = !collapsed[t.id]; }}>{collapsed[t.id] ? '▸' : '▾'}</button>{/if}#{t.id}
               </td>
               <td class="nowrap" style="padding-left:{8 + lvl * 14}px">
-                <span class="dim">{t.from_kind === 'agent' ? t.from_name : t.from_kind}</span> <span class="mute">→</span> <span class="hi"><Glyph name={t.to_agent} /> {t.to_agent}</span>{#if n}<span class="mute sm"> +{n}</span>{/if}
+                <span class="dim">{t.from_kind === 'agent' ? t.from_name : t.from_kind}</span> <span class="mute">→</span> <span class="hi" title={t.from_kind === 'user' ? 'you asked Atlas directly — a top-level request' : ''}><Glyph name={t.to_agent} /> {t.to_agent}</span>{#if n}<span class="mute sm"> +{n}</span>{/if}
               </td>
               <td class="ellipsis" style="max-width:340px">{t.title}{#if t.question}<div class="attn sm ellipsis">? {t.question}</div>{:else if t.status === 'partial'}<div class="attn sm ellipsis">⚠ {t.error}</div>{/if}</td>
               <td class="nowrap"><Led state={led(t.status)} pulse={t.status === 'running' || t.status === 'waiting_input'} size={8} /> <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'}>{t.status.replace('_', ' ')}</span></td>
@@ -195,6 +195,9 @@
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={() => { detailOpen = false; load(); }} />
 
 <style>
+  /* a task straight from you to Atlas is always top-level; picked out so it isn't mistaken for a delegated
+     sub-task, or for a top-level task a cron/intent/Telegram message started instead of you */
+  tr.userReq td:nth-child(2) .hi, tr.userReq td.ellipsis, .mcard.userReq .hi, .mcard.userReq .mtitle { color: var(--accent-hi); font-weight: 700; }
   .mchips { display: flex; gap: 6px; overflow-x: auto; flex: none; scrollbar-width: none; }
   .mchips::-webkit-scrollbar { display: none; }
   .mchip { flex: none; min-height: 36px; padding: 0 14px; background: var(--bg-1); border: 1px solid var(--line-2); color: var(--fg-dim); font-size: var(--fs-sm); white-space: nowrap; }

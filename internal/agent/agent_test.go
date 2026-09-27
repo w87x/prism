@@ -2248,3 +2248,83 @@ func TestNoticeWithTopicStillReachesWebChat(t *testing.T) {
 		t.Fatalf("notice with an automatic Topic must still show in the web chat: %+v", hist)
 	}
 }
+
+// Cancelling a top-level task (the Tasks page "Stop" button) takes its whole delegated tree down with it, not
+// just its own turn — the gap this closes: CancelTask previously stopped only the one task, and only StopChat's
+// own cancelDescendants call reached delegated work.
+func TestCancelTaskCascadesToDescendants(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	root, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "coordinate"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &root.ID, RootID: root.ID, FromKind: "agent", FromName: "Atlas", ToAgent: "Scout", Input: "work", Depth: 1}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &child.ID, RootID: root.ID, FromKind: "agent", FromName: "Scout", ToAgent: "Rook", Input: "help", Depth: 2}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan int64, 2)
+	h.e.mu.Lock()
+	h.e.cancels[child.ID] = func() { stopped <- child.ID }
+	h.e.cancels[grandchild.ID] = func() { stopped <- grandchild.ID }
+	h.e.mu.Unlock()
+
+	if err := h.e.CancelTask(ctx, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64]bool{}
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-stopped:
+			got[id] = true
+		case <-time.After(3 * time.Second):
+			t.Fatalf("only got %v", got)
+		}
+	}
+	if !got[child.ID] || !got[grandchild.ID] {
+		t.Fatalf("expected both descendants cancelled: %v", got)
+	}
+	for _, id := range []int64{root.ID, child.ID, grandchild.ID} {
+		tk, err := h.e.Tasks.Get(ctx, id)
+		if err != nil || tk.Status != tasks.Cancelled {
+			t.Fatalf("task %d not cancelled: %+v err=%v", id, tk, err)
+		}
+	}
+}
+
+// Cancelling a nested sub-task takes down only its own branch — not its parent or an unrelated sibling branch.
+func TestCancelTaskOnlyTakesDownItsOwnBranch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	root, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "coordinate"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchA, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &root.ID, RootID: root.ID, FromKind: "agent", FromName: "Atlas", ToAgent: "Scout", Input: "a", Depth: 1}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchB, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &root.ID, RootID: root.ID, FromKind: "agent", FromName: "Atlas", ToAgent: "Rook", Input: "b", Depth: 1}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.CancelTask(ctx, branchA.ID); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := h.e.Tasks.Get(ctx, branchA.ID)
+	b, _ := h.e.Tasks.Get(ctx, branchB.ID)
+	r, _ := h.e.Tasks.Get(ctx, root.ID)
+	if a.Status != tasks.Cancelled {
+		t.Fatalf("branch A should be cancelled: %+v", a)
+	}
+	if b.Status == tasks.Cancelled {
+		t.Fatalf("unrelated branch B must survive: %+v", b)
+	}
+	if r.Status == tasks.Cancelled {
+		t.Fatalf("the parent must survive a child's own cancellation: %+v", r)
+	}
+}

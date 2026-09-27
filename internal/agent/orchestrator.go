@@ -530,30 +530,49 @@ func (e *Engine) StopChat(key string) bool {
 	return true
 }
 
-// cancelDescendants stops the running or queued tasks below a task.
+// cancelDescendants stops the running or queued tasks under a task — its own delegated work and, transitively,
+// whatever that delegated in turn, but never its siblings or ancestors (found via the whole tree's parent_id
+// chain, not just everything sharing its root_id, so this is correct whether taskID is the top of its tree or a
+// delegated task partway down it).
 func (e *Engine) cancelDescendants(taskID int64) {
 	if taskID == 0 {
 		return
 	}
 	ctx := context.Background()
-	root := taskID
-	if t, err := e.Tasks.Get(ctx, taskID); err == nil && t.RootID != 0 {
-		root = t.RootID
-	}
-	rows, err := e.DB.Query(ctx, `SELECT id FROM tasks WHERE root_id=$1 AND id<>$2 AND status IN ('queued','running')`, root, taskID)
+	t, err := e.Tasks.Get(ctx, taskID)
 	if err != nil {
 		return
 	}
-	var ids []int64
+	root := t.RootID
+	if root == 0 {
+		root = t.ID
+	}
+	rows, err := e.DB.Query(ctx, `SELECT id, parent_id, status FROM tasks WHERE root_id=$1`, root)
+	if err != nil {
+		return
+	}
+	byParent := map[int64][]int64{}
+	live := map[int64]bool{}
 	for rows.Next() {
 		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		var parentID *int64
+		var status string
+		if rows.Scan(&id, &parentID, &status) != nil {
+			continue
 		}
+		if parentID != nil {
+			byParent[*parentID] = append(byParent[*parentID], id)
+		}
+		live[id] = status == "queued" || status == "running"
 	}
 	rows.Close()
-	for _, id := range ids {
-		_ = e.CancelTask(ctx, id)
+	queue := byParent[taskID]
+	for i := 0; i < len(queue); i++ {
+		id := queue[i]
+		queue = append(queue, byParent[id]...)
+		if live[id] {
+			_ = e.cancelOne(ctx, id)
+		}
 	}
 }
 
@@ -852,7 +871,18 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 }
 
 // CancelTask cancels a task; a running one has its context cancelled.
+// CancelTask stops one task, then (via cancelDescendants) everything under it that is still queued or running —
+// so stopping a top-level user request takes its whole tree down with it, not just its own turn. This is a
+// deliberate, explicit stop, unlike a steering interruption, which lets detached delegate/ask_colleague work keep
+// running in the background on purpose (see execOne's interrupted-tool path).
 func (e *Engine) CancelTask(ctx context.Context, id int64) error {
+	err := e.cancelOne(ctx, id)
+	e.cancelDescendants(id)
+	return err
+}
+
+// cancelOne stops a single task's own context and marks it cancelled, without touching anything it delegated.
+func (e *Engine) cancelOne(ctx context.Context, id int64) error {
 	e.mu.Lock()
 	c := e.cancels[id]
 	e.mu.Unlock()
