@@ -42,6 +42,7 @@ type EntityExtractResult struct {
 	Considered int    `json:"considered"`
 	Entities   int    `json:"entities"`
 	Relations  int    `json:"relations"`
+	Merged     int    `json:"merged,omitempty"` // near-duplicate entities folded together this pass, see dedupeEntities
 	Skipped    string `json:"skipped,omitempty"`
 }
 
@@ -49,7 +50,135 @@ func (r EntityExtractResult) String() string {
 	if r.Skipped != "" {
 		return fmt.Sprintf("%s: skipped (%s)", r.Bank, r.Skipped)
 	}
-	return fmt.Sprintf("%s: %d entities, %d relations (from %d facts)", r.Bank, r.Entities, r.Relations, r.Considered)
+	s := fmt.Sprintf("%s: %d entities, %d relations (from %d facts)", r.Bank, r.Entities, r.Relations, r.Considered)
+	if r.Merged > 0 {
+		s += fmt.Sprintf(", %d merged", r.Merged)
+	}
+	return s
+}
+
+// The same entity tends to accumulate near-duplicates over many separate extraction passes: the model sees only a
+// flat name list each time ("Euphoria" one pass, "Euphoria Season 3" the next), and "reuse the exact existing name"
+// is advice, not a constraint. dedupeEntities folds them back together — canonical name kept as one of the
+// duplicates' own wording, the rest recorded as aliases (memory_entities.aliases, otherwise unused) so nothing
+// written under an old name goes unmatched later.
+const entityDedupPrompt = `You clean up a knowledge graph's entity list: find names that refer to the SAME real-world thing, written differently across separate extraction passes (e.g. "Euphoria" and "Euphoria Season 3", "OpenAI" and "Open AI").
+
+For each group, "keep" is the id of the clearest, most complete/canonical name; "drop" lists the other ids that are the same thing. Never group two names that are merely related or similar-sounding but are actually different things (a show and its sequel, a person and their company). At most 8 groups. If nothing is a clear duplicate, return an empty list.
+Answer JSON only: {"merges":[{"keep":1,"drop":[2,3]}]}`
+
+const maxEntityDedupeGroups = 8
+
+// dedupeEntities looks at every live entity in a bank and merges clear near-duplicates: the survivor's mentions,
+// links and evidence absorb the dropped ones', its aliases record their names, and it is deleted. Returns how many
+// were merged away.
+func (s *Service) dedupeEntities(ctx context.Context, bankID int64) int {
+	rows, err := s.db.Query(ctx, `SELECT id, name, kind, mentions FROM memory_entities WHERE bank_id=$1 ORDER BY mentions DESC LIMIT 200`, bankID)
+	if err != nil {
+		return 0
+	}
+	type er struct {
+		id       int64
+		name     string
+		kind     string
+		mentions int
+	}
+	var ents []er
+	byID := map[int64]*er{}
+	for rows.Next() {
+		var e er
+		if rows.Scan(&e.id, &e.name, &e.kind, &e.mentions) == nil {
+			ents = append(ents, e)
+		}
+	}
+	rows.Close()
+	if len(ents) < 2 {
+		return 0
+	}
+	for i := range ents {
+		byID[ents[i].id] = &ents[i]
+	}
+	var sb strings.Builder
+	for _, e := range ents {
+		fmt.Fprintf(&sb, "%d: %s (%s, %d mentions)\n", e.id, e.name, e.kind, e.mentions)
+	}
+	var parsed struct {
+		Merges []struct {
+			Keep int64   `json:"keep"`
+			Drop []int64 `json:"drop"`
+		} `json:"merges"`
+	}
+	if err := s.llm.CompleteJSON(ctx, "role:fast", entityDedupPrompt, sb.String(), &parsed); err != nil {
+		return 0
+	}
+	if len(parsed.Merges) > maxEntityDedupeGroups {
+		parsed.Merges = parsed.Merges[:maxEntityDedupeGroups]
+	}
+	merged := 0
+	dropped := map[int64]bool{} // an id already folded away this pass cannot also be a keep or dropped again
+	for _, m := range parsed.Merges {
+		keep, ok := byID[m.Keep]
+		if !ok || dropped[m.Keep] {
+			continue
+		}
+		for _, did := range m.Drop {
+			dup, ok := byID[did]
+			if !ok || did == m.Keep || dropped[did] || jaccard(strings.ToLower(dup.name), strings.ToLower(keep.name)) < 0.2 {
+				continue
+			}
+			if s.mergeEntity(ctx, keep.id, dup.id, dup.name) == nil {
+				dropped[did] = true
+				merged++
+			}
+		}
+	}
+	return merged
+}
+
+// mergeEntity folds dupID into keepID: mentions, links and evidence move over, dupName is recorded as an alias
+// (if new), and dupID is deleted (cascading its now-superseded rows).
+func (s *Service) mergeEntity(ctx context.Context, keepID, dupID int64, dupName string) error {
+	if keepID == dupID {
+		return errors.New("cannot merge an entity into itself")
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO memory_entity_mentions(entity_id,fact_id) SELECT $1,fact_id FROM memory_entity_mentions WHERE entity_id=$2 ON CONFLICT DO NOTHING`, keepID, dupID); err != nil {
+		return err
+	}
+	rows, err := s.db.Query(ctx, `SELECT CASE WHEN a=$1 THEN b ELSE a END, kind, label, weight, source FROM memory_entity_links WHERE (a=$1 OR b=$1) AND valid_to IS NULL`, dupID)
+	if err != nil {
+		return err
+	}
+	type lk struct {
+		other            int64
+		kind, label, src string
+		weight           float64
+	}
+	var links []lk
+	for rows.Next() {
+		var l lk
+		if rows.Scan(&l.other, &l.kind, &l.label, &l.weight, &l.src) == nil {
+			links = append(links, l)
+		}
+	}
+	rows.Close()
+	for _, l := range links {
+		if l.other == keepID {
+			continue // dup and keep were linked to each other: redundant once merged
+		}
+		a, b := order(keepID, l.other)
+		_, _ = s.db.Exec(ctx, `INSERT INTO memory_entity_links(a,b,kind,label,weight,source) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (a,b) DO NOTHING`,
+			a, b, l.kind, l.label, l.weight, l.src)
+	}
+	_, err = s.db.Exec(ctx, `UPDATE memory_entities SET mentions=mentions+(SELECT mentions FROM memory_entities WHERE id=$2),
+		aliases=CASE WHEN $3=ANY(aliases) OR $3=name THEN aliases ELSE array_append(aliases,$3) END,
+		first_seen=LEAST(first_seen,(SELECT first_seen FROM memory_entities WHERE id=$2)),
+		last_seen=GREATEST(last_seen,(SELECT last_seen FROM memory_entities WHERE id=$2))
+		WHERE id=$1`, keepID, dupID, dupName)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `DELETE FROM memory_entities WHERE id=$1`, dupID)
+	return err
 }
 
 // ExtractEntities looks at a bank's facts created since the last pass (or all of them, with force) and
@@ -188,8 +317,9 @@ func (s *Service) ExtractEntities(ctx context.Context, bankID int64, force bool)
 			res.Relations++
 		}
 	}
+	res.Merged = s.dedupeEntities(ctx, bankID)
 	_, _ = s.db.Exec(ctx, `UPDATE memory_banks SET entities_at=now() WHERE id=$1`, bankID)
-	if res.Entities+res.Relations > 0 {
+	if res.Entities+res.Relations+res.Merged > 0 {
 		s.changed()
 	}
 	return res, nil

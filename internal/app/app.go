@@ -595,8 +595,8 @@ func (a *App) memoryLoop(ctx context.Context) {
 			}
 			cnt := 0
 			for _, r := range rs {
-				cnt += r.Entities + r.Relations
-				if r.Entities+r.Relations > 0 {
+				cnt += r.Entities + r.Relations + r.Merged
+				if r.Entities+r.Relations+r.Merged > 0 {
 					a.Logf("info", "memory", "entities — %s", r)
 				}
 			}

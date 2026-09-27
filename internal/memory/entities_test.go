@@ -251,3 +251,99 @@ func TestLinkEntitiesInvalidatesExclusiveRelationAcrossPairs(t *testing.T) {
 		t.Fatalf("expected one retired edge: %+v", gh.Edges)
 	}
 }
+
+// dedupeEntities folds near-duplicate names into the clearer one: mentions and links move to the survivor,
+// the dropped name becomes an alias, and a proposed merge with no real similarity is refused as a guardrail
+// against the model grouping two genuinely different things.
+func TestDedupeEntitiesMergesNamesLinksAndMentions(t *testing.T) {
+	ctx := context.Background()
+	s, fake := newSvc(t)
+	bank, err := s.BankBySpec(ctx, "user", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := store(t, s, StoreReq{Bank: "user", Text: "User is watching Euphoria season 3"})
+
+	keep, _, err := s.upsertEntity(ctx, bank.ID, "Euphoria", "product", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup, _, err := s.upsertEntity(ctx, bank.ID, "Euphoria Season 3", "product", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := s.upsertEntity(ctx, bank.ID, "HBO", "organization", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO memory_entity_mentions(entity_id,fact_id) VALUES($1,$2)`, dup, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.linkEntities(ctx, dup, other, "semantic", "airs on", "auto", 0.6); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.Handler = func(req map[string]any, _ int) testutil.Reply {
+		for _, m := range req["messages"].([]any) {
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "clean up a knowledge graph") {
+				return testutil.Reply{Content: fmt.Sprintf(`{"merges":[{"keep":%d,"drop":[%d]},{"keep":%d,"drop":[%d]}]}`, keep, dup, keep, other)}
+			}
+		}
+		return entityReply("", "")
+	}
+	merged := s.dedupeEntities(ctx, bank.ID)
+	if merged != 1 {
+		t.Fatalf("expected exactly the real duplicate merged, got %d", merged)
+	}
+
+	g, err := s.EntityGraph(ctx, bank.ID, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var survivor *EntityNode
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == keep {
+			survivor = &g.Nodes[i]
+		}
+		if g.Nodes[i].ID == dup {
+			t.Fatalf("the dropped entity must be gone: %+v", g.Nodes[i])
+		}
+	}
+	if survivor == nil || survivor.Mentions != 3 {
+		t.Fatalf("survivor = %+v", survivor)
+	}
+	facts, err := s.EntityFacts(ctx, keep)
+	if err != nil || len(facts) != 1 || facts[0].ID != f.ID {
+		t.Fatalf("survivor should have absorbed the dup's evidence: %+v err=%v", facts, err)
+	}
+	foundEdge := false
+	for _, e := range g.Edges {
+		if (e.A == keep && e.B == other) || (e.A == other && e.B == keep) {
+			foundEdge = true
+			if e.Label != "airs on" {
+				t.Fatalf("edge label = %q", e.Label)
+			}
+		}
+	}
+	if !foundEdge {
+		t.Fatalf("the dup's link should have moved to the survivor: %+v", g.Edges)
+	}
+
+	var aliases []string
+	if err := s.db.QueryRow(ctx, `SELECT aliases FROM memory_entities WHERE id=$1`, keep).Scan(&aliases); err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 1 || aliases[0] != "Euphoria Season 3" {
+		t.Fatalf("aliases = %v", aliases)
+	}
+
+	// HBO must still exist: jaccard("euphoria","hbo") is far below the guard threshold, so the proposed
+	// (real but unrelated) merge into it is refused even though the model asked for it.
+	var stillThere bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memory_entities WHERE id=$1)`, other).Scan(&stillThere); err != nil {
+		t.Fatal(err)
+	}
+	if !stillThere {
+		t.Fatal("an unrelated entity must not be merged away by the guardrail")
+	}
+}

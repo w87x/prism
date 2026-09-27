@@ -49,8 +49,8 @@
     const rs = await call('memory.entities_extract', { bank_id: bank });
     busy = '';
     if (!rs) return;
-    const t = rs.reduce((a, r) => ({ e: a.e + r.entities, r: a.r + r.relations }), { e: 0, r: 0 });
-    toast(t.e + t.r ? `${t.e} entities, ${t.r} relations` : (rs[0]?.skipped ? `Nothing to extract: ${rs[0].skipped}` : 'Nothing new to extract'));
+    const t = rs.reduce((a, r) => ({ e: a.e + r.entities, r: a.r + r.relations, m: a.m + (r.merged || 0) }), { e: 0, r: 0, m: 0 });
+    toast(t.e + t.r + t.m ? `${t.e} entities, ${t.r} relations${t.m ? `, ${t.m} duplicates merged` : ''}` : (rs[0]?.skipped ? `Nothing to extract: ${rs[0].skipped}` : 'Nothing new to extract'));
   }
   async function resolveContradiction(c, keep) {
     const drop = keep === c.a.id ? c.b.id : c.a.id;
