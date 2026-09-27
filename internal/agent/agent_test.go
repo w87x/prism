@@ -2227,3 +2227,24 @@ func TestStalledRuns(t *testing.T) {
 		t.Fatalf("stalled = %+v", got)
 	}
 }
+
+// A Telegram-routing Topic is metadata for the Telegram sink only: it must not hide the notice from the web chat
+// feed. Only notify_user's own explicit topic choice does that (SkipWebChat), never an automatic Topic assignment
+// such as a cron's or intent's own Telegram organisation.
+func TestNoticeWithTopicStillReachesWebChat(t *testing.T) {
+	h := newHarness(t)
+	h.e.Notify(context.Background(), Notice{Agent: "Oneiros", Text: "autonomous topic notice", Topic: "Some Project"})
+	hist, err := h.e.ChatHistory(context.Background(), "web", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range hist {
+		if strings.Contains(m.Text, "autonomous topic notice") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("notice with an automatic Topic must still show in the web chat: %+v", hist)
+	}
+}

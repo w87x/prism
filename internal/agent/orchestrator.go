@@ -66,6 +66,11 @@ type Notice struct {
 	Text  string `json:"text"`
 	Level string `json:"level"` // info | attention | warning | error
 	Topic string `json:"topic"` // routing hint for Telegram topics
+	// SkipWebChat leaves this out of the web chat feed / notification bell, so it reaches Telegram only. Only
+	// notify_user's own explicit "route to a topic so the main chat stays clean" sets this — an automatic Topic
+	// assignment (a cron's or intent's own Telegram organisation) must not also hide the notice from the web UI,
+	// since most of what reads notices is that UI, not Telegram.
+	SkipWebChat bool `json:"-"`
 }
 
 func (e *Engine) ask(ctx context.Context, info RunInfo, q tools.Question) (string, error) {
@@ -605,7 +610,7 @@ func (e *Engine) Notify(ctx context.Context, n Notice) {
 	if n.Agent == "" {
 		n.Agent = "Atlas"
 	}
-	if n.Topic == "" {
+	if !n.SkipWebChat {
 		e.logChat(ctx, "agent", n.Agent, n.Text, "web", "", 0)
 		e.NoteToChat(ctx, "web", n.Agent, n.Text)
 	}
@@ -629,7 +634,7 @@ func (e *Engine) NotifyReport(ctx context.Context, n Notice) string {
 	if n.Agent == "" {
 		n.Agent = "Atlas"
 	}
-	if n.Topic == "" {
+	if !n.SkipWebChat {
 		e.logChat(ctx, "agent", n.Agent, n.Text, "web", "", 0)
 		e.NoteToChat(ctx, "web", n.Agent, n.Text)
 	}
@@ -840,7 +845,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	if t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system") && res.NeedsInput == "" {
 		txt := strings.TrimSpace(res.Text)
 		if txt != "" && !strings.EqualFold(strings.Trim(txt, ". \n"), "NO_REPLY") && !strings.HasPrefix(txt, "[partial") {
-			e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info"})
+			e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic})
 		}
 	}
 	return out

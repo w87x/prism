@@ -126,7 +126,8 @@ func (s *Service) expire(ctx context.Context, i Intent) {
 	if s.Notify != nil {
 		s.Notify("intent", "attention", "Monitor ended", msg)
 	}
-	s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "attention", Text: msg})
+	s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "attention", Text: msg, Topic: i.Topic})
+	s.releaseTopic(ctx, i.ProjectBankID, i.Topic)
 }
 
 // humanDuration renders seconds the way people say them ("3m", "1h 20m").

@@ -34,6 +34,10 @@ type Cron struct {
 	System  bool       `json:"system"`
 	LastRun *time.Time `json:"last_run,omitempty"`
 	NextRun *time.Time `json:"next_run,omitempty"`
+	// Topic/ProjectBankID: the Telegram topic its results use (own name, or a shared project's), resolved once
+	// when created. See topics.go.
+	Topic         string `json:"topic,omitempty"`
+	ProjectBankID int64  `json:"project_bank_id,omitempty"`
 }
 
 type Intent struct {
@@ -55,6 +59,10 @@ type Intent struct {
 	// Monitor fields (watches with a time budget, see monitor.go)
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	Announce   bool       `json:"announce"`
+	// Topic/ProjectBankID: the Telegram topic its notices use (own name, or a shared project's), resolved once
+	// when created. See topics.go.
+	Topic         string `json:"topic,omitempty"`
+	ProjectBankID int64  `json:"project_bank_id,omitempty"`
 	Fraction   *float64   `json:"fraction,omitempty"`    // how far along the last progress text said it was
 	ETASeconds *int       `json:"eta_seconds,omitempty"` // estimated seconds to completion, when it can be told
 	samples    []sample
@@ -81,6 +89,9 @@ type Service struct {
 	Logf     func(level, source, format string, args ...any)
 	// Notify reports scheduler events to the notification centre (may be nil).
 	Notify func(kind, level, title, text string)
+	// DeleteTopic removes a Telegram topic by name (may be nil: no Telegram, or the topic was never created) — see
+	// topics.go's releaseTopic. Wired in internal/app/ext.go.
+	DeleteTopic func(ctx context.Context, name string) error
 
 	mu      sync.Mutex
 	running bool
@@ -149,8 +160,10 @@ func (s *Service) tick(ctx context.Context) {
 
 // ── crons ───────────────────────────────────────────────────────────────────
 
+const cronCols = `id,name,agent,expr,prompt,enabled,system,last_run,next_run,topic,COALESCE(project_bank_id,0)`
+
 func (s *Service) Crons(ctx context.Context) ([]Cron, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id,name,agent,expr,prompt,enabled,system,last_run,next_run FROM crons ORDER BY system DESC, name`)
+	rows, err := s.DB.Query(ctx, `SELECT `+cronCols+` FROM crons ORDER BY system DESC, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +171,7 @@ func (s *Service) Crons(ctx context.Context) ([]Cron, error) {
 	var out []Cron
 	for rows.Next() {
 		var c Cron
-		if err := rows.Scan(&c.ID, &c.Name, &c.Agent, &c.Expr, &c.Prompt, &c.Enabled, &c.System, &c.LastRun, &c.NextRun); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Agent, &c.Expr, &c.Prompt, &c.Enabled, &c.System, &c.LastRun, &c.NextRun, &c.Topic, &c.ProjectBankID); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -177,8 +190,9 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 	next := sched.Next(time.Now().In(s.loc(ctx)))
 	var id int64
 	if c.ID == 0 {
-		err = s.DB.QueryRow(ctx, `INSERT INTO crons(name,agent,expr,prompt,enabled,system,next_run) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-			c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, c.System, next).Scan(&id)
+		topic, bankID := s.resolveTopic(ctx, c.Name, c.Name+": "+c.Prompt)
+		err = s.DB.QueryRow(ctx, `INSERT INTO crons(name,agent,expr,prompt,enabled,system,next_run,topic,project_bank_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, c.System, next, topic, nullIfZero(bankID)).Scan(&id)
 	} else {
 		id = c.ID
 		_, err = s.DB.Exec(ctx, `UPDATE crons SET name=$2,agent=$3,expr=$4,prompt=$5,enabled=$6,next_run=$7 WHERE id=$1`, c.ID, c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, next)
@@ -187,9 +201,15 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 }
 
 func (s *Service) DeleteCron(ctx context.Context, id int64) error {
+	var topic string
+	var bankID int64
+	_ = s.DB.QueryRow(ctx, `SELECT topic, COALESCE(project_bank_id,0) FROM crons WHERE id=$1`, id).Scan(&topic, &bankID)
 	tag, err := s.DB.Exec(ctx, `DELETE FROM crons WHERE id=$1 AND NOT system`, id)
 	if err == nil && tag.RowsAffected() == 0 {
 		return errors.New("built-in schedules cannot be deleted (disable them instead)")
+	}
+	if err == nil {
+		s.releaseTopic(ctx, bankID, topic)
 	}
 	return err
 }
@@ -206,7 +226,7 @@ func (s *Service) fireCron(ctx context.Context, c Cron) error {
 	if c.System && c.Agent == "Oneiros" {
 		input += s.dismissedNote(ctx)
 	}
-	_, err := s.Engine.Enqueue(ctx, tasks.Task{FromKind: "cron", FromName: c.Name, ToAgent: c.Agent, Title: c.Name, Input: input, Priority: priority})
+	_, err := s.Engine.Enqueue(ctx, tasks.Task{FromKind: "cron", FromName: c.Name, ToAgent: c.Agent, Title: c.Name, Input: input, Priority: priority, NotifyTopic: c.Topic})
 	return err
 }
 
@@ -267,13 +287,13 @@ func (s *Service) tickCrons(ctx context.Context) {
 
 // ── intents & watches ───────────────────────────────────────────────────────
 
-const intentCols = `id,type,owner,description,predicate,cadence_s,repeat,status,progress,last_check,next_due,last_error,notify,created_at,fired_at,expires_at,announce,samples`
+const intentCols = `id,type,owner,description,predicate,cadence_s,repeat,status,progress,last_check,next_due,last_error,notify,created_at,fired_at,expires_at,announce,samples,topic,COALESCE(project_bank_id,0)`
 
 func scanIntent(r pgx.Row) (Intent, error) {
 	var i Intent
 	var sm []byte
 	err := r.Scan(&i.ID, &i.Type, &i.Owner, &i.Description, &i.Predicate, &i.CadenceS, &i.Repeat, &i.Status, &i.Progress, &i.LastCheck, &i.NextDue, &i.LastError, &i.Notify, &i.CreatedAt, &i.FiredAt,
-		&i.ExpiresAt, &i.Announce, &sm)
+		&i.ExpiresAt, &i.Announce, &sm, &i.Topic, &i.ProjectBankID)
 	i.samples = parseSamples(sm)
 	if n := len(i.samples); n > 0 && i.Status == "active" {
 		f := i.samples[n-1].F
@@ -323,13 +343,22 @@ func (s *Service) CreateIntent(ctx context.Context, i Intent, p Predicate) (int6
 		i.CadenceS = min
 	}
 	pj, _ := json.Marshal(p)
+	topic, bankID := s.resolveTopic(ctx, i.Description, i.Description)
 	var id int64
-	err := s.DB.QueryRow(ctx, `INSERT INTO intents(type,owner,description,predicate,cadence_s,repeat,notify,next_due,expires_at,announce) VALUES($1,$2,$3,$4,$5,$6,$7,now(),$8,$9) RETURNING id`,
-		i.Type, i.Owner, i.Description, pj, i.CadenceS, i.Repeat, i.Notify || i.ID == 0, i.ExpiresAt, i.Announce).Scan(&id)
+	err := s.DB.QueryRow(ctx, `INSERT INTO intents(type,owner,description,predicate,cadence_s,repeat,notify,next_due,expires_at,announce,topic,project_bank_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11) RETURNING id`,
+		i.Type, i.Owner, i.Description, pj, i.CadenceS, i.Repeat, i.Notify || i.ID == 0, i.ExpiresAt, i.Announce, topic, nullIfZero(bankID)).Scan(&id)
 	if err == nil {
 		s.emit("intent.update", map[string]any{"id": id})
 	}
 	return id, err
+}
+
+func nullIfZero(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
 }
 
 func (s *Service) UpdateIntent(ctx context.Context, id int64, status string, cadence *int) error {
@@ -339,6 +368,13 @@ func (s *Service) UpdateIntent(ctx context.Context, id int64, status string, cad
 		}
 		if _, err := s.DB.Exec(ctx, `UPDATE intents SET status=$2, next_due=now(), last_error='' WHERE id=$1`, id, status); err != nil {
 			return err
+		}
+		if status == "cancelled" {
+			var topic string
+			var bankID int64
+			if s.DB.QueryRow(ctx, `SELECT topic, COALESCE(project_bank_id,0) FROM intents WHERE id=$1`, id).Scan(&topic, &bankID) == nil {
+				s.releaseTopic(ctx, bankID, topic)
+			}
 		}
 	}
 	if cadence != nil && *cadence >= 10 && *cadence <= 86400 {
@@ -351,7 +387,13 @@ func (s *Service) UpdateIntent(ctx context.Context, id int64, status string, cad
 }
 
 func (s *Service) DeleteIntent(ctx context.Context, id int64) error {
+	var topic string
+	var bankID int64
+	_ = s.DB.QueryRow(ctx, `SELECT topic, COALESCE(project_bank_id,0) FROM intents WHERE id=$1`, id).Scan(&topic, &bankID)
 	_, err := s.DB.Exec(ctx, `DELETE FROM intents WHERE id=$1`, id)
+	if err == nil {
+		s.releaseTopic(ctx, bankID, topic)
+	}
 	return err
 }
 
@@ -400,7 +442,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 			if s.Notify != nil {
 				s.Notify("error", "warning", "Watch stopped", fmt.Sprintf("“%s” failed %d times in a row: %v", i.Description, int(errs), err))
 			}
-			s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "warning", Text: fmt.Sprintf("I stopped watching “%s”: it failed %d times in a row (%v).", i.Description, int(errs), err)})
+			s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "warning", Text: fmt.Sprintf("I stopped watching “%s”: it failed %d times in a row (%v).", i.Description, int(errs), err), Topic: i.Topic})
 		}
 		s.emit("intent.update", map[string]any{"id": i.ID})
 		return
@@ -416,7 +458,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 			if e, ok := etaSeconds(ss); ok {
 				txt += fmt.Sprintf(" (about %s left)", humanDuration(e))
 			}
-			s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "info", Text: txt})
+			s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "info", Text: txt, Topic: i.Topic})
 		}
 	}
 	pj, _ := json.Marshal(p)
@@ -438,11 +480,12 @@ func (s *Service) check(ctx context.Context, i Intent) {
 		return
 	}
 	if i.Type == "watch" { // watches report directly: no model call needed
-		s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "info", Text: fmt.Sprintf("%s — %s", i.Description, res.Evidence)})
+		s.Engine.Notify(ctx, agent.Notice{Agent: i.Owner, Level: "info", Text: fmt.Sprintf("%s — %s", i.Description, res.Evidence), Topic: i.Topic})
 		return
 	}
-	// intents wake their owner, who decides what the user should hear
-	_, err = s.Engine.Enqueue(ctx, tasks.Task{FromKind: "intent", FromName: fmt.Sprintf("intent #%d", i.ID), ToAgent: i.Owner, Title: "Intent: " + i.Description,
+	// intents wake their owner, who decides what the user should hear; NotifyTopic carries this intent's topic to
+	// the resulting task, so its own reply (internal/agent/orchestrator.go) lands there too
+	_, err = s.Engine.Enqueue(ctx, tasks.Task{FromKind: "intent", FromName: fmt.Sprintf("intent #%d", i.ID), ToAgent: i.Owner, Title: "Intent: " + i.Description, NotifyTopic: i.Topic,
 		Input: fmt.Sprintf("A standing intent you registered has triggered.\nIntent: %s\nEvidence: %s\n\nDecide what the user should be told and reply with that message (concise, useful, no preamble). If acting is within your remit, do it first. If it is not worth interrupting the user, reply NO_REPLY.", i.Description, res.Evidence)})
 	if err != nil {
 		s.logf("warn", "could not wake %s for intent %d: %v", i.Owner, i.ID, err)
@@ -493,7 +536,7 @@ func (s *Service) AddBriefing(ctx context.Context, agentName, title, body string
 	}
 	s.emit("briefing.new", map[string]any{"id": id, "title": title})
 	if importance >= 4 { // deliver immediately
-		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body})
+		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body, Topic: "Briefings"})
 		_, _ = s.DB.Exec(ctx, `UPDATE briefings SET status='delivered' WHERE id=$1`, id)
 	}
 	return id, nil

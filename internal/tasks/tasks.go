@@ -56,6 +56,9 @@ type Task struct {
 	// AcknowledgedAt is set once the user has dealt with (or dismissed) a partial/failed task, which removes it
 	// from Today's "needs your attention".
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
+	// NotifyTopic: for a cron- or intent-fired task, the Telegram topic its "reports back to the user" notice
+	// (internal/agent/orchestrator.go) should use — set by the firing cron/intent (see scheduler/topics.go).
+	NotifyTopic string `json:"notify_topic,omitempty"`
 }
 
 func (t Task) Terminal() bool { return t.Status == Done || t.Status == Failed || t.Status == Cancelled }
@@ -79,12 +82,12 @@ func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db, waiters: map[int64][]chan struct{}{}}
 }
 
-const cols = `id,parent_id,root_id,from_kind,from_name,to_agent,title,input,status,result,error,question,depth,priority,session_id,tokens_in,tokens_out,created_at,started_at,finished_at,restarts,acknowledged_at`
+const cols = `id,parent_id,root_id,from_kind,from_name,to_agent,title,input,status,result,error,question,depth,priority,session_id,tokens_in,tokens_out,created_at,started_at,finished_at,restarts,acknowledged_at,notify_topic`
 
 func scan(r pgx.Row) (Task, error) {
 	var t Task
 	err := r.Scan(&t.ID, &t.ParentID, &t.RootID, &t.FromKind, &t.FromName, &t.ToAgent, &t.Title, &t.Input, &t.Status, &t.Result, &t.Error,
-		&t.Question, &t.Depth, &t.Priority, &t.SessionID, &t.TokensIn, &t.TokensOut, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Restarts, &t.AcknowledgedAt)
+		&t.Question, &t.Depth, &t.Priority, &t.SessionID, &t.TokensIn, &t.TokensOut, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Restarts, &t.AcknowledgedAt, &t.NotifyTopic)
 	return t, err
 }
 
@@ -105,9 +108,9 @@ func (s *Store) Create(ctx context.Context, t Task, running bool) (Task, error) 
 	if t.Title == "" {
 		t.Title = firstLine(t.Input, 80)
 	}
-	row := s.db.QueryRow(ctx, `INSERT INTO tasks(parent_id,root_id,from_kind,from_name,to_agent,title,input,status,depth,priority,session_id,started_at)
-		VALUES($1,COALESCE($2,0),$3,$4,$5,$6,$7,$8,$9,$10,$11, CASE WHEN $8='running' THEN now() END) RETURNING `+cols,
-		t.ParentID, nilIfZero(t.RootID), t.FromKind, t.FromName, t.ToAgent, t.Title, t.Input, status, t.Depth, t.Priority, t.SessionID)
+	row := s.db.QueryRow(ctx, `INSERT INTO tasks(parent_id,root_id,from_kind,from_name,to_agent,title,input,status,depth,priority,session_id,started_at,notify_topic)
+		VALUES($1,COALESCE($2,0),$3,$4,$5,$6,$7,$8,$9,$10,$11, CASE WHEN $8='running' THEN now() END, $12) RETURNING `+cols,
+		t.ParentID, nilIfZero(t.RootID), t.FromKind, t.FromName, t.ToAgent, t.Title, t.Input, status, t.Depth, t.Priority, t.SessionID, t.NotifyTopic)
 	out, err := scan(row)
 	if err != nil {
 		return out, err

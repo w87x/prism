@@ -567,7 +567,7 @@ func (e *Engine) toolNotify() *tools.Tool {
 			if a.Level == "" {
 				a.Level = "info"
 			}
-			return e.NotifyReport(ctx, Notice{Agent: env.Agent, Text: a.Text, Level: a.Level, Topic: a.Topic}), nil
+			return e.NotifyReport(ctx, Notice{Agent: env.Agent, Text: a.Text, Level: a.Level, Topic: a.Topic, SkipWebChat: a.Topic != ""}), nil
 		},
 	}
 }

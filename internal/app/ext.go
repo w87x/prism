@@ -160,6 +160,7 @@ func (a *App) buildExtensions(ctx context.Context) error {
 	// scheduler (autonomy)
 	x.Sched = &scheduler.Service{DB: a.DB.Pool, Engine: a.Engine, Settings: a.Settings, Emit: a.Emit, Logf: a.Logf}
 	x.Sched.Notify = a.Notify
+	x.Sched.DeleteTopic = x.Telegram.DeleteTopic
 	x.Sched.Env = scheduler.Env{
 		LLM: a.LLM,
 		CallTool: func(ctx context.Context, name string, args json.RawMessage) (string, error) {

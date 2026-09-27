@@ -725,6 +725,26 @@ func (b *Bot) Deliver(ctx context.Context, n agent.Notice) (string, error) {
 }
 
 // topic finds or creates a forum topic by name.
+// DeleteTopic removes a named forum topic (a cron or intent releasing its own topic — see scheduler/topics.go). A
+// group that isn't configured, or a name that was never made into a topic, is not an error: there is simply
+// nothing to delete.
+func (b *Bot) DeleteTopic(ctx context.Context, name string) error {
+	c, ok := b.active(ctx)
+	if !ok || c.GroupID == 0 {
+		return nil
+	}
+	name = strings.TrimSpace(name)
+	var thread int64
+	if err := b.DB.QueryRow(ctx, `SELECT thread_id FROM telegram_topics WHERE chat_id=$1 AND lower(name)=lower($2)`, c.GroupID, name).Scan(&thread); err != nil {
+		return nil
+	}
+	if err := b.call(ctx, c.Token, "deleteForumTopic", map[string]any{"chat_id": c.GroupID, "message_thread_id": thread}, nil); err != nil {
+		return err
+	}
+	_, _ = b.DB.Exec(ctx, `DELETE FROM telegram_topics WHERE chat_id=$1 AND thread_id=$2`, c.GroupID, thread)
+	return nil
+}
+
 func (b *Bot) topic(ctx context.Context, c settings.Telegram, name, by, purpose string) (int64, error) {
 	name = strings.TrimSpace(name)
 	if r := []rune(name); len(r) > 60 {
