@@ -29,8 +29,8 @@ var predicateProps = []tools.Prop{
 	tools.Int("download_id", "kind=download: id from download_start"),
 	tools.Str("tool", "kind=tool: name of a READ-ONLY tool to poll — an MCP tool of the service being watched (e.g. mcp__downloadstation__list_tasks) is the right way to watch that service; do not guess its web address with curl"),
 	tools.Str("args", "kind=tool: JSON object with the tool's arguments, e.g. {\"id\":\"dbid_764\"}"),
-	tools.Str("field", "kind=tool: dot path into the tool's JSON output to judge, e.g. data.task.status ('*' = every array element)"),
-	tools.Str("expect", "kind=tool: regex on that value (or the whole output) meaning 'done', e.g. finished|seeding|100"),
+	tools.Str("field", "kind=tool: dot path into the tool's JSON output to judge, e.g. data.task.status ('*' = every array element, e.g. data.messages.* for a whole list of items — combine with changed=true to watch a mailbox/feed/list: only genuinely new items fire, whatever was already there when the watch was created never does)"),
+	tools.Str("expect", "kind=tool: regex on that value (or the whole output) meaning 'done', e.g. finished|seeding|100 (mutually exclusive with changed)"),
 }
 
 // RegisterTools installs intent, watch, cron and briefing tools.

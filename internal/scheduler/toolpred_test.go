@@ -55,3 +55,46 @@ func TestWatchGuardCapsAndDedupes(t *testing.T) {
 		t.Fatalf("another agent has its own allowance: %v", err)
 	}
 }
+
+// A wildcard field with changed=true tracks individual items (mirrors the rss predicate): the first check
+// silently baselines whatever is already there, and later checks fire only with genuinely new ones, never
+// the pre-existing backlog — this is what makes "watch my inbox" or "watch this task list" not re-report
+// everything that was already there when the watch was created.
+func TestToolPredicateTracksNewItemsOnly(t *testing.T) {
+	calls := 0
+	var out string
+	env := Env{CallTool: func(ctx context.Context, tool string, a json.RawMessage) (string, error) { calls++; return out, nil }}
+	p := &Predicate{Kind: "tool", Tool: "mail_list", Field: "data.messages.*", Changed: true}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	// first check: two pre-existing messages baseline silently, no fire
+	out = `{"data":{"messages":[{"id":"m1","subject":"Old one"},{"id":"m2","subject":"Also old"}]}}`
+	r, err := p.Eval(context.Background(), env)
+	if err != nil || r.Fired || !strings.Contains(r.Progress, "baseline: 2") {
+		t.Fatalf("baseline check: %+v %v", r, err)
+	}
+
+	// no change: still nothing fires
+	r, err = p.Eval(context.Background(), env)
+	if err != nil || r.Fired || !strings.Contains(r.Progress, "none new") {
+		t.Fatalf("no-change check: %+v %v", r, err)
+	}
+
+	// one new message arrives alongside the old ones: fires with only the new one as evidence
+	out = `{"data":{"messages":[{"id":"m1","subject":"Old one"},{"id":"m2","subject":"Also old"},{"id":"m3","subject":"New arrival"}]}}`
+	r, err = p.Eval(context.Background(), env)
+	if err != nil || !r.Fired || !strings.Contains(r.Progress, "1 new") || !strings.Contains(r.Evidence, "New arrival") || strings.Contains(r.Evidence, "Old one") {
+		t.Fatalf("new-item check: %+v %v", r, err)
+	}
+
+	// firing again with nothing new does not re-fire on m3
+	r, err = p.Eval(context.Background(), env)
+	if err != nil || r.Fired {
+		t.Fatalf("must not re-fire on an already-seen item: %+v %v", r, err)
+	}
+	if calls != 4 {
+		t.Fatalf("calls = %d", calls)
+	}
+}

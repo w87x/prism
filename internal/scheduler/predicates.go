@@ -314,6 +314,43 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
+		// a wildcard field ("data.messages.*") tracks which individual items have already been seen — the same
+		// idea as the rss predicate — instead of hashing the whole output: a watch on a mailbox or a task list
+		// then reports only what is actually new, and never the backlog that was already there when it was set up.
+		if p.Changed && strings.Contains(p.Field, "*") {
+			items, ok := jsonFieldValues(out, p.Field)
+			if !ok {
+				return Result{Progress: "field " + p.Field + " not in the output"}, nil
+			}
+			seenAny, _ := st["items"].([]any)
+			seen := map[string]bool{}
+			for _, s := range seenAny {
+				seen[fmt.Sprint(s)] = true
+			}
+			first := len(seen) == 0
+			var freshKeys, freshSummaries []string
+			allKeys := make([]any, 0, len(items))
+			for _, it := range items {
+				k := itemKey(it)
+				allKeys = append(allKeys, k)
+				if !seen[k] {
+					freshKeys = append(freshKeys, k)
+					freshSummaries = append(freshSummaries, itemSummary(it))
+				}
+			}
+			st["items"] = allKeys
+			if first { // baseline: what is already there does not count as new
+				return Result{Progress: fmt.Sprintf("baseline: %d items", len(items))}, nil
+			}
+			if len(freshKeys) == 0 {
+				return Result{Progress: fmt.Sprintf("%d items, none new", len(items))}, nil
+			}
+			ev := strings.Join(freshSummaries, "\n")
+			if len(ev) > 2000 {
+				ev = ev[:2000] + "…"
+			}
+			return Result{Fired: true, Progress: fmt.Sprintf("%d new (of %d)", len(freshKeys), len(items)), Evidence: ev}, nil
+		}
 		val := out
 		if p.Field != "" {
 			v, ok := jsonField(out, p.Field)
@@ -470,9 +507,31 @@ func firstNonEmpty(a ...string) string {
 // jsonField reads a dot path out of JSON text: keys, array indexes, and * for every array element (values are joined
 // with ", "). ok=false when the text is not JSON or the path is absent.
 func jsonField(text, path string) (string, bool) {
+	vals, ok := jsonFieldValues(text, path)
+	if !ok {
+		return "", false
+	}
+	var parts []string
+	for _, x := range vals {
+		switch t := x.(type) {
+		case string:
+			parts = append(parts, t)
+		case nil:
+			parts = append(parts, "null")
+		default:
+			b, _ := json.Marshal(t)
+			parts = append(parts, string(b))
+		}
+	}
+	return strings.Join(parts, ", "), true
+}
+
+// jsonFieldValues is jsonField's traversal, kept separate so a wildcard path's matches can also be used one at a
+// time (see the tool predicate's per-item tracking) instead of only as one joined string.
+func jsonFieldValues(text, path string) ([]any, bool) {
 	var v any
 	if err := json.Unmarshal([]byte(text), &v); err != nil {
-		return "", false
+		return nil, false
 	}
 	vals := []any{v}
 	for _, seg := range strings.Split(path, ".") {
@@ -497,20 +556,52 @@ func jsonField(text, path string) (string, bool) {
 		}
 		vals = next
 		if len(vals) == 0 {
-			return "", false
+			return nil, false
 		}
 	}
-	var parts []string
-	for _, x := range vals {
-		switch t := x.(type) {
-		case string:
-			parts = append(parts, t)
-		case nil:
-			parts = append(parts, "null")
-		default:
-			b, _ := json.Marshal(t)
-			parts = append(parts, string(b))
+	return vals, true
+}
+
+// itemKey gives a JSON value from a tool's output a stable identity, so repeated checks can tell whether it is one
+// already seen: an object's own id-like field when it has one, a plain string as itself, and a hash of the whole
+// value as a last resort (mirrors the rss predicate's firstNonEmpty(ID, Link, Title)).
+func itemKey(v any) string {
+	if m, ok := v.(map[string]any); ok {
+		for _, k := range []string{"id", "ID", "Id", "uid", "uuid", "guid", "message_id", "messageId", "key"} {
+			if s, ok := m[k]; ok && s != nil {
+				return fmt.Sprint(s)
+			}
+		}
+		for _, k := range []string{"link", "url", "href"} {
+			if s, ok := m[k]; ok && s != nil {
+				return fmt.Sprint(s)
+			}
 		}
 	}
-	return strings.Join(parts, ", "), true
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, _ := json.Marshal(v)
+	return hashOf(string(b))
+}
+
+// itemSummary is what a newly-seen item reads as in a watch's evidence: a readable field if the item has one,
+// otherwise its raw (clipped) JSON.
+func itemSummary(v any) string {
+	if m, ok := v.(map[string]any); ok {
+		for _, k := range []string{"title", "subject", "name", "text", "summary"} {
+			if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, _ := json.Marshal(v)
+	s := string(b)
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
 }
