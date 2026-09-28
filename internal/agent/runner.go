@@ -453,6 +453,12 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 				e.Emit("run.compacted", map[string]any{"run": ar.Info.ID, "agent": p.Name})
 			}
 		}
+		// the context bar (web UI's "Active agents" panel) otherwise only hears about context/window once a whole
+		// turn finishes (run.usage below), so for a long response it sits frozen at 0 the entire time the agent is
+		// visibly generating — push what is already known (the prompt about to be sent) right away instead of
+		// waiting; token totals are unchanged from the last full turn, only context/window are fresher here.
+		e.Emit("run.usage", map[string]any{"run": ar.Info.ID, "agent": p.Name, "tokens_in": ar.tokensIn.Load(), "tokens_out": ar.tokensOut.Load(),
+			"context": ar.ctxTokens.Load(), "window": window})
 
 		resp, err := e.chat(ctx, modelRef, sysPrompt, history, specs, ar, p.Name, &calib, func() {
 			// context overflow: compact hard and let the caller retry

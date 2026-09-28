@@ -124,7 +124,17 @@ export function activeRuns() {
 function newRun(e) {
   return { id: e.run, agent: e.agent, depth: e.depth || 0, task: e.task || 0, parent_run: e.parent_run || 0, kind: e.kind || '', title: e.title || '', task_text: '',
     tokens_in: 0, tokens_out: 0, context: 0, window: 0, buf: '', started: Date.now(), phase: 'thinking', done: false, calls: 0, live: false, liveMs: LIVE_MS_DEFAULT, kb: e.kb || 0, compactions: 0,
-    chat: e.is_chat ? (e.chat_topic || '') : S.runs[e.parent_run]?.chat }; // which chat a run belongs to (sub-agents inherit it)
+    chat: e.is_chat ? (e.chat_topic || '') : S.runs[e.parent_run]?.chat, // which chat a run belongs to (sub-agents inherit it)
+    _baseCtx: 0, _estChars: 0 }; // context/window as of the last real run.usage, plus a live char count streamed since — see estimateLiveContext
+}
+
+// Between one run.usage event and the next (a single long answer can take a while), the context bar would
+// otherwise sit frozen: nudge it up as text actually streams in, using the same cheap ~4-bytes/token heuristic
+// the backend itself estimates context with (internal/llm's EstimateTokens) — corrected back to the exact number
+// the moment the next real run.usage arrives.
+function estimateLiveContext(r) {
+  if (!r.window) return;
+  r.context = Math.min(r.window, r._baseCtx + Math.ceil(r._estChars / 4));
 }
 
 // LED "live" pulse speed tracks how fast tokens are actually arriving: a smoothed (EMA) inter-arrival gap
@@ -177,6 +187,8 @@ function wire() {
       r.buf = (r.buf + e.text).slice(-BUF);
       r.phase = e.kind === 'thinking' ? 'thinking' : 'acting'; // blue while reasoning, green while writing/acting
       markLive(r); // the LED swells while tokens keep arriving
+      r._estChars += e.text.length;
+      estimateLiveContext(r);
     }
   });
   on('run.tool', (e) => {
@@ -195,7 +207,7 @@ function wire() {
   });
   on('run.usage', (e) => {
     const r = S.runs[e.run];
-    if (r) Object.assign(r, { tokens_in: e.tokens_in, tokens_out: e.tokens_out, context: e.context, window: e.window });
+    if (r) Object.assign(r, { tokens_in: e.tokens_in, tokens_out: e.tokens_out, context: e.context, window: e.window, _baseCtx: e.context, _estChars: 0 });
   });
   on('run.compacted', (e) => { const r = S.runs[e.run]; if (r) { r.buf += '\n⟲ context compacted\n'; r.compactions = (r.compactions || 0) + 1; } });
   on('run.end', (e) => {

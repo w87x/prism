@@ -2328,3 +2328,57 @@ func TestCancelTaskOnlyTakesDownItsOwnBranch(t *testing.T) {
 		t.Fatalf("the parent must survive a child's own cancellation: %+v", r)
 	}
 }
+
+// The "Active agents" panel's context bar previously only learned a run's context/window once a whole model turn
+// finished (run.usage), so it sat frozen at 0 for the entire time a long response was generating. It must now also
+// know it the moment the turn STARTS (before the model call even returns), so the bar has something real to show
+// throughout, not just a jump at the very end.
+func TestRunUsageIsEmittedBeforeTheModelCallReturns(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var mu sync.Mutex
+	var early, final map[string]any
+	h.e.Emit = func(typ string, data any) {
+		if typ != "run.usage" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		m, _ := data.(map[string]any)
+		if early == nil {
+			early = m
+		}
+		final = m
+	}
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{Content: "the answer", DelayMS: 1500}
+	}
+	done := make(chan struct{})
+	go func() { _ = h.e.UserMessage(ctx, UserMsg{Text: "hello"}); close(done) }()
+	// while the (slow) model call is still in flight, an early run.usage must already have a real window
+	waitFor(t, 3*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return early != nil
+	})
+	mu.Lock()
+	var w int64
+	switch v := early["window"].(type) {
+	case int:
+		w = int64(v)
+	case int64:
+		w = v
+	case float64:
+		w = int64(v)
+	}
+	mu.Unlock()
+	if w == 0 {
+		t.Fatalf("run.usage before the model call returned must already carry a real window: %+v", early)
+	}
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if final == nil || final["tokens_out"] == nil {
+		t.Fatalf("final run.usage missing token totals: %+v", final)
+	}
+}
