@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"prism/internal/tools"
 )
@@ -58,7 +59,7 @@ func TestCalendarToolsTalkToTheHelper(t *testing.T) {
 		"update-event": `{"event":{"id":"EV1","title":"Standup (moved)","start":"2026-09-22T11:00:00+03:00","end":"2026-09-22T11:15:00+03:00","calendar":"Work"}}`,
 		"add-event":    `{"event":{"id":"EV9","title":"Dentist","start":"2026-09-25T09:30:00+03:00","end":"2026-09-25T10:30:00+03:00","calendar":"Personal"}}`})
 	reg := tools.NewRegistry(nil)
-	registerCalendar(reg, h)
+	registerCalendar(reg, nil, h)
 
 	// listing: one line per event with what the model needs to act on it, and repeating/all-day flags
 	out, err := runTool(t, reg, "calendar_events", map[string]any{"from": "2026-09-22", "to": "2026-09-24", "query": "it's a \"quoted\" query\nwith a newline"}, nil)
@@ -107,7 +108,7 @@ func TestDeletesAlwaysAsk(t *testing.T) {
 		"delete-event":    `{"deleted":{"id":"EV1","title":"Dentist","start":"2026-09-25T09:30:00+03:00","end":"2026-09-25T10:30:00+03:00","calendar":"Personal"}}`,
 		"delete-reminder": `{"deleted":{}}`})
 	reg := tools.NewRegistry(nil)
-	registerCalendar(reg, h)
+	registerCalendar(reg, nil, h)
 	var asked []string
 	answer := "deny"
 	env := &tools.Env{Agent: "Atlas", Ask: func(ctx context.Context, q tools.Question) (string, error) {
@@ -145,7 +146,7 @@ func TestDeletesAlwaysAsk(t *testing.T) {
 func TestHelperErrorsAreReadable(t *testing.T) {
 	h, _ := fakeHelper(t, map[string]string{"events": `{"error":"access to Calendars was not granted"}`})
 	reg := tools.NewRegistry(nil)
-	registerCalendar(reg, h)
+	registerCalendar(reg, nil, h)
 	_, err := runTool(t, reg, "calendar_events", map[string]any{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "access to Calendars was not granted") {
 		t.Fatalf("%v", err)
@@ -155,14 +156,19 @@ func TestHelperErrorsAreReadable(t *testing.T) {
 	}
 }
 
+// The due date is rendered in the given location, not this process's own OS timezone (a real bug once:
+// midnight +03:00 read back as the previous day wherever the machine running PRISM happens to be UTC).
+// +03:00 is used here as the rendering location too, so the test is deterministic regardless of the
+// machine it runs on, matching the input's own offset rather than relying on any ambient TZ.
 func TestReminderFormatting(t *testing.T) {
-	got := describeReminder(reminder{ID: "R1", Title: "Pay rent", List: "Home", Due: "2026-10-01T00:00:00+03:00", Priority: 1, Notes: "  bank\napp "}, true)
+	msk := time.FixedZone("+03:00", 3*3600)
+	got := describeReminder(reminder{ID: "R1", Title: "Pay rent", List: "Home", Due: "2026-10-01T00:00:00+03:00", Priority: 1, Notes: "  bank\napp "}, true, msk)
 	for _, want := range []string{"[ ] Pay rent (Home)", "due Thu 1 Oct", "❗", "id=R1", "notes: bank app"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %q", want, got)
 		}
 	}
-	if !strings.Contains(describeReminder(reminder{Title: "x", Completed: true}, false), "[x]") {
+	if !strings.Contains(describeReminder(reminder{Title: "x", Completed: true}, false, msk), "[x]") {
 		t.Error("completed box")
 	}
 }

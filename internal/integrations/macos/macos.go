@@ -96,7 +96,7 @@ func RegisterTools(reg *tools.Registry, st *settings.Store, h *Helper, dataDir s
 	if !Available() {
 		return
 	}
-	registerCalendar(reg, h)
+	registerCalendar(reg, st, h)
 	registerShortcuts(reg, dataDir)
 	reg.Register(
 		&tools.Tool{

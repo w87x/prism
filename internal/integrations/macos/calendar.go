@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/settings"
 	"prism/internal/tools"
 )
 
@@ -37,16 +38,19 @@ type reminder struct {
 	Notes      string `json:"notes"`
 }
 
-func parseT(s string) (time.Time, bool) {
+// parseT parses an RFC3339 timestamp and renders it in loc (the user's configured timezone, not
+// necessarily this process's OS-level time.Local — PRISM's server and the user reading its output are
+// not guaranteed to be in the same zone, e.g. a Linux server for a user elsewhere).
+func parseT(s string, loc *time.Location) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339, s)
-	return t.In(time.Local), err == nil
+	return t.In(loc), err == nil
 }
 
 // describeEvent is one line for the model (and for the confirmation shown to the user).
-func describeEvent(e calEvent, withID bool) string {
+func describeEvent(e calEvent, withID bool, loc *time.Location) string {
 	var when string
-	s, ok1 := parseT(e.Start)
-	en, ok2 := parseT(e.End)
+	s, ok1 := parseT(e.Start, loc)
+	en, ok2 := parseT(e.End, loc)
 	switch {
 	case !ok1:
 		when = e.Start
@@ -85,14 +89,14 @@ func describeEvent(e calEvent, withID bool) string {
 	return sb.String()
 }
 
-func describeReminder(r reminder, withID bool) string {
+func describeReminder(r reminder, withID bool, loc *time.Location) string {
 	var sb strings.Builder
 	box := "[ ]"
 	if r.Completed {
 		box = "[x]"
 	}
 	fmt.Fprintf(&sb, "%s %s (%s)", box, r.Title, r.List)
-	if t, ok := parseT(r.Due); ok {
+	if t, ok := parseT(r.Due, loc); ok {
 		if r.DueHasTime {
 			fmt.Fprintf(&sb, " — due %s", t.Format("Mon 2 Jan 15:04"))
 		} else {
@@ -112,7 +116,22 @@ func describeReminder(r reminder, withID bool) string {
 }
 
 // registerCalendar installs the Calendar and Reminders tools on top of the EventKit helper.
-func registerCalendar(reg *tools.Registry, h *Helper) {
+func registerCalendar(reg *tools.Registry, st *settings.Store, h *Helper) {
+	// loc is the user's configured timezone (Settings → General), not this process's own OS timezone —
+	// PRISM's server and the user reading dates it prints are not guaranteed to share one. Falls back to
+	// time.Local when unset/invalid, or when st is nil (tests that don't exercise formatting).
+	loc := func(ctx context.Context) *time.Location {
+		if st == nil {
+			return time.Local
+		}
+		g := settings.Load(ctx, st, settings.KeyGeneral, settings.General{})
+		if g.Timezone != "" {
+			if l, err := time.LoadLocation(g.Timezone); err == nil {
+				return l
+			}
+		}
+		return time.Local
+	}
 	dec := func(raw json.RawMessage) (map[string]any, error) {
 		m := map[string]any{}
 		if len(raw) > 0 && string(raw) != "null" {
@@ -186,7 +205,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				}
 				var sb strings.Builder
 				for _, e := range r.Events {
-					sb.WriteString(describeEvent(e, true) + "\n")
+					sb.WriteString(describeEvent(e, true, loc(ctx)) + "\n")
 				}
 				if r.Total > len(r.Events) {
 					fmt.Fprintf(&sb, "…and %d more (narrow the range or add a query).\n", r.Total-len(r.Events))
@@ -216,7 +235,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "add-event", m, &r); err != nil {
 					return "", err
 				}
-				return "Created: " + describeEvent(r.Event, true), nil
+				return "Created: " + describeEvent(r.Event, true, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -250,7 +269,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "update-event", payload, &r); err != nil {
 					return "", err
 				}
-				return "Updated: " + describeEvent(r.Event, true) + "\nWas: " + describeEvent(before, false), nil
+				return "Updated: " + describeEvent(r.Event, true, loc(ctx)) + "\nWas: " + describeEvent(before, false, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -266,7 +285,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err != nil {
 					return "", err
 				}
-				what := describeEvent(ev, false)
+				what := describeEvent(ev, false, loc(ctx))
 				if err := tools.Confirm(ctx, env, "calendar_delete", what, fmt.Sprintf("%s wants to delete the event: %s", env.Agent, what)); err != nil {
 					return "", err
 				}
@@ -276,7 +295,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "delete-event", map[string]any{"id": m["id"], "occurrence": m["start"], "span": m["span"]}, &r); err != nil {
 					return "", err
 				}
-				return "Deleted: " + describeEvent(r.Deleted, false), nil
+				return "Deleted: " + describeEvent(r.Deleted, false, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -301,7 +320,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				}
 				var sb strings.Builder
 				for _, x := range r.Reminders {
-					sb.WriteString(describeReminder(x, true) + "\n")
+					sb.WriteString(describeReminder(x, true, loc(ctx)) + "\n")
 				}
 				if r.Total > len(r.Reminders) {
 					fmt.Fprintf(&sb, "…and %d more.\n", r.Total-len(r.Reminders))
@@ -324,7 +343,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "add-reminder", m, &r); err != nil {
 					return "", err
 				}
-				return "Created: " + describeReminder(r.Reminder, true), nil
+				return "Created: " + describeReminder(r.Reminder, true, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -343,7 +362,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "update-reminder", m, &r); err != nil {
 					return "", err
 				}
-				return "Updated: " + describeReminder(r.Reminder, true), nil
+				return "Updated: " + describeReminder(r.Reminder, true, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -361,7 +380,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "complete-reminder", m, &r); err != nil {
 					return "", err
 				}
-				return describeReminder(r.Reminder, false), nil
+				return describeReminder(r.Reminder, false, loc(ctx)), nil
 			},
 		},
 		&tools.Tool{
@@ -379,7 +398,7 @@ func registerCalendar(reg *tools.Registry, h *Helper) {
 				if err := h.Run(ctx, "get-reminder", m, &cur); err != nil {
 					return "", err
 				}
-				what := describeReminder(cur.Reminder, false)
+				what := describeReminder(cur.Reminder, false, loc(ctx))
 				if err := tools.Confirm(ctx, env, "reminders_delete", what, fmt.Sprintf("%s wants to delete the reminder: %s", env.Agent, what)); err != nil {
 					return "", err
 				}
