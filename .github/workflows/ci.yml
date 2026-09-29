@@ -21,7 +21,7 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 15
     steps:
       - uses: actions/checkout@v4
 
@@ -39,8 +39,13 @@ jobs:
       - name: Test
         env:
           # testutil.DB creates and drops a throwaway database per test against this admin connection.
-          PRISM_TEST_DSN: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-        run: go test ./... -timeout 25m
+          # 127.0.0.1, not localhost: some Actions runners resolve localhost to ::1 first, which the
+          # service container's port mapping does not reliably answer on.
+          PRISM_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        # -p 4: each test creates and migrates its own throwaway database (testutil.DB), so unbounded
+        # cross-package parallelism means many of those landing on the Postgres service at once — fine on
+        # a beefy local machine, but it can overload a shared 2-core runner. Capped, not serialized.
+        run: go test ./... -timeout 25m -p 4
 
   frontend:
     runs-on: ubuntu-latest
