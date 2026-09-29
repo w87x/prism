@@ -1,5 +1,7 @@
 # PRISM
 
+[![CI](https://github.com/w87x/prism/actions/workflows/ci.yml/badge.svg)](https://github.com/w87x/prism/actions/workflows/ci.yml)
+
 A personal, single-user, **multi-agent AI assistant**. You talk to one agent — **Atlas** — who either answers
 immediately or decomposes the task, delegates the pieces to specialists (max two levels deep) and synthesizes
 the result. Small, focused contexts instead of one bloated one.
@@ -12,12 +14,16 @@ the result. Small, focused contexts instead of one bloated one.
 
 ## Requirements
 
-* macOS (Calendar, Reminders, Shortcuts and notifications use native APIs)
+* macOS or Linux (macOS is the primary target — Calendar, Reminders, Shortcuts and native notifications use
+  macOS-only APIs and simply aren't available on Linux; everything else is platform-independent)
 * Go (version in `go.mod`) and Node.js to build
 * PostgreSQL 14+ (pgvector optional but recommended) and an OpenAI-compatible model endpoint
-* Optional: `aria2` (torrent/FTP downloads), Google Chrome (browser tools) — `make deps` installs them
+* Optional: `aria2` (torrent/FTP downloads), Google Chrome (browser tools) — `make deps` installs them (macOS)
 
 ## Run it
+
+Grab a prebuilt binary from [Releases](https://github.com/w87x/prism/releases) (macOS/Linux, amd64/arm64), or build
+from source:
 
 ```bash
 make ui build       # builds web/dist, then bin/prism (the UI is embedded in the binary)

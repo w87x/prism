@@ -31,7 +31,9 @@ import (
 	"prism/internal/tools/builtin"
 )
 
-const Version = "0.1.0"
+// Version is overridden at release build time via -ldflags "-X prism/internal/app.Version=vX.Y.Z"
+// (see .github/workflows/release.yml); a plain `go build` keeps this default.
+var Version = "0.1.0"
 
 type App struct {
 	Cfg *config.Config

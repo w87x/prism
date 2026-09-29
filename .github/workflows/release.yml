@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: cd web && npm ci && npm run build
+
+      # go:embed needs web/dist present at compile time for every platform build below, so it's built
+      # once here and shared rather than re-installing/re-building node_modules four times over.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+  build:
+    needs: ui
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X prism/internal/app.Version=${{ github.ref_name }}" -o dist/prism ./cmd/prism
+
+      - name: Package
+        run: |
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md dist/
+          cd dist
+          tar czf prism_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz prism README.md LICENSE THIRD_PARTY_NOTICES.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prism_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prism_*
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
+          draft: false
