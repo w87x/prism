@@ -766,7 +766,7 @@ func (s *Server) registerOnboarding() {
 		for _, p := range ps {
 			names = append(names, p.Name)
 		}
-		ds := onboarding.Templates()
+		ds := onboarding.TemplatesWithMCP(a.Tools)
 		for i := range ds {
 			for _, n := range names {
 				if strings.EqualFold(n, ds[i].Name) {

@@ -151,6 +151,10 @@
   let stageNote = $state('');
   $effect(() => { if (step === 3) loadTools(); });
   const toolOpts = $derived((S.tools || []).map((t) => ({ value: t.name, label: t.name, hint: t.category, badge: t.risk === 'exec' ? 'exec' : t.risk === 'write' ? 'write' : t.category?.startsWith('mcp:') ? 'mcp' : '' })));
+  // connected MCP servers, shown so it's clear what "built-in templates" can fold tools from before generating
+  let mcpServers = $state([]);
+  $effect(() => { if (step === 3) call('mcp.list', {}, { quiet: true }).then((r) => (mcpServers = r || [])); });
+  const mcpConnected = $derived(mcpServers.filter((s) => s.status?.state === 'connected'));
   function removeDraft(i) {
     drafts = drafts.filter((_, j) => j !== i);
     const np = {};
@@ -299,6 +303,12 @@
       {:else if step === 3}
         <h2>Agents</h2>
         <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Sherpa, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
+        {#if mcpConnected.length}
+          <div class="mcpbox sm">
+            <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Generate with the model" sees all of it directly; "Use built-in templates" folds each server's tools into whichever template fits, or drafts a new one when nothing does:
+            <div class="mcprow">{#each mcpConnected as s}<Badge tone="accent">{s.name} · {s.status.tools?.length || 0} tools</Badge>{/each}</div>
+          </div>
+        {/if}
         {#if regen}<Field label="Hints"><Textarea bind:value={hints} rows={3} mono={false} /></Field>{/if}
         <div class="row wrap genrow">
           <Field label="How many"><NumberInput bind:value={count} min={1} max={100} /></Field>
@@ -366,6 +376,8 @@
   .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
   .ok-box { border: 1px solid var(--line-2); background: var(--bg); padding: 6px 10px; display: flex; flex-direction: column; gap: 3px; }
+  .mcpbox { border: 1px solid var(--accent-dim); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 6px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .mcprow { display: flex; flex-wrap: wrap; gap: 6px; }
   .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; }
   .tst { margin-top: 4px; }
   .list { max-height: 220px; border: 1px solid var(--line); }

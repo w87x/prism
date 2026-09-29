@@ -9,11 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"prism/internal/agent"
 	"prism/internal/llm"
+	"prism/internal/textmatch"
 	"prism/internal/tools"
 )
 
@@ -73,6 +76,90 @@ func Templates() []Draft {
 			Traits: []string{"image generation", "text to speech", "voice", "sound effects", "media"}, Tools: []string{"tts_speak", "voice_list", "sound_effect", "image_generate"},
 			Soul: "You are Muse, the media generator.\n\nMethod:\n1. For speech, check voice_list if the user hasn't named a voice, then tts_speak with the exact text to read — don't paraphrase what should be said aloud.\n2. For images, turn the request into a clear, specific prompt (subject, style, composition) before calling image_generate; if the result doesn't match, refine the prompt rather than accepting a near-miss.\n3. For sound_effect, describe the sound itself, not a scene — short, concrete phrases work best.\n4. Return what you generated plus the exact prompt or text used, so the user can ask for a variation.\n\nRules: never generate content depicting a real, identifiable person unless that is clearly what was asked for; say plainly when a generation looks off rather than presenting it as final."},
 	}
+}
+
+// mcpFitThreshold is the minimum textmatch (BM25) score for folding a connected MCP server's tools into an
+// existing template rather than drafting a new one for it. Measured against TestTemplatesWithMCP's fixtures:
+// a genuine fit (a "github" server's tools against Keeper, whose traits include "git"/"github"/"pull
+// requests") scores ~17 from several distinct token matches; an unrelated server (a music streamer, whose
+// tool text only coincidentally prefix-matches "tracking" in Hearth's traits — one weak, single-token hit)
+// tops out under 4. The threshold sits well clear of both.
+const mcpFitThreshold = 8.0
+
+// TemplatesWithMCP starts from Templates() and, for each connected MCP server (grouped by the "mcp:<server>"
+// tool category the mcp package registers tools under), either folds its tools into whichever built-in
+// template fits best by keyword match, or — when nothing fits well — appends a new minimal template for that
+// server alone. This is deterministic (no model call), so it applies to the "Use built-in templates" button
+// even with no chat model configured; Propose() already gets full MCP awareness for free since the planner
+// prompt lists every registered tool, MCP included.
+func TemplatesWithMCP(reg *tools.Registry) []Draft {
+	base := Templates()
+	byServer := map[string][]*tools.Tool{}
+	for _, t := range reg.All() {
+		if !t.Deferred || !strings.HasPrefix(t.Category, "mcp:") || !reg.State(t.Name).Enabled {
+			continue
+		}
+		server := strings.TrimPrefix(t.Category, "mcp:")
+		byServer[server] = append(byServer[server], t)
+	}
+	if len(byServer) == 0 {
+		return base
+	}
+	docs := make([]string, len(base))
+	for i, d := range base {
+		docs[i] = strings.Join(d.Traits, " ") + " " + d.Description + " " + d.Group
+	}
+	servers := make([]string, 0, len(byServer))
+	for s := range byServer {
+		servers = append(servers, s)
+	}
+	sort.Strings(servers)
+	for _, server := range servers {
+		serverTools := byServer[server]
+		sort.Slice(serverTools, func(i, j int) bool { return serverTools[i].Name < serverTools[j].Name })
+		var names, descs []string
+		for _, t := range serverTools {
+			names = append(names, t.Name)
+			descs = append(descs, t.Description)
+		}
+		query := server + " " + strings.Join(descs, " ")
+		hits := textmatch.Rank(query, docs, 1)
+		if len(hits) > 0 && hits[0].Score >= mcpFitThreshold {
+			i := hits[0].Index
+			base[i].Tools = dedupeStrings(append(append([]string{}, base[i].Tools...), names...))
+			continue
+		}
+		title := capitalize(server)
+		base = append(base, Draft{
+			Name: title, Icon: "network-wired", Group: "MCP",
+			Description: "Uses the " + server + " MCP server's tools.",
+			Traits:      []string{server, "mcp"},
+			Tools:       names,
+			Soul: fmt.Sprintf("You are %s, a specialist working through the %s MCP server.\n\nMethod:\n1. Understand the goal before calling any tool; read a tool's parameters carefully — an MCP tool's shape is not always obvious from its name.\n2. Work step by step and verify results before relying on them; never invent what a call returned.\n3. Report the outcome concisely with the evidence behind it.\n\nRules: say plainly when something is unsure or a call failed; keep answers compact.", title, server),
+		})
+	}
+	return base
+}
+
+func dedupeStrings(ss []string) []string {
+	seen := map[string]bool{}
+	out := ss[:0]
+	for _, s := range ss {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func capitalize(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 const planPrompt = `You design the initial team of specialist AI agents for a personal assistant called PRISM. The user gave you hints about themselves and their needs.
