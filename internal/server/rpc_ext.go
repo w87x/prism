@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/app"
 	"prism/internal/docsearch"
 	"prism/internal/foldermap"
 	"prism/internal/ingest"
@@ -177,12 +179,68 @@ func (s *Server) registerMCP() {
 		return out, nil
 	})
 	rpc(s, "mcp.save", func(ctx context.Context, sv mcp.Server) (int64, error) {
+		isNew := sv.ID == 0
 		id, err := a.Ext.MCP.Save(ctx, sv)
 		if err != nil {
 			return 0, err
 		}
-		go func() { _ = a.Ext.MCP.Reload(context.Background(), id) }() // connect in the background (npx may download)
+		go func() { // connect in the background (npx may download)
+			bg := context.Background()
+			_ = a.Ext.MCP.Reload(bg, id)
+			if isNew {
+				suggestAgentForMCP(bg, a, id, sv.Name)
+			}
+		}()
 		return id, nil
+	})
+	rpc(s, "mcp.suggestions", func(ctx context.Context, _ none) ([]mcpSuggestion, error) {
+		rows, err := a.DB.Query(ctx, `SELECT id, server, draft, created_at FROM mcp_agent_suggestions WHERE status='pending' ORDER BY id DESC`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []mcpSuggestion
+		for rows.Next() {
+			var m mcpSuggestion
+			var raw []byte
+			if err := rows.Scan(&m.ID, &m.Server, &raw, &m.CreatedAt); err != nil {
+				return nil, err
+			}
+			_ = json.Unmarshal(raw, &m.Draft)
+			out = append(out, m)
+		}
+		return out, nil
+	})
+	rpc(s, "mcp.suggestion_apply", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (int64, error) {
+		var raw []byte
+		if err := a.DB.QueryRow(ctx, `SELECT draft FROM mcp_agent_suggestions WHERE id=$1 AND status='pending'`, r.ID).Scan(&raw); err != nil {
+			return 0, err
+		}
+		var d onboarding.Draft
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return 0, err
+		}
+		n, err := onboarding.Apply(ctx, a.Profiles, []onboarding.Draft{d}, false)
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			return 0, fmt.Errorf("an agent named %q already exists", d.Name)
+		}
+		_, _ = a.DB.Exec(ctx, `UPDATE mcp_agent_suggestions SET status='applied' WHERE id=$1`, r.ID)
+		p, err := a.Profiles.Get(ctx, d.Name)
+		if err != nil {
+			return 0, err
+		}
+		return p.ID, nil
+	})
+	rpc(s, "mcp.suggestion_dismiss", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		_, err := a.DB.Exec(ctx, `UPDATE mcp_agent_suggestions SET status='dismissed' WHERE id=$1`, r.ID)
+		return err == nil, err
 	})
 	rpc(s, "mcp.delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
@@ -207,6 +265,49 @@ func (s *Server) registerMCP() {
 		go func() { _ = a.Ext.MCP.Reload(context.Background(), r.ID) }()
 		return true, nil
 	})
+}
+
+type mcpSuggestion struct {
+	ID        int64            `json:"id"`
+	Server    string           `json:"server"`
+	Draft     onboarding.Draft `json:"draft"`
+	CreatedAt time.Time        `json:"created_at"`
+}
+
+// suggestAgentForMCP drafts one agent for a just-connected MCP server's own tools (reusing the same
+// planner onboarding uses) and stores it for the user to review on the Agents page. Best-effort and
+// silent: a slow/absent model or a server with no tools must never surface as an error to mcp.save.
+func suggestAgentForMCP(ctx context.Context, a *app.App, serverID int64, serverName string) {
+	if !a.LLM.HasChat(ctx) {
+		return
+	}
+	st := a.Ext.MCP.Statuses()[serverID]
+	if st.State != "connected" || len(st.Tools) == 0 {
+		return
+	}
+	ps, err := a.Profiles.List(ctx)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, p := range ps {
+		names = append(names, p.Name)
+	}
+	hint := fmt.Sprintf("The user just connected a new MCP server called %q, exposing exactly these tools: %s. Design exactly ONE agent whose primary toolset is those MCP tools; add at most 2-3 complementary built-in tools only if the job clearly needs them (e.g. artifact_save, file_read). Do not propose anything unrelated to this server.",
+		serverName, strings.Join(st.Tools, ", "))
+	drafts, used, err := onboarding.Propose(ctx, a.LLM, a.Tools, names, hint, 1, "", nil)
+	if err != nil || !used || len(drafts) == 0 || drafts[0].Exists {
+		return
+	}
+	b, err := json.Marshal(drafts[0])
+	if err != nil {
+		return
+	}
+	var id int64
+	if err := a.DB.QueryRow(ctx, `INSERT INTO mcp_agent_suggestions(server, draft) VALUES($1,$2) RETURNING id`, serverName, b).Scan(&id); err != nil {
+		return
+	}
+	a.Emit("mcp.suggestion", map[string]any{"id": id, "server": serverName, "name": drafts[0].Name})
 }
 
 func (s *Server) registerWeb() {

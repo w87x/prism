@@ -3,7 +3,7 @@
   // per specialist group beyond it, everyone slowly circling. Dragging pulls an agent off its orbit; on
   // release it is captured by the orbit again (at the angle where it was let go). Active agents glow and
   // their delegation lines light up; requests between colleagues arc with a travelling dot.
-  import { S, activeRuns, reopenOnboarding, iconOf } from '../lib/store.svelte.js';
+  import { S, activeRuns, reopenOnboarding, iconOf, call, listen, toast } from '../lib/store.svelte.js';
   import Button from '../lib/ui/Button.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
   import Icon from '../lib/ui/Icon.svelte';
@@ -24,6 +24,19 @@
   const activeNames = $derived(new Set(runs.map((r) => r.agent)));
   const match = (a) => !filter || `${a.name} ${a.group} ${a.description} ${(a.traits || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase());
   function newAgent() { S.selectedAgent = 'new'; }
+
+  // agents proposed for a newly connected MCP server, waiting on the user's review
+  let suggestions = $state([]);
+  async function loadSuggestions() { suggestions = (await call('mcp.suggestions', {}, { quiet: true })) || []; }
+  $effect(() => { loadSuggestions(); });
+  $effect(() => listen('mcp.suggestion', loadSuggestions));
+  async function acceptSuggestion(s) {
+    const id = await call('mcp.suggestion_apply', { id: s.id });
+    if (id) { toast(`${s.draft.name} created`); suggestions = suggestions.filter((x) => x.id !== s.id); S.refresh++; }
+  }
+  async function dismissSuggestion(s) {
+    if (await call('mcp.suggestion_dismiss', { id: s.id })) suggestions = suggestions.filter((x) => x.id !== s.id);
+  }
 
   // ── scene (plain state, read by the draw loop) ──
   let nodes = []; // {id, a, x, y, ang, orbit, pinned}
@@ -75,9 +88,26 @@
       if (n.a.role === 'entry') { if (!n.pinned) { n.x = cx; n.y = cy; } continue; }
       const o = orbitOf(n.orbit);
       if (!o) continue;
-      if (!n.pinned && !reduced) n.ang += o.speed * 0.016 * (activeNames.has(n.a.name) ? 0.25 : 1); // busy agents linger
+      if (n.angTarget != null) {
+        // easing toward a target angle (an orbit-mate re-spacing after a drag) overrides the usual drift
+        const diff = Math.atan2(Math.sin(n.angTarget - n.ang), Math.cos(n.angTarget - n.ang));
+        if (Math.abs(diff) < 0.01) { n.ang = n.angTarget; n.angTarget = null; }
+        else n.ang += diff * 0.08;
+      } else if (!n.pinned && !reduced) n.ang += o.speed * 0.016 * (activeNames.has(n.a.name) ? 0.25 : 1); // busy agents linger
       if (!n.pinned) { n.x = cx + Math.cos(n.ang) * o.k * ex; n.y = cy + Math.sin(n.ang) * o.k * ey; }
     }
+  }
+  // after a drag settles an agent at a new angle on its orbit, its orbit-mates ease into even spacing
+  // around it instead of staying wherever they were (which is what let a drag leave them bunched together).
+  // Relative order is kept — this only evens out the gaps, it does not reshuffle who is "next to" whom.
+  function evenOutOrbit(dragged) {
+    const peers = nodes.filter((n) => n.orbit === dragged.orbit && n !== dragged && !n.pinned);
+    if (!peers.length) return;
+    const twoPi = Math.PI * 2;
+    const rel = (n) => ((n.ang - dragged.ang) % twoPi + twoPi) % twoPi;
+    peers.sort((a, b) => rel(a) - rel(b));
+    const step = twoPi / (peers.length + 1);
+    peers.forEach((n, i) => { n.angTarget = dragged.ang + step * (i + 1); });
   }
   const arcPath = (ctx, a, b) => {
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = Math.min(60, len * 0.28);
@@ -182,7 +212,11 @@
     const { n, moved } = gesture; gesture = null; hoverId = null;
     if (!moved) { S.selectedAgent = n.a.id; return; }
     // released: the orbit captures it again where it was let go
-    if (n.a.role !== 'entry') { const { cx, cy, ex, ey } = spec(), o = orbitOf(n.orbit); n.ang = Math.atan2((n.y - cy) / (o ? o.k * ey : ey), (n.x - cx) / (o ? o.k * ex : ex)); }
+    if (n.a.role !== 'entry') {
+      const { cx, cy, ex, ey } = spec(), o = orbitOf(n.orbit);
+      n.ang = Math.atan2((n.y - cy) / (o ? o.k * ey : ey), (n.x - cx) / (o ? o.k * ex : ex));
+      evenOutOrbit(n);
+    }
     n.pinned = false;
   }
 
@@ -205,6 +239,20 @@
     <Button size="sm" onclick={newAgent}><Icon name="plus" size={11} /> New agent</Button>
     <Button size="sm" variant="accent" onclick={reopenOnboarding}><Icon name="refresh" size={11} /> Regenerate profiles</Button>
   </div>
+
+  {#if suggestions.length}
+    <div class="sugg">
+      {#each suggestions as s (s.id)}
+        <div class="srow">
+          <Icon name="plus" size={12} />
+          <span class="sm">New MCP server <b class="hi">{s.server}</b> connected — suggested agent <b class="hi">{s.draft.name}</b>: {s.draft.description}</span>
+          <span class="grow"></span>
+          <Button size="sm" variant="primary" onclick={() => acceptSuggestion(s)}>Create</Button>
+          <Button size="sm" variant="ghost" onclick={() => dismissSuggestion(s)}>Dismiss</Button>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   {#if view === 'graph'}
     <div class="graph" bind:clientWidth={w} bind:clientHeight={h}>
@@ -245,6 +293,8 @@
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   .f { width: 230px; }
   @media (max-width: 820px) { .f { width: 100%; flex: 1; } }
+  .sugg { display: flex; flex-direction: column; gap: 4px; flex: none; }
+  .srow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--accent-dim); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .graph { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line-2); overflow: hidden; background: radial-gradient(circle at 50% 50%, #0a1c15 0%, #030806 100%); }
   canvas { position: absolute; inset: 0; display: block; touch-action: none; }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
