@@ -22,17 +22,12 @@
   .accent { --c: var(--accent); } .attn { --c: var(--attn); } .warn { --c: var(--warn); } .err { --c: var(--err); }
   .bar i { display: block; height: 100%; background: var(--c); box-shadow: 0 0 6px var(--c); }
   .bar > i:not(.sweep) { transition: width 0.25s; }
-  .sweep { position: absolute; inset: 0; width: 40%; transform-origin: left center; opacity: 0.85;
-    animation: idle 1.8s ease-in-out infinite; }
-  .sweep.live { animation-name: sweep; animation-duration: var(--ms); animation-timing-function: ease-in-out; }
+  .sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; opacity: 0.85;
+    animation: sweep 1.6s linear infinite; }
+  .sweep.live { animation-duration: var(--ms); }
   @keyframes sweep {
-    0%   { transform: translateX(-40%) scaleX(0.5); }
-    50%  { transform: translateX(80%) scaleX(1.4); }
-    100% { transform: translateX(220%) scaleX(0.5); }
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(430%); }
   }
-  @keyframes idle {
-    0%, 100% { transform: translateX(-10%) scaleX(0.6); }
-    50%      { transform: translateX(60%) scaleX(0.9); }
-  }
-  @media (prefers-reduced-motion: reduce) { .sweep { animation: none; transform: translateX(0) scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .sweep { animation: none; transform: translateX(0); } }
 </style>
