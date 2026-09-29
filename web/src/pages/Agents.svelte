@@ -1,8 +1,11 @@
 <script>
-  // Agent orbits on a <canvas>: Atlas at the centre, the maintenance staff on the inner orbit and one orbit
-  // per specialist group beyond it, everyone slowly circling. Dragging pulls an agent off its orbit; on
-  // release it is captured by the orbit again (at the angle where it was let go). Active agents glow and
-  // their delegation lines light up; requests between colleagues arc with a travelling dot.
+  // Agents on a <canvas>, laid out by a small force simulation: Atlas fixed at the centre, everyone else
+  // repelled apart (so neighbours never overlap), gently pulled toward their own group's centroid (so a
+  // group still reads as a cluster) and toward a target distance from Atlas by role (staff inner, each
+  // specialist group a little further out — no fixed rings or angles, so nothing has to "cross" anything
+  // else). Dragging pins a node under the pointer; on release the simulation takes it from wherever it was
+  // dropped. Active agents glow and their delegation lines light up; requests between colleagues arc with a
+  // travelling dot.
   import { S, activeRuns, reopenOnboarding, iconOf, call, listen, toast } from '../lib/store.svelte.js';
   import Button from '../lib/ui/Button.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
@@ -39,34 +42,44 @@
   }
 
   // ── scene (plain state, read by the draw loop) ──
-  let nodes = []; // {id, a, x, y, ang, orbit, pinned}
-  let orbits = []; // {label, k (0..1 of the available radius), speed}
+  let nodes = []; // {id, a, x, y, vx, vy, orbit, pinned}
+  let orbits = []; // {key, label, k (0..1 of the available radius) — the group's target distance from Atlas}
   let hoverId = null, gesture = null, colors = {};
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // rebuild orbit assignment whenever the roster changes; angles are kept for agents that were already there
+  // rebuild group assignment whenever the roster changes; positions are kept for agents already placed
   $effect(() => {
     const list = S.agents;
     const old = new Map(nodes.map((n) => [n.id, n]));
     const groups = [...new Set(list.filter((a) => a.role === 'worker').map((a) => a.group))].sort();
     orbits = [];
     const hasStaff = list.some((a) => a.role === 'maint');
-    if (hasStaff) orbits.push({ key: 'staff', label: 'staff', k: groups.length ? 0.36 : 0.62, speed: 0.045 });
-    groups.forEach((g, i) => orbits.push({ key: 'g:' + g, label: g, k: groups.length === 1 ? 0.78 : 0.58 + (0.36 * i) / (groups.length - 1), speed: (i % 2 ? -1 : 1) * (0.03 - i * 0.002) }));
+    if (hasStaff) orbits.push({ key: 'staff', label: 'staff', k: groups.length ? 0.36 : 0.62 });
+    groups.forEach((g, i) => orbits.push({ key: 'g:' + g, label: g, k: groups.length === 1 ? 0.78 : 0.58 + (0.36 * i) / (groups.length - 1) }));
     const byOrbit = {};
+    const { cx, cy, ex, ey } = spec();
     nodes = list.map((a) => {
       const key = a.role === 'entry' ? null : a.role === 'maint' ? 'staff' : 'g:' + a.group;
-      const o = old.get(a.id);
-      const n = o || { id: a.id, x: 0, y: 0, ang: 0, pinned: false };
+      const n = old.get(a.id) || { id: a.id, x: cx, y: cy, vx: 0, vy: 0, pinned: false, isNew: true };
       n.a = a; n.orbit = key;
-      if (key) { (byOrbit[key] ||= []).push(n); }
+      if (key) (byOrbit[key] ||= []).push(n);
       return n;
     });
-    // spread agents evenly around their orbit; keep the current angle for nodes that are already placed
-    for (const [key, ns] of Object.entries(byOrbit)) ns.forEach((n, i) => { if (!old.has(n.id)) n.ang = (i / ns.length) * Math.PI * 2 + key.length; });
+    // seed a spread-out starting spot for brand-new nodes only — the simulation takes it from there, this
+    // just avoids everyone spawning stacked on top of Atlas and fighting their way apart on frame one
+    for (const [key, ns] of Object.entries(byOrbit)) {
+      const o = orbits.find((x) => x.key === key);
+      ns.forEach((n, i) => {
+        if (!n.isNew) return;
+        n.isNew = false;
+        const ang = (i / ns.length) * Math.PI * 2 + key.length;
+        n.x = cx + Math.cos(ang) * (o?.k ?? 0.6) * ex;
+        n.y = cy + Math.sin(ang) * (o?.k ?? 0.6) * ey;
+      });
+    }
   });
 
-  const spec = () => { const cx = w / 2, cy = h / 2, mx = w < 560 ? 26 : 70, my = w < 560 ? 30 : 60; return { cx, cy, ex: Math.max(80, w / 2 - mx), ey: Math.max(80, h / 2 - my) }; };
+  const spec = () => { const cx = w / 2, cy = h / 2, mx = w < 560 ? 26 : 70, my = w < 560 ? 30 : 92; return { cx, cy, ex: Math.max(80, w / 2 - mx), ey: Math.max(80, h / 2 - my) }; };
   const orbitOf = (key) => orbits.find((o) => o.key === key);
   // small by default so the orbits stay readable; the hovered agent swells (eased per node in draw())
   // phone-sized canvas: smaller nodes, and names only for the agent you touch (see draw)
@@ -82,32 +95,41 @@
   }
   const nodeColor = (a) => (!a.enabled ? colors.off : a.role === 'entry' ? colors.hi : a.role === 'maint' ? colors.accent : colors.fg);
 
-  function place(t) {
+  // force constants: REPEL keeps neighbours from overlapping, COHESION pulls a group loosely toward its own
+  // centroid so it still reads as a cluster, RADIAL is a soft spring toward the group's target distance from
+  // Atlas, DAMP settles the motion instead of letting it oscillate, MAXV caps how fast a node can catch up
+  // (so a roster change eases in rather than snapping).
+  const REPEL = 1.5, COHESION = 0.004, RADIAL = 0.02, DAMP = 0.82, MAXV = 7;
+  function place() {
     const { cx, cy, ex, ey } = spec();
+    const atlas = nodes.find((n) => n.a.role === 'entry');
+    if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
+    if (reduced) return; // prefers-reduced-motion: settle once via CSS-free snap, no continuous simulation
     for (const n of nodes) {
-      if (n.a.role === 'entry') { if (!n.pinned) { n.x = cx; n.y = cy; } continue; }
-      const o = orbitOf(n.orbit);
-      if (!o) continue;
-      if (n.angTarget != null) {
-        // easing toward a target angle (an orbit-mate re-spacing after a drag) overrides the usual drift
-        const diff = Math.atan2(Math.sin(n.angTarget - n.ang), Math.cos(n.angTarget - n.ang));
-        if (Math.abs(diff) < 0.01) { n.ang = n.angTarget; n.angTarget = null; }
-        else n.ang += diff * 0.08;
-      } else if (!n.pinned && !reduced) n.ang += o.speed * 0.016 * (activeNames.has(n.a.name) ? 0.25 : 1); // busy agents linger
-      if (!n.pinned) { n.x = cx + Math.cos(n.ang) * o.k * ex; n.y = cy + Math.sin(n.ang) * o.k * ey; }
+      if (n.a.role === 'entry' || n.pinned) { n.vx = 0; n.vy = 0; continue; }
+      let fx = 0, fy = 0;
+      for (const m of nodes) {
+        if (m === n) continue;
+        let dx = n.x - m.x, dy = n.y - m.y, d = Math.hypot(dx, dy);
+        const minD = R(n) + R(m) + 22;
+        if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
+        if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
+      }
+      const peers = n.orbit ? nodes.filter((p) => p.orbit === n.orbit && p !== n) : [];
+      if (peers.length) {
+        let mx = 0, my = 0;
+        for (const p of peers) { mx += p.x; my += p.y; }
+        mx /= peers.length; my /= peers.length;
+        fx += (mx - n.x) * COHESION; fy += (my - n.y) * COHESION;
+      }
+      const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
+      const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
+      fx += (sx / sd) * err * ex * RADIAL; fy += (sy / sd) * err * ey * RADIAL;
+      n.vx = (n.vx + fx) * DAMP; n.vy = (n.vy + fy) * DAMP;
+      const sp = Math.hypot(n.vx, n.vy);
+      if (sp > MAXV) { n.vx = (n.vx / sp) * MAXV; n.vy = (n.vy / sp) * MAXV; }
+      n.x += n.vx; n.y += n.vy;
     }
-  }
-  // after a drag settles an agent at a new angle on its orbit, its orbit-mates ease into even spacing
-  // around it instead of staying wherever they were (which is what let a drag leave them bunched together).
-  // Relative order is kept — this only evens out the gaps, it does not reshuffle who is "next to" whom.
-  function evenOutOrbit(dragged) {
-    const peers = nodes.filter((n) => n.orbit === dragged.orbit && n !== dragged && !n.pinned);
-    if (!peers.length) return;
-    const twoPi = Math.PI * 2;
-    const rel = (n) => ((n.ang - dragged.ang) % twoPi + twoPi) % twoPi;
-    peers.sort((a, b) => rel(a) - rel(b));
-    const step = twoPi / (peers.length + 1);
-    peers.forEach((n, i) => { n.angTarget = dragged.ang + step * (i + 1); });
   }
   const arcPath = (ctx, a, b) => {
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = Math.min(60, len * 0.28);
@@ -123,24 +145,10 @@
     if (!canvas || view !== 'graph') return;
     const ctx = canvas.getContext('2d'), dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
-    place(t);
+    place();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const { cx, cy, ex, ey } = spec();
     const atlas = nodes.find((n) => n.a.role === 'entry');
-
-    // orbits: on a phone-sized canvas these are just visual clutter around already-tiny nodes — the nodes still
-    // sit at the same radius (see spec()/orbitOf), only the guide rings and their labels are skipped
-    if (!compact()) {
-      ctx.lineWidth = 1; ctx.strokeStyle = colors.line; ctx.fillStyle = colors.mute; ctx.font = '9px monospace'; ctx.textAlign = 'left';
-      for (const o of orbits) {
-        ctx.globalAlpha = 0.55; ctx.setLineDash([2, 6]);
-        ctx.beginPath(); ctx.ellipse(cx, cy, o.k * ex, o.k * ey, 0, 0, Math.PI * 2); ctx.stroke();
-        ctx.setLineDash([]); ctx.globalAlpha = 0.6;
-        ctx.fillText(o.label.toUpperCase(), cx + o.k * ex * Math.cos(-0.5) + 4, cy + o.k * ey * Math.sin(-0.5));
-      }
-      ctx.globalAlpha = 1;
-    }
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
     // spokes from Atlas; live ones (delegation in progress) run bright and dashed
@@ -211,12 +219,8 @@
     if (!gesture) return;
     const { n, moved } = gesture; gesture = null; hoverId = null;
     if (!moved) { S.selectedAgent = n.a.id; return; }
-    // released: the orbit captures it again where it was let go
-    if (n.a.role !== 'entry') {
-      const { cx, cy, ex, ey } = spec(), o = orbitOf(n.orbit);
-      n.ang = Math.atan2((n.y - cy) / (o ? o.k * ey : ey), (n.x - cx) / (o ? o.k * ex : ex));
-      evenOutOrbit(n);
-    }
+    // released: the simulation takes over from wherever it was dropped, gently repelling neighbours apart
+    // if it landed close to any of them rather than a hard reset back onto a ring
     n.pinned = false;
   }
 
@@ -262,7 +266,7 @@
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span class="mute">agents circle their orbit · drag to move · click to edit</span>
+        <span class="mute">agents settle apart to avoid overlap · drag to move · click to edit</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>
