@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import { FA } from '../lib/icons.js';
-  import { S, call, listen, toast, confirmBox, refreshAll, skipOnboarding, loadModels, modelOptions, go } from '../lib/store.svelte.js';
+  import { S, call, listen, toast, confirmBox, refreshAll, skipOnboarding, loadModels, modelOptions, loadTools, go } from '../lib/store.svelte.js';
   import Logo from '../lib/ui/Logo.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Input from '../lib/ui/Input.svelte';
@@ -10,9 +10,12 @@
   import Textarea from '../lib/ui/Textarea.svelte';
   import NumberInput from '../lib/ui/NumberInput.svelte';
   import Checkbox from '../lib/ui/Checkbox.svelte';
+  import Tags from '../lib/ui/Tags.svelte';
+  import MultiSelect from '../lib/ui/MultiSelect.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
+  import Icon from '../lib/ui/Icon.svelte';
 
   const steps = ['Database', 'Models', 'About you', 'Agents', 'Finish'];
   const setup = $derived(!!S.status?.setup);
@@ -146,6 +149,15 @@
   let open = $state(-1);
   let job = 0;
   let stageNote = $state('');
+  $effect(() => { if (step === 3) loadTools(); });
+  const toolOpts = $derived((S.tools || []).map((t) => ({ value: t.name, label: t.name, hint: t.category, badge: t.risk === 'exec' ? 'exec' : t.risk === 'write' ? 'write' : t.category?.startsWith('mcp:') ? 'mcp' : '' })));
+  function removeDraft(i) {
+    drafts = drafts.filter((_, j) => j !== i);
+    const np = {};
+    Object.entries(pick).forEach(([k, v]) => { const ki = Number(k); if (ki < i) np[ki] = v; else if (ki > i) np[ki - 1] = v; });
+    pick = np;
+    if (open === i) open = -1; else if (open > i) open--;
+  }
   $effect(() => listen('onboarding.progress', (e) => {
     if (!gBusy) return;
     if (!job) job = e.job; // the first event can outrun the RPC reply
@@ -299,16 +311,22 @@
         {#if note}<div class="attn sm">{note}</div>{/if}
         {#if drafts.length}
           <div class="drafts scroll">
-            {#each drafts as d, i (d.name)}
+            {#each drafts as d, i (i)}
               <div class="draft" class:exists={d.exists}>
                 <div class="row">
                   {#if d.exists}<Badge tone="mute">exists</Badge>{:else}<Checkbox bind:checked={pick[i]} />{/if}
                   <span class="hi"><i class="fa">{FA[d.icon] || FA.robot}</i> {d.name}</span><Badge tone="accent">{d.group}</Badge><span class="dim sm grow ellipsis">{d.description}</span>
-                  <Button size="sm" variant="ghost" onclick={() => (open = open === i ? -1 : i)}>{open === i ? 'hide' : 'details'}</Button>
+                  <Button size="sm" variant="ghost" onclick={() => (open = open === i ? -1 : i)}>{open === i ? 'hide' : 'edit'}</Button>
+                  <Button size="sm" variant="ghost" title="remove from the list" onclick={() => removeDraft(i)}><Icon name="x" size={11} /></Button>
                 </div>
                 {#if open === i}
-                  <div class="sm mute">traits: {(d.traits || []).join(', ')} · tools: {(d.tools || []).join(', ') || 'base only'}</div>
-                  <pre>{d.soul}</pre>
+                  <div class="edrow">
+                    <div class="two"><Field label="Name"><Input bind:value={d.name} /></Field><Field label="Group"><Input bind:value={d.group} /></Field></div>
+                    <Field label="Description"><Input bind:value={d.description} /></Field>
+                    <Field label="Traits"><Tags bind:value={d.traits} placeholder="add trait…" /></Field>
+                    <Field label="Toolset"><MultiSelect bind:value={d.tools} options={toolOpts} placeholder="base tools only" /></Field>
+                    <Field label="Soul"><Textarea bind:value={d.soul} rows={10} /></Field>
+                  </div>
                 {/if}
               </div>
             {/each}
@@ -355,6 +373,8 @@
   .draft { border: 1px solid var(--line); background: var(--bg); padding: 5px 8px; display: flex; flex-direction: column; gap: 4px; }
   .draft.exists { opacity: 0.55; }
   .draft pre { max-height: 220px; }
+  .edrow { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+  .edrow .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .acc { color: var(--accent-hi); }
   .gm { width: 260px; }
   .danger { border: 1px solid var(--err-dim); background: color-mix(in srgb, var(--err) 6%, transparent); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
