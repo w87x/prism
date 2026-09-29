@@ -100,7 +100,7 @@
   // a group loosely in the same band, without any node attracting another), DAMP settles the motion instead
   // of letting it oscillate, MAXV caps how fast a node can catch up (so a roster change eases in rather than
   // snapping).
-  const REPEL = 1.5, RADIAL = 0.02, DAMP = 0.82, MAXV = 7;
+  const REPEL = 2.6, RADIAL = 0.02, DAMP = 0.82, MAXV = 9;
   function place() {
     const { cx, cy, ex, ey } = spec();
     const atlas = nodes.find((n) => n.a.role === 'entry');
