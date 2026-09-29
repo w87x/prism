@@ -95,11 +95,12 @@
   }
   const nodeColor = (a) => (!a.enabled ? colors.off : a.role === 'entry' ? colors.hi : a.role === 'maint' ? colors.accent : colors.fg);
 
-  // force constants: REPEL keeps neighbours from overlapping, COHESION pulls a group loosely toward its own
-  // centroid so it still reads as a cluster, RADIAL is a soft spring toward the group's target distance from
-  // Atlas, DAMP settles the motion instead of letting it oscillate, MAXV caps how fast a node can catch up
-  // (so a roster change eases in rather than snapping).
-  const REPEL = 1.5, COHESION = 0.004, RADIAL = 0.02, DAMP = 0.82, MAXV = 7;
+  // force constants: REPEL keeps neighbours from overlapping — nodes only ever push each other apart, never
+  // pull together — RADIAL is a soft spring toward the group's target distance from Atlas (this is what keeps
+  // a group loosely in the same band, without any node attracting another), DAMP settles the motion instead
+  // of letting it oscillate, MAXV caps how fast a node can catch up (so a roster change eases in rather than
+  // snapping).
+  const REPEL = 1.5, RADIAL = 0.02, DAMP = 0.82, MAXV = 7;
   function place() {
     const { cx, cy, ex, ey } = spec();
     const atlas = nodes.find((n) => n.a.role === 'entry');
@@ -114,13 +115,6 @@
         const minD = R(n) + R(m) + 22;
         if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
         if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
-      }
-      const peers = n.orbit ? nodes.filter((p) => p.orbit === n.orbit && p !== n) : [];
-      if (peers.length) {
-        let mx = 0, my = 0;
-        for (const p of peers) { mx += p.x; my += p.y; }
-        mx /= peers.length; my /= peers.length;
-        fx += (mx - n.x) * COHESION; fy += (my - n.y) * COHESION;
       }
       const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
       const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
