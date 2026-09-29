@@ -208,16 +208,17 @@ type NotifyKind struct {
 }
 
 type Notify struct {
-	Cron     NotifyKind `json:"cron"`
-	Intent   NotifyKind `json:"intent"`
-	Ask      NotifyKind `json:"ask"`
-	Error    NotifyKind `json:"error"`
-	Proposal NotifyKind `json:"proposal"` // an agent proposes a change to another agent (Metis)
+	Cron       NotifyKind `json:"cron"`
+	Intent     NotifyKind `json:"intent"`
+	Ask        NotifyKind `json:"ask"`
+	Error      NotifyKind `json:"error"`
+	Proposal   NotifyKind `json:"proposal"`   // an agent proposes a change to another agent (Metis)
+	Connection NotifyKind `json:"connection"` // a non-loopback client connects, or a connection is denied
 }
 
 func DefaultNotify() Notify {
 	return Notify{Cron: NotifyKind{Show: true}, Intent: NotifyKind{Show: true, External: true}, Ask: NotifyKind{Show: true}, Error: NotifyKind{Show: true, External: true},
-		Proposal: NotifyKind{Show: true, External: true}}
+		Proposal: NotifyKind{Show: true, External: true}, Connection: NotifyKind{Show: true}}
 }
 
 // Of returns the preferences of a kind.
@@ -233,6 +234,8 @@ func (n Notify) Of(kind string) NotifyKind {
 		return n.Error
 	case "proposal":
 		return n.Proposal
+	case "connection":
+		return n.Connection
 	}
 	return NotifyKind{Show: true}
 }

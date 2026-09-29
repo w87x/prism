@@ -62,7 +62,7 @@
   const retStatuses = ['done', 'failed', 'cancelled', 'partial'];
   const toggleRetStatus = (s, on) => { const cur = new Set(ret.task_statuses || []); on ? cur.add(s) : cur.delete(s); ret.task_statuses = [...cur]; };
   let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, tool_fail_warn: 3, tool_fail_block: 6, stall_off: false, stall_min: 20, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
-  let nf = $state({ cron: { show: true, external: false }, intent: { show: true, external: true }, ask: { show: true, external: false }, error: { show: true, external: true }, proposal: { show: true, external: true } });
+  let nf = $state({ cron: { show: true, external: false }, intent: { show: true, external: true }, ask: { show: true, external: false }, error: { show: true, external: true }, proposal: { show: true, external: true }, connection: { show: true, external: false } });
   let cleaning = $state(false);
   async function cleanNow() {
     cleaning = true;
@@ -509,7 +509,7 @@
         <Panel title="What notifies you" id="set.what-notifies-you" collapsible resizable>
           <div class="sm mute">Notifications appear under the bell in the top bar and as a toast. “Also push” sends them to macOS and Telegram (when those are configured).</div>
           <table class="t nt"><thead><tr><th>Event</th><th>Show</th><th>Also push</th></tr></thead><tbody>
-            {#each [['cron', 'A schedule fires', true], ['intent', 'A standing intent / watch triggers', true], ['ask', 'An agent needs you (question or approval)', false], ['error', 'A task fails for good, or a watch gives up', true], ['proposal', 'An agent proposes a change to another agent (needs your review)', true]] as [k, label, ext]}
+            {#each [['cron', 'A schedule fires', true], ['intent', 'A standing intent / watch triggers', true], ['ask', 'An agent needs you (question or approval)', false], ['error', 'A task fails for good, or a watch gives up', true], ['proposal', 'An agent proposes a change to another agent (needs your review)', true], ['connection', 'A client connects from another machine, or a connection is denied', true]] as [k, label, ext]}
               <tr><td>{label}</td><td><Switch bind:checked={nf[k].show} /></td><td>{#if ext}<Switch bind:checked={nf[k].external} disabled={!nf[k].show} />{:else}<span class="mute sm" title="Approvals and questions already reach Telegram and macOS on their own">built in</span>{/if}</td></tr>
             {/each}
           </tbody></table>

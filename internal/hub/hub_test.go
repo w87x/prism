@@ -114,6 +114,71 @@ func TestLANHostsAndToken(t *testing.T) {
 	}
 }
 
+// OnDenied is the one hook that sees a stranger probing the server: it must fire with the real remote
+// address and a reason, for both ways a connection can be turned away before a Client ever exists.
+func TestOnDeniedFiresForBadHostAndBadToken(t *testing.T) {
+	h := New()
+	h.Token = "s3cret"
+	type denial struct{ addr, reason string }
+	var denials []denial
+	h.OnDenied = func(addr, reason string) { denials = append(denials, denial{addr, reason}) }
+
+	req := httptest.NewRequest("GET", "http://evil.example/ws", nil)
+	req.RemoteAddr = "203.0.113.5:54321"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("expected 403 for a foreign host, got %d", rec.Code)
+	}
+
+	req2 := httptest.NewRequest("GET", "http://127.0.0.1:7777/ws", nil)
+	req2.RemoteAddr = "198.51.100.9:1234"
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != 401 {
+		t.Fatalf("expected 401 for a missing token, got %d", rec2.Code)
+	}
+
+	if len(denials) != 2 {
+		t.Fatalf("expected 2 denials, got %+v", denials)
+	}
+	if denials[0].addr != "203.0.113.5:54321" || denials[0].reason != "forbidden host" {
+		t.Fatalf("host denial: %+v", denials[0])
+	}
+	if denials[1].addr != "198.51.100.9:1234" || denials[1].reason != "bad or missing token" {
+		t.Fatalf("token denial: %+v", denials[1])
+	}
+}
+
+// OnConnect is where a legitimate connection becomes visible; Remote/RemoteAddr are what the caller (the
+// app layer) uses to decide whether to tell the user about it — this machine talking to itself must not
+// look remote.
+func TestOnConnectReportsRemoteAddrAndLoopback(t *testing.T) {
+	h := New()
+	connected := make(chan *Client, 1)
+	h.OnConnect = func(c *Client) { connected <- c }
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	select {
+	case cl := <-connected:
+		if cl.RemoteAddr == "" {
+			t.Fatal("RemoteAddr should be populated")
+		}
+		if cl.Remote {
+			t.Fatalf("a loopback test connection must not be reported as Remote: %+v", cl)
+		}
+	case <-ctx.Done():
+		t.Fatal("OnConnect never fired")
+	}
+}
+
 func TestSingleEditorTab(t *testing.T) {
 	h := New()
 	srv := httptest.NewServer(h)

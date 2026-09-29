@@ -46,6 +46,10 @@ type Client struct {
 	ctx  context.Context
 	sem  chan struct{} // bounds in-flight RPCs so one runaway client cannot exhaust the backend
 	id   int64
+	// RemoteAddr is r.RemoteAddr (ip:port) at connect time; Remote is true when that address is not
+	// loopback — a real network client, not the app's own machine talking to itself.
+	RemoteAddr string
+	Remote     bool
 }
 
 type clientKey struct{}
@@ -71,6 +75,9 @@ type Hub struct {
 	AllowIPHosts bool
 	Token        string // if set, required as ?token= (or the X-Prism-Token header)
 	OnConnect    func(c *Client)
+	// OnDenied fires when a connection is rejected before a Client ever exists (bad host or bad/missing
+	// token) — the one place a stranger probing the server is visible at all.
+	OnDenied func(remoteAddr, reason string)
 
 	nextID int64
 	editor *Client // the one tab allowed to change things (single-user app: other tabs are read-only)
@@ -220,10 +227,16 @@ func (h *Hub) broadcastEditor() {
 // ServeHTTP upgrades to a WebSocket and runs the RPC loop.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.HostAllowed(r) {
+		if h.OnDenied != nil {
+			h.OnDenied(r.RemoteAddr, "forbidden host")
+		}
 		http.Error(w, "forbidden host", http.StatusForbidden)
 		return
 	}
 	if !h.Authorized(r) {
+		if h.OnDenied != nil {
+			h.OnDenied(r.RemoteAddr, "bad or missing token")
+		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -236,7 +249,8 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(40 << 20) // chat messages can carry a few pictures (base64)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	c := &Client{conn: conn, send: make(chan []byte, 1024), hub: h, ctx: ctx, sem: make(chan struct{}, maxInflight)}
+	c := &Client{conn: conn, send: make(chan []byte, 1024), hub: h, ctx: ctx, sem: make(chan struct{}, maxInflight),
+		RemoteAddr: r.RemoteAddr, Remote: !isLoopback(hostOnly(r.RemoteAddr))}
 	h.mu.Lock()
 	h.nextID++
 	c.id = h.nextID

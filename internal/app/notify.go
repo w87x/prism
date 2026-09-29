@@ -30,7 +30,7 @@ func (a *App) notifyRef(kind, level, title, text, ref string) {
 		return
 	}
 	if ref == "" {
-		ref = map[string]string{"cron": "autonomy", "intent": "autonomy", "ask": "chat", "error": "tasks", "proposal": "agents"}[kind]
+		ref = map[string]string{"cron": "autonomy", "intent": "autonomy", "ask": "chat", "error": "tasks", "proposal": "agents", "connection": "settings"}[kind]
 	}
 	it, err := a.Notifs.Add(ctx, notify.Item{Kind: kind, Level: level, Title: title, Text: text, Ref: ref})
 	if err != nil {

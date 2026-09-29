@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io/fs"
+	"log"
 	"net/http"
 	"path"
 	"strconv"
@@ -33,6 +34,16 @@ func New(a *app.App, h *hub.Hub, ui fs.FS) *Server {
 	s.registerExtensions()
 	h.OnConnect = func(c *hub.Client) {
 		c.Send("status", a.Status(context.Background()))
+		// A connection from this same machine (the user's own browser) is the normal case and would be
+		// noisy to announce every reload/reconnect; a connection from anywhere else is worth surfacing —
+		// "who's on my PRISM" is exactly the point of listening beyond loopback with a token.
+		if c.Remote {
+			a.Notify("connection", "info", "New connection", "from "+c.RemoteAddr)
+		}
+	}
+	h.OnDenied = func(remoteAddr, reason string) {
+		log.Printf("[warn] hub: connection denied (%s) from %s", reason, remoteAddr)
+		a.Notify("connection", "warning", "Blocked connection attempt", reason+" — from "+remoteAddr)
 	}
 	return s
 }
