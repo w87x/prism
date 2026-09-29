@@ -8,7 +8,6 @@
   import Led from './ui/Led.svelte';
   import Glyph from './ui/Glyph.svelte';
   import Bar from './ui/Bar.svelte';
-  import Equalizer from './ui/Equalizer.svelte';
   import Field from './ui/Field.svelte';
   import Transcript from './Transcript.svelte';
 
@@ -38,11 +37,10 @@
   {#if r}
     <div class="row wrap gap-12 sm">
       <span><Led state={led} live={r.live} liveMs={r.liveMs} size={8} /> {r.done ? r.phase : r.phase === 'thinking' ? 'thinking' : 'acting'}</span>
-      {#if !r.done}<Equalizer live={r.live} liveMs={r.liveMs} tone={r.phase === 'thinking' ? 'accent' : ''} />{/if}
       <span class="hi"><Glyph name={r.agent} /> {r.agent}</span>
       <span class="dim">{fmtTokens(r.tokens_in)}↑ {fmtTokens(r.tokens_out)}↓ · {r.calls}⚙</span>
       {#if r.task}<span class="dim">task #{r.task}</span>{/if}
-      {#if r.window}<span class="grow ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} /></span>{/if}
+      {#if r.window}<span class="grow ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} live={r.live} liveMs={r.liveMs} /></span>{/if}
     </div>
     {#if detail?.task?.input}<Field label="Task"><div class="pre task">{detail.task.input}</div></Field>{:else if r.title}<Field label="Task"><div class="pre task">{r.title}</div></Field>{/if}
     <Field label="Right now">

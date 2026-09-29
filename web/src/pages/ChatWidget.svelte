@@ -5,7 +5,6 @@
   import Glyph from '../lib/ui/Glyph.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Bar from '../lib/ui/Bar.svelte';
-  import Equalizer from '../lib/ui/Equalizer.svelte';
   import Empty from '../lib/ui/Empty.svelte';
 
   const runs = $derived(activeRuns());
@@ -24,11 +23,10 @@
       <div class="row">
         <Led state={r.done ? 'off' : r.phase === 'thinking' ? 'standby' : 'ok'} live={r.live} liveMs={r.liveMs} size={8} />
         <span class="nm grow ellipsis"><Glyph name={r.agent} /> {r.agent}</span>
-        {#if !r.done}<Equalizer live={r.live} liveMs={r.liveMs} tone={r.phase === 'thinking' ? 'accent' : ''} />{/if}
         <span class="tk sm dim" title="tokens in / out · tool calls">{fmtTokens(r.tokens_in)}↑ {fmtTokens(r.tokens_out)}↓ · {r.calls}⚙</span>
       </div>
       {#if !r.done && lastLine(r.buf)}<div class="now" title={lastLine(r.buf)}>{lastLine(r.buf).slice(0, 90)}</div>{:else if r.task_text}<div class="now">{r.task_text}</div>{/if}
-      {#if r.window}<div class="ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} /></div>{/if}
+      {#if r.window}<div class="ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} live={r.live} liveMs={r.liveMs} /></div>{/if}
     </div>
   {/each}
 </Panel>
