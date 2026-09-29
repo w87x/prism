@@ -21,12 +21,33 @@ const jsPage = `<!doctype html><html><body><div id="root"></div><script>
 setTimeout(()=>{document.getElementById('root').innerHTML='<h1>Rendered by JS</h1><button id="b" onclick="document.getElementById(\'out\').textContent=\'clicked!\'">Press me</button><div id="out"></div><input name="q" placeholder="search here">';},150);
 </script></body></html>`
 
+// testManagerDir is like t.TempDir() but tolerant of Chrome's own renderer/GPU/zygote subprocesses not
+// releasing their profile-dir file handles the instant Stop()'s context cancel returns — t.TempDir()'s own
+// cleanup fails the test outright on a non-empty dir (seen for real on a Linux CI runner, never on macOS
+// where this races far less), so this retries briefly instead of failing over a slow-to-exit child process.
+func testManagerDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "prism-browser-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 20; i++ {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	return dir
+}
+
 func TestRenderSnapshotClick(t *testing.T) {
 	d := testutil.DB(t)
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true}) // the test site is on loopback
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -84,7 +105,7 @@ func TestTasksGetSeparateTabsByDefault(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -139,7 +160,7 @@ func TestExplicitTabOverridesDefault(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -180,7 +201,7 @@ func TestTabCloseIsScopedToOneTab(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -227,7 +248,7 @@ func TestWaitSelectorWaitsForLateContent(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -263,7 +284,7 @@ func TestDownloadWait(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
@@ -378,7 +399,7 @@ func TestCaptureRecordsPageApiJSONAndMedia(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
