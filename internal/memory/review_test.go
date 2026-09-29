@@ -102,3 +102,38 @@ func TestMemoryListToolMissingBankIsNotAnError(t *testing.T) {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
 }
+
+// memory_reclassify is the only tool that can move a fact into or out of user/profile banks (merge/split are
+// restricted to project/domain) — the gap that let a misfiled fact (e.g. a third party's details stored in
+// "user") sit there with nothing able to fix it short of hand-editing the database.
+func TestMemoryReclassifyToolMovesAcrossAnyBankKind(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	f := store(t, s, StoreReq{Bank: "user", Text: "Alexander is a writer who blogs on author.today", Agent: "Atlas"})
+	reg := tools.NewRegistry(nil)
+	RegisterTools(reg, s, func(context.Context, string) []string { return []string{"user"} })
+	reclassify, ok := reg.Get("memory_reclassify")
+	if !ok {
+		t.Fatal("memory_reclassify not registered")
+	}
+
+	// moving into a not-yet-existing domain bank creates it, exactly like memory_store would
+	out, err := reclassify.Run(ctx, &tools.Env{Agent: "Mnemosyne"}, json.RawMessage(`{"id":`+itoa(f.ID)+`,"bank":"domain:Alexander","reason":"about a third party, not the user"}`))
+	if err != nil || !strings.Contains(out, "domain:Alexander") {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	moved, err := s.GetFact(ctx, f.ID)
+	if err != nil || moved.Bank != "domain:Alexander" {
+		t.Fatalf("fact did not move: %+v err=%v", moved, err)
+	}
+
+	// re-running with the same destination is a clear error, not a silent no-op
+	if _, err := reclassify.Run(ctx, &tools.Env{Agent: "Mnemosyne"}, json.RawMessage(`{"id":`+itoa(f.ID)+`,"bank":"domain:Alexander"}`)); err == nil {
+		t.Fatal("moving a fact to the bank it is already in should error")
+	}
+
+	// a bad fact id fails clearly instead of silently doing nothing
+	if _, err := reclassify.Run(ctx, &tools.Env{Agent: "Mnemosyne"}, json.RawMessage(`{"id":999999,"bank":"user"}`)); err == nil {
+		t.Fatal("a nonexistent fact id should error")
+	}
+}

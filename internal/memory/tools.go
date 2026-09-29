@@ -260,6 +260,36 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_reclassify", Category: "memory", Only: maintainers, Risk: tools.RiskWrite,
+			Description: "Move a fact to the bank it actually belongs in. Unlike memory_merge_banks/memory_split_bank (project/domain banks only), this works on ANY bank including user and profile — use it when memory_store filed something in the wrong place, e.g. a fact about a third party sitting in the user's own bank. Target bank is created if it doesn't exist yet, exactly like memory_store.",
+			Params:      tools.Obj("id,bank", tools.Int("id", "fact id"), tools.Str("bank", "target bank spec: user | profile:<agent> | project:<name> | domain:<name>"), tools.Str("reason", "one line on why the original bank was wrong (for the audit trail)")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					ID     int64
+					Bank   string
+					Reason string
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				cur, err := s.GetFact(ctx, a.ID)
+				if err != nil {
+					return "", fmt.Errorf("fact %d not found: %w", a.ID, err)
+				}
+				dst, err := s.BankBySpec(ctx, a.Bank, env.Agent, true)
+				if err != nil {
+					return "", err
+				}
+				if dst.ID == cur.BankID {
+					return "", fmt.Errorf("fact %d is already in %s", a.ID, dst.Label())
+				}
+				if err := s.MoveFact(ctx, a.ID, dst.ID); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("moved fact %d from %s to %s", a.ID, cur.Bank, dst.Label()), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_consolidate", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
 			Description: "Run memory housekeeping now: distil pending raw messages into facts, archive long-unused low-rank facts, purge old history.",
 			Params:      tools.Obj(""),
