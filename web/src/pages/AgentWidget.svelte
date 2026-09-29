@@ -70,6 +70,12 @@
   }
 
   const toolOpts = $derived((S.tools || []).map((t) => ({ value: t.name, label: t.name, hint: t.category, badge: t.risk === 'exec' ? 'exec' : t.risk === 'write' ? 'write' : t.category?.startsWith('mcp:') ? 'mcp' : '' })));
+  // when hiring, show what the roster already has so the new agent doesn't duplicate an existing one's job
+  const roster = $derived(S.agents.filter((a) => a.role !== 'entry' && a.enabled && a.name !== d?.name).sort((a, b) => a.group.localeCompare(b.group)));
+  function toolPreview(tools) {
+    const s = (tools || []).join(', ');
+    return s.length > 130 ? s.slice(0, 130) + '…' : s || '(base tools only)';
+  }
   const skillOpts = $derived((S.skills || []).map((s) => ({ value: s.name, label: s.name, hint: s.description })));
   const modelOpts = $derived([{ value: '', label: '(default chat model)' }, { value: 'role:fast', label: '(fast model)' }, ...modelOptions('chat')]);
 
@@ -99,6 +105,16 @@
   <Panel title={d.id ? d.name : 'New agent'} grow>
     {#snippet right()}{#if d.system}<Badge tone="accent">{d.role === 'entry' ? 'entry' : 'staff'}</Badge>{/if}<span class="sm mute">v{d.soul_version}</span>{/snippet}
     <div class="form">
+      {#if !d.id}
+        <Field label="Existing agents & their tools" hint="check nobody already covers this before hiring — agent_find does the same at runtime">
+          <div class="roster">
+            {#each roster as a (a.id)}
+              <div class="rrow"><span class="hi">{a.name}</span><span class="dim sm">[{a.group}]</span><span class="sm mute">{toolPreview(a.tools)}</span></div>
+            {/each}
+            {#if !roster.length}<div class="sm mute">no other agents yet</div>{/if}
+          </div>
+        </Field>
+      {/if}
       <Field label="Name"><Input bind:value={d.name} disabled={d.system} placeholder="e.g. Scout" /></Field>
       <div class="two">
         <Field label="Group"><Input bind:value={d.group} placeholder="Web, Coding…" /></Field>
@@ -185,4 +201,7 @@
   .hv pre { max-height: 200px; }
   .lessons { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); background: var(--bg); padding: 4px 6px; max-height: 190px; overflow: auto; }
   .ls { color: var(--fg-dim); }
+  .roster { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); background: var(--bg); padding: 6px; max-height: 160px; overflow: auto; }
+  .rrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .rrow .hi { flex: none; }
 </style>
