@@ -8,6 +8,7 @@
   import Led from './ui/Led.svelte';
   import Glyph from './ui/Glyph.svelte';
   import Bar from './ui/Bar.svelte';
+  import Equalizer from './ui/Equalizer.svelte';
   import Field from './ui/Field.svelte';
   import Transcript from './Transcript.svelte';
 
@@ -37,6 +38,7 @@
   {#if r}
     <div class="row wrap gap-12 sm">
       <span><Led state={led} live={r.live} liveMs={r.liveMs} size={8} /> {r.done ? r.phase : r.phase === 'thinking' ? 'thinking' : 'acting'}</span>
+      {#if !r.done}<Equalizer live={r.live} liveMs={r.liveMs} tone={r.phase === 'thinking' ? 'accent' : ''} />{/if}
       <span class="hi"><Glyph name={r.agent} /> {r.agent}</span>
       <span class="dim">{fmtTokens(r.tokens_in)}↑ {fmtTokens(r.tokens_out)}↓ · {r.calls}⚙</span>
       {#if r.task}<span class="dim">task #{r.task}</span>{/if}
