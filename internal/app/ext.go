@@ -211,6 +211,21 @@ func (a *App) buildExtensions(ctx context.Context) error {
 			d, err := a.Downloads.Get(ctx, id)
 			return d.Status, d.Bytes, d.Total, err
 		},
+		MailNew: func(ctx context.Context, account, folder string) ([]scheduler.MailItem, error) {
+			items, err := x.Mail.ListInbox(ctx, account, folder)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]scheduler.MailItem, len(items))
+			for i, it := range items {
+				who := ""
+				if len(it.From) > 0 {
+					who = it.From[0].String()
+				}
+				out[i] = scheduler.MailItem{ID: it.Account + ":" + it.Folder + ":" + it.ID, Subject: it.Subject, From: who}
+			}
+			return out, nil
+		},
 	}
 	x.Sched.RegisterTools(a.Tools)
 	return x.Sched.SeedDefaults(ctx)

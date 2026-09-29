@@ -13,7 +13,7 @@ import (
 )
 
 var predicateProps = []tools.Prop{
-	tools.Enum("kind", "what to check", "time", "http", "file", "process", "rss", "llm", "download", "tool"),
+	tools.Enum("kind", "what to check", "time", "http", "file", "process", "rss", "mail", "llm", "download", "tool"),
 	tools.Str("at", "kind=time: when to fire, RFC3339 with timezone (use the clock tool to compute)"),
 	tools.Str("url", "kind=http|rss|llm: page or feed URL"),
 	tools.Int("status", "kind=http: expected HTTP status"),
@@ -31,6 +31,10 @@ var predicateProps = []tools.Prop{
 	tools.Str("args", "kind=tool: JSON object with the tool's arguments, e.g. {\"id\":\"dbid_764\"}"),
 	tools.Str("field", "kind=tool: dot path into the tool's JSON output to judge, e.g. data.task.status ('*' = every array element, e.g. data.messages.* for a whole list of items — combine with changed=true to watch a mailbox/feed/list: only genuinely new items fire, whatever was already there when the watch was created never does)"),
 	tools.Str("expect", "kind=tool: regex on that value (or the whole output) meaning 'done', e.g. finished|seeding|100 (mutually exclusive with changed)"),
+	tools.Str("account", "kind=mail: account tag from mail_accounts; empty = every enabled account"),
+	tools.Str("folder", "kind=mail: folder to watch; empty = the account's inbox"),
+	tools.Str("from", "kind=mail: only fire for senders containing this"),
+	tools.Str("subject", "kind=mail: only fire for subjects containing this"),
 }
 
 // RegisterTools installs intent, watch, cron and briefing tools.

@@ -32,18 +32,18 @@
   let ni = $state(null);
   const kinds = [
     { value: 'time', label: 'at a time', hint: 'reminder' }, { value: 'http', label: 'web page condition' }, { value: 'llm', label: 'judged by the model', hint: 'free-form question' },
-    { value: 'rss', label: 'new feed item' }, { value: 'file', label: 'file exists / finished copying' }, { value: 'process', label: 'process exits' }, { value: 'download', label: 'download finishes' },
+    { value: 'rss', label: 'new feed item' }, { value: 'mail', label: 'new mail' }, { value: 'file', label: 'file exists / finished copying' }, { value: 'process', label: 'process exits' }, { value: 'download', label: 'download finishes' },
   ];
   async function loadI() { intents = (await call('intents.list', {}, { quiet: true })) || []; }
   $effect(() => { loadI(); return listen('intent.update', loadI); });
   function newIntent() {
-    ni = { description: '', type: 'intent', owner: 'Atlas', kind: 'llm', cadence_s: 300, repeat: false, p: { at: '', url: '', contains: '', not_contains: '', changed: false, status: 200, question: '', query: '', path: '', stable_s: 5, pid: 0, pattern: '', download_id: 0 } };
+    ni = { description: '', type: 'intent', owner: 'Atlas', kind: 'llm', cadence_s: 300, repeat: false, p: { at: '', url: '', contains: '', not_contains: '', changed: false, status: 200, question: '', query: '', path: '', stable_s: 5, pid: 0, pattern: '', download_id: 0, account: '', folder: '', from: '', subject: '' } };
     iOpen = true;
   }
   async function saveIntent() {
     const p = { kind: ni.kind };
     const src = ni.p;
-    const pick = { time: ['at'], http: ['url', 'contains', 'not_contains', 'changed', 'status'], llm: ['question', 'url', 'query'], rss: ['url', 'contains'], file: ['path', 'stable_s'], process: ['pid', 'pattern'], download: ['download_id'] }[ni.kind];
+    const pick = { time: ['at'], http: ['url', 'contains', 'not_contains', 'changed', 'status'], llm: ['question', 'url', 'query'], rss: ['url', 'contains'], mail: ['account', 'folder', 'from', 'subject'], file: ['path', 'stable_s'], process: ['pid', 'pattern'], download: ['download_id'] }[ni.kind];
     pick.forEach((k) => { if (src[k] !== '' && src[k] !== 0 && src[k] !== false) p[k] = src[k]; });
     if (ni.kind === 'time' && p.at && !p.at.includes('T')) p.at = new Date(p.at).toISOString();
     else if (ni.kind === 'time' && p.at) p.at = new Date(p.at).toISOString();
@@ -354,6 +354,10 @@
       <Checkbox bind:checked={ni.p.changed} label="fire when the content changes" />
     {/if}
     {#if ni.kind === 'rss'}<Field label="Title contains (optional)"><Input bind:value={ni.p.contains} /></Field>{/if}
+    {#if ni.kind === 'mail'}
+      <div class="row wrap gap-12"><div class="grow"><Field label="Account" hint="empty = every enabled account"><Input bind:value={ni.p.account} placeholder="work" /></Field></div><div class="grow"><Field label="Folder" hint="empty = inbox"><Input bind:value={ni.p.folder} placeholder="INBOX" /></Field></div></div>
+      <div class="row wrap gap-12"><div class="grow"><Field label="From contains (optional)"><Input bind:value={ni.p.from} /></Field></div><div class="grow"><Field label="Subject contains (optional)"><Input bind:value={ni.p.subject} /></Field></div></div>
+    {/if}
     {#if ni.kind === 'file'}<Field label="Path"><Input bind:value={ni.p.path} mono placeholder="~/Downloads/big.iso" /></Field><Field label="Stable for (seconds)" hint="0 = fire when it exists"><NumberInput bind:value={ni.p.stable_s} min={0} max={3600} /></Field>{/if}
     {#if ni.kind === 'process'}<div class="row gap-12"><Field label="PID"><NumberInput bind:value={ni.p.pid} min={0} max={9999999} /></Field><div class="grow"><Field label="or command pattern"><Input bind:value={ni.p.pattern} mono placeholder="rsync" /></Field></div></div>{/if}
     {#if ni.kind === 'download'}<Field label="Download id"><NumberInput bind:value={ni.p.download_id} min={0} max={99999999} /></Field>{/if}

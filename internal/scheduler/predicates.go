@@ -49,6 +49,11 @@ type Predicate struct {
 	Tool  string `json:"tool,omitempty"`
 	Args  string `json:"args,omitempty"`  // JSON object with the tool's arguments
 	Field string `json:"field,omitempty"` // dot path into the tool's JSON output, e.g. data.tasks.0.status ('*' = every array element)
+	// mail: new messages in a folder, like rss but for a mailbox
+	Account string `json:"account,omitempty"` // mail account tag; empty = every enabled account
+	Folder  string `json:"folder,omitempty"`  // empty = the account's inbox
+	From    string `json:"from,omitempty"`    // only fire for senders containing this
+	Subject string `json:"subject,omitempty"` // only fire for subjects containing this
 
 	State map[string]any `json:"state,omitempty"`
 }
@@ -64,6 +69,7 @@ type Env struct {
 	FetchText func(ctx context.Context, url string) (string, error)
 	Search    func(ctx context.Context, query string) (string, error)
 	Feed      func(ctx context.Context, url string) ([]FeedItem, error)
+	MailNew   func(ctx context.Context, account, folder string) ([]MailItem, error)
 	Download  func(ctx context.Context, id int64) (status string, bytes, total int64, err error)
 	// CallTool runs a registered tool (MCP tools included) for a tool predicate; the app checks that it is safe to poll.
 	CallTool func(ctx context.Context, tool string, args json.RawMessage) (string, error)
@@ -72,6 +78,9 @@ type Env struct {
 }
 
 type FeedItem struct{ ID, Title, Link string }
+
+// MailItem is one message found while polling a mailbox — ID must be stable and unique across accounts/folders.
+type MailItem struct{ ID, Subject, From string }
 
 func (e Env) now() time.Time {
 	if e.Now != nil {
@@ -150,8 +159,10 @@ func (p *Predicate) Validate() error {
 				return fmt.Errorf("expect is not a valid regex: %w", err)
 			}
 		}
+	case "mail":
+		// no required fields: empty account/folder means "every enabled account's inbox"
 	default:
-		return fmt.Errorf("unknown predicate kind %q (http, file, process, rss, llm, time, download, tool, shell)", p.Kind)
+		return fmt.Errorf("unknown predicate kind %q (http, file, process, rss, mail, llm, time, download, tool, shell)", p.Kind)
 	}
 	return nil
 }
@@ -284,6 +295,48 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 			ev = append(ev, it.Title+" — "+it.Link)
 		}
 		return Result{Fired: true, Progress: fmt.Sprintf("%d new", len(fresh)), Evidence: strings.Join(ev, "\n")}, nil
+
+	case "mail":
+		if env.MailNew == nil {
+			return Result{}, errors.New("mail is unavailable")
+		}
+		items, err := env.MailNew(ctx, p.Account, p.Folder)
+		if err != nil {
+			return Result{}, err
+		}
+		seenAny, _ := st["seen"].([]any)
+		seen := map[string]bool{}
+		for _, s := range seenAny {
+			seen[fmt.Sprint(s)] = true
+		}
+		first := len(seen) == 0
+		var freshM []MailItem
+		var idsM []any
+		for _, it := range items {
+			idsM = append(idsM, it.ID)
+			if seen[it.ID] {
+				continue
+			}
+			if p.From != "" && !strings.Contains(strings.ToLower(it.From), strings.ToLower(p.From)) {
+				continue
+			}
+			if p.Subject != "" && !strings.Contains(strings.ToLower(it.Subject), strings.ToLower(p.Subject)) {
+				continue
+			}
+			freshM = append(freshM, it)
+		}
+		st["seen"] = idsM
+		if first { // the first run only records the baseline — the existing backlog is not "new"
+			return Result{Progress: fmt.Sprintf("baseline: %d messages", len(items))}, nil
+		}
+		if len(freshM) == 0 {
+			return Result{Progress: "no new mail"}, nil
+		}
+		var evM []string
+		for _, it := range freshM {
+			evM = append(evM, it.From+": "+it.Subject)
+		}
+		return Result{Fired: true, Progress: fmt.Sprintf("%d new", len(freshM)), Evidence: strings.Join(evM, "\n")}, nil
 
 	case "download":
 		status, b, t, err := env.Download(ctx, p.DownloadID)

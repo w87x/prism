@@ -54,6 +54,54 @@ func (s *Service) enabled(ctx context.Context) ([]Account, error) {
 	return out, nil
 }
 
+// NewMailItem is one message found by ListInbox, tagged with the account it came from.
+type NewMailItem struct {
+	Account string
+	Envelope
+}
+
+// ListInbox is Search across one account (account="") or every enabled account, with no filters beyond
+// the folder. The scheduler's mail predicate polls this to notice new arrivals, the same way its rss
+// predicate polls a feed.
+func (s *Service) ListInbox(ctx context.Context, account, folder string) ([]NewMailItem, error) {
+	var accts []Account
+	var err error
+	if account != "" && !strings.EqualFold(account, "all") {
+		one, _, oerr := s.open(ctx, account)
+		if oerr != nil {
+			return nil, oerr
+		}
+		accts = []Account{one}
+	} else if accts, err = s.enabled(ctx); err != nil {
+		return nil, err
+	}
+	if len(accts) == 0 {
+		return nil, errors.New("no mail account is connected (Settings → Integrations → Mail)")
+	}
+	var out []NewMailItem
+	var problems []string
+	for _, ac := range accts {
+		be, err := s.backend(ac)
+		if err != nil {
+			problems = append(problems, ac.Tag+": "+err.Error())
+			continue
+		}
+		es, err := be.Search(ctx, Query{Folder: folder, Limit: 30})
+		if err != nil {
+			problems = append(problems, ac.Tag+": "+err.Error())
+			continue
+		}
+		for _, e := range es {
+			out = append(out, NewMailItem{Account: ac.Tag, Envelope: e})
+		}
+	}
+	if len(out) == 0 && len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "; "))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date.After(out[j].Date) })
+	return out, nil
+}
+
 // folderFor finds the drafts/sent folder of an account: configured, else by role, else the usual name.
 func folderFor(ctx context.Context, be Backend, a Account, role string) string {
 	if role == "drafts" && a.Drafts != "" {
