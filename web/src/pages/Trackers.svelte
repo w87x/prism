@@ -62,6 +62,9 @@
     const v = r.data?.[col];
     return v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
   };
+  // a tracked item's own fields (not just source_url) commonly hold a link the agent found for it —
+  // e.g. a "listing" or "page" column — worth a click instead of unreadable plain text
+  const isURL = (s) => /^https?:\/\/\S+$/i.test(s);
 </script>
 
 <div class="pg">
@@ -113,7 +116,7 @@
               <tbody>
                 {#each selected.rows as r (r.id)}
                   <tr class:gone={r.status === 'gone'}>
-                    {#each t.columns as c}{@const v = cellText(r, c.name)}<td class="ellipsis" style="max-width:320px" title={v}>{v}</td>{/each}
+                    {#each t.columns as c}{@const v = cellText(r, c.name)}<td class="ellipsis" style="max-width:320px" title={v}>{#if isURL(v)}<a href={v} target="_blank" rel="noopener">{v}</a>{:else}{v}{/if}</td>{/each}
                     <td>{#if r.status === 'gone'}<Badge tone="mute">gone</Badge>{:else}<Badge tone="ok">active</Badge>{/if}</td>
                     <td class="ellipsis" style="max-width:220px" title={r.source_url}>{#if r.source_url}<a href={r.source_url} target="_blank" rel="noopener">{r.source_url}</a>{/if}</td>
                     <td class="mute sm">{ago(r.updated_at)}</td>
