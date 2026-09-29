@@ -250,7 +250,7 @@ func (pm *ProcessManager) Start(ctx context.Context, req StartReq) (Process, err
 	// Deliberately NOT the calling tool call's ctx: the whole point is the command outlives this one agent
 	// turn. Its own lifetime is controlled only by Cancel (or the process exiting on its own).
 	rctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(rctx, "/bin/zsh", "-c", req.Command)
+	cmd := exec.CommandContext(rctx, "/bin/bash", "-c", req.Command)
 	cmd.Dir = dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out := &outBuf{}
@@ -356,7 +356,7 @@ func registerProcess(reg *tools.Registry, pm *ProcessManager) {
 			Name: "process_start", Category: "code", Risk: tools.RiskExec,
 			Description: "Run a shell command as a background process. It waits up to wait_s seconds (default 15, max 120) for the command to finish: a quick command comes back with its exit code and output right in this call, a long one (a build, an index pass, a big transfer, yt-dlp, a dev server) keeps running and you get its id, progress and latest output instead. " +
 				"For plain quick commands (ls, cat, grep, head) just use the shell tool. Follow a long one with process_status (wait_s makes it wait for news instead of polling), process_log, process_input or process_cancel; the user is notified when a long process ends. Do NOT start one process per tiny step — chain steps in one command.",
-			Params: tools.Obj("command", tools.Str("command", "the command line (zsh)"), tools.Str("cwd", "working directory (default workspace)"),
+			Params: tools.Obj("command", tools.Str("command", "the command line (bash)"), tools.Str("cwd", "working directory (default workspace)"),
 				tools.Int("wait_s", "seconds to wait for it to finish before returning (default 15, max 120)")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {

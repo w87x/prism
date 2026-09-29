@@ -508,7 +508,7 @@ func lastLine(s string) string {
 func runShell(ctx context.Context, command string) (string, int) {
 	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "/bin/zsh", "-c", command)
+	cmd := exec.CommandContext(cctx, "/bin/bash", "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	out, err := cmd.CombinedOutput()

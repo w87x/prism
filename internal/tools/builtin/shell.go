@@ -87,7 +87,7 @@ func registerShell(reg *tools.Registry, d Deps) {
 	reg.Register(
 		&tools.Tool{
 			Name: "shell", Category: "code", Risk: tools.RiskExec, Timeout: 31 * time.Minute,
-			Description: "Run a quick shell command (zsh) and get its output — the right tool for ls, cat, head, grep, wc, small scripts. Default working dir is the PRISM workspace. Output is truncated to ~20 KB; commands time out (default 2 min) and block your turn while they run, so for anything long (downloads, builds, transfers) use process_start (or download_start for files and videos) instead of raising the timeout.",
+			Description: "Run a quick shell command (bash) and get its output — the right tool for ls, cat, head, grep, wc, small scripts. Default working dir is the PRISM workspace. Output is truncated to ~20 KB; commands time out (default 2 min) and block your turn while they run, so for anything long (downloads, builds, transfers) use process_start (or download_start for files and videos) instead of raising the timeout.",
 			Params: tools.Obj("command", tools.Str("command", "the command line"), tools.Str("cwd", "working directory (default workspace)"),
 				tools.Int("timeout_s", "timeout in seconds (max 1800)")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
@@ -106,7 +106,7 @@ func registerShell(reg *tools.Registry, d Deps) {
 				if a.Cwd != "" {
 					dir = expandHome(a.Cwd)
 				}
-				return runCmd(ctx, time.Duration(a.TimeoutS)*time.Second, dir, "/bin/zsh", "-c", a.Command)
+				return runCmd(ctx, time.Duration(a.TimeoutS)*time.Second, dir, "/bin/bash", "-c", a.Command)
 			},
 		},
 		&tools.Tool{
