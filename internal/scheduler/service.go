@@ -217,7 +217,43 @@ func (s *Service) DeleteCron(ctx context.Context, id int64) error {
 	return err
 }
 
+// resolveAgent returns name unchanged if it still exists (the common case). Otherwise — typically because
+// "Regenerate profiles" replaced the roster after this cron/intent was created — it looks for the closest
+// current match by name/description/traits and, when one is found, persists the correction via update so
+// this cron/intent heals itself instead of failing the same way on every future fire. ok=false means nothing
+// reasonable exists, so the caller should stop firing rather than guarantee a failed task.
+func (s *Service) resolveAgent(ctx context.Context, name string, update func(newName string) error) (resolved string, ok bool) {
+	if _, err := s.Engine.Profiles.Get(ctx, name); err == nil {
+		return name, true
+	}
+	hits, err := s.Engine.Profiles.Search(ctx, name, 1)
+	if err != nil || len(hits) == 0 {
+		return "", false
+	}
+	repl := hits[0].Name
+	if update != nil {
+		_ = update(repl)
+	}
+	return repl, true
+}
+
 func (s *Service) fireCron(ctx context.Context, c Cron) error {
+	agentName, ok := s.resolveAgent(ctx, c.Agent, func(n string) error {
+		_, err := s.DB.Exec(ctx, `UPDATE crons SET agent=$2 WHERE id=$1`, c.ID, n)
+		return err
+	})
+	if !ok {
+		_, _ = s.DB.Exec(ctx, `UPDATE crons SET enabled=false WHERE id=$1`, c.ID)
+		s.emit("cron.fired", map[string]any{"id": c.ID, "name": c.Name})
+		if s.Notify != nil {
+			s.Notify("error", "warning", "Schedule disabled", fmt.Sprintf("“%s” was disabled: its agent %q no longer exists and no replacement was found.", c.Name, c.Agent))
+		}
+		return fmt.Errorf("agent %q not found and no replacement available", c.Agent)
+	}
+	if agentName != c.Agent {
+		s.logf("info", "cron %q: agent %q no longer exists, dispatching to %q instead", c.Name, c.Agent, agentName)
+		c.Agent = agentName
+	}
 	priority := 0
 	if c.System {
 		// built-in maintenance (memory consolidation, dreaming, evolution review) shouldn't sit behind a
@@ -426,6 +462,22 @@ func (s *Service) check(ctx context.Context, i Intent) {
 	if err := json.Unmarshal(i.Predicate, &p); err != nil {
 		_, _ = s.DB.Exec(ctx, `UPDATE intents SET status='error', last_error=$2 WHERE id=$1`, i.ID, "bad predicate: "+err.Error())
 		return
+	}
+	owner, ok := s.resolveAgent(ctx, i.Owner, func(n string) error {
+		_, err := s.DB.Exec(ctx, `UPDATE intents SET owner=$2 WHERE id=$1`, i.ID, n)
+		return err
+	})
+	if !ok {
+		_, _ = s.DB.Exec(ctx, `UPDATE intents SET status='error', last_error=$2 WHERE id=$1`, i.ID, fmt.Sprintf("agent %q no longer exists and no replacement was found", i.Owner))
+		if s.Notify != nil {
+			s.Notify("error", "warning", "Watch stopped", fmt.Sprintf("“%s” was stopped: its agent %q no longer exists and no replacement was found.", i.Description, i.Owner))
+		}
+		s.emit("intent.update", map[string]any{"id": i.ID})
+		return
+	}
+	if owner != i.Owner {
+		s.logf("info", "intent %d: agent %q no longer exists, dispatching to %q instead", i.ID, i.Owner, owner)
+		i.Owner = owner
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	res, err := p.Eval(cctx, s.Env)

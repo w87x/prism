@@ -162,3 +162,87 @@ func TestBriefingLifecycle(t *testing.T) {
 		t.Fatalf("high-importance briefing should auto-deliver: %+v", b)
 	}
 }
+
+// A cron/intent whose agent got renamed or replaced (typically by "Regenerate profiles") used to fail every
+// fire with a buried "agent not found" task error. It should instead redispatch to the closest current
+// match and heal its own stored agent name, so it doesn't repeat the same failure forever.
+func TestCronRedispatchesAndHealsWhenAgentIsGone(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	if _, err := s.Engine.Profiles.Save(ctx, agent.Profile{Name: "Builder", Group: "Construction", Description: "Builds things", Role: agent.RoleWorker, Enabled: true}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.SaveCron(ctx, Cron{Name: "nightly build", Agent: "old_builder", Expr: "@daily", Prompt: "build it", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RunCronNow(ctx, id); err != nil {
+		t.Fatalf("cron should have redispatched, not failed: %v", err)
+	}
+	ts, _ := s.Engine.Tasks.List(ctx, tasks.Filter{Agent: "Builder"})
+	if len(ts) != 1 {
+		t.Fatalf("expected the task to land on Builder: %+v", ts)
+	}
+	cs, _ := s.Crons(ctx)
+	var healed Cron
+	for _, c := range cs {
+		if c.ID == id {
+			healed = c
+		}
+	}
+	if healed.Agent != "Builder" {
+		t.Fatalf("cron's stored agent should have healed to Builder: %+v", healed)
+	}
+}
+
+// When nothing remotely matches the missing agent, firing must not keep guaranteeing a failed task forever:
+// the cron is disabled instead, with a clear notice, rather than left silently retrying every tick.
+func TestCronDisabledWhenNoReplacementFits(t *testing.T) {
+	s, rc := setup(t)
+	ctx := context.Background()
+	id, err := s.SaveCron(ctx, Cron{Name: "orphaned", Agent: "zzz_totally_unrelated_zzz", Expr: "@daily", Prompt: "do the thing", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RunCronNow(ctx, id); err == nil {
+		t.Fatal("expected an error when no replacement agent can be found")
+	}
+	cs, _ := s.Crons(ctx)
+	var healed Cron
+	for _, c := range cs {
+		if c.ID == id {
+			healed = c
+		}
+	}
+	if healed.Enabled {
+		t.Fatalf("an unresolvable cron should be disabled, not left firing forever: %+v", healed)
+	}
+	if !rc.has("cron.fired") {
+		t.Fatalf("expected the UI to be told about the change: %v", rc.ev)
+	}
+}
+
+// Same self-healing for intents/watches (Intent.Owner), whose dispatch path is separate from crons.
+func TestIntentRedispatchesWhenAgentIsGone(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	if _, err := s.Engine.Profiles.Save(ctx, agent.Profile{Name: "Builder", Group: "Construction", Description: "Builds things", Role: agent.RoleWorker, Enabled: true}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Minute).Format(time.RFC3339)
+	id, err := s.CreateIntent(ctx, Intent{Owner: "old_builder", Type: "watch", Description: "build finished", CadenceS: 30, Notify: true}, Predicate{Kind: "time", At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.tick(ctx)
+	is, _ := s.Intents(ctx, "")
+	var got Intent
+	for _, i := range is {
+		if i.ID == id {
+			got = i
+		}
+	}
+	if got.Owner != "Builder" || got.Status != "fired" {
+		t.Fatalf("intent should have redispatched to Builder and fired: %+v", got)
+	}
+}
