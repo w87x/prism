@@ -5,6 +5,8 @@ const pending = new Map();
 const handlers = new Map(); // event → Set<fn>
 const openHooks = new Set();
 let backoff = 400;
+let attempt = 0; // reconnect attempts since the last successful open
+let nextRetryAt = 0; // Date.now() timestamp of the next scheduled retry, while waiting to reconnect
 let stateCb = () => {};
 let closedByUs = false;
 
@@ -35,11 +37,12 @@ export function on(event, fn) {
 
 export function connect() {
   closedByUs = false;
-  stateCb('connecting');
+  stateCb('connecting', { attempt, nextRetryAt: 0 });
   ws = new WebSocket(url());
   ws.onopen = () => {
     backoff = 400;
-    stateCb('open');
+    attempt = 0;
+    stateCb('open', {});
     openHooks.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
   };
   ws.onmessage = (m) => {
@@ -57,10 +60,15 @@ export function connect() {
     handlers.get('*')?.forEach((f) => { try { f(d.event, d.data); } catch (e) { console.error(e); } });
   };
   ws.onclose = () => {
-    stateCb('closed');
+    if (!closedByUs) {
+      attempt++;
+      backoff = Math.min(backoff * 1.6, 5000);
+      nextRetryAt = Date.now() + backoff;
+      setTimeout(connect, backoff);
+    }
+    stateCb('closed', { attempt, nextRetryAt });
     pending.forEach((p) => p.reject(new Error('connection lost')));
     pending.clear();
-    if (!closedByUs) setTimeout(connect, backoff = Math.min(backoff * 1.6, 5000));
   };
   ws.onerror = () => {};
 }

@@ -7,6 +7,16 @@
   const total = $derived(runs.reduce((a, r) => a + r.tokens_in + r.tokens_out, 0));
   const tasks = $derived(st ? [st.queue && `${st.queue} queued`, st.running && `${st.running} running`, st.waiting && `${st.waiting} waiting`].filter(Boolean) : []);
   const connLed = $derived(S.conn === 'open' ? 'ok' : S.conn === 'connecting' ? 'warn' : 'error');
+  // reconnect progress, not just a static "connecting": which attempt this is, and — while waiting out
+  // the backoff between attempts — a live countdown to the next one, so it's visibly retrying rather
+  // than looking stuck. Rides the clock's existing 1s tick, so this costs nothing extra while online.
+  const connText = $derived.by(() => {
+    if (S.conn === 'open') return 'online';
+    const { attempt = 0, nextRetryAt = 0 } = S.connMeta || {};
+    if (S.conn === 'connecting') return attempt > 0 ? `connecting… (#${attempt})` : 'connecting…';
+    const s = Math.max(0, Math.ceil((nextRetryAt - now.getTime()) / 1000));
+    return nextRetryAt ? `retrying in ${s}s (#${attempt})` : S.conn;
+  });
 
   let now = $state(new Date());
   $effect(() => {
@@ -32,7 +42,7 @@
     {/if}
     {#if st && !st.pgvector}<span class="warnc" title="The pgvector extension is missing: memory search works, but compares embeddings in the app, which gets slow as memory grows.">vectors: fallback</span>{/if}
     <button class="wallbtn" title="Full-screen thinking wall" onclick={() => (S.wallOpen = true)}><Led state={runs.some((r) => !r.done) ? 'ok' : 'off'} live={runs.some((r) => !r.done)} size={6} /> thinking{#if runs.filter((r) => !r.done).length} · {runs.filter((r) => !r.done).length}{/if}</button>
-    <span class="conn"><Led state={connLed} size={7} /> {S.conn === 'open' ? 'online' : S.conn}</span>
+    <span class="conn"><Led state={connLed} pulse={S.conn !== 'open'} size={7} /> {connText}</span>
     <span class="clock" title="local time">{pad(now.getHours())}<span class="blink">:</span>{pad(now.getMinutes())}<span class="blink">:</span>{pad(now.getSeconds())}</span>
   </div>
 </footer>

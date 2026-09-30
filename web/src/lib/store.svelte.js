@@ -8,6 +8,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 
 export const S = $state({
   conn: 'connecting',
+  connMeta: {}, // { attempt, nextRetryAt } — see ws.js's onConnState
   status: null,
   page: lsGet('prism.page', 'today'),
   memoryBank: 0, // set before go('memory') to open the Memory page on that bank
@@ -336,7 +337,7 @@ export async function answerAsk(id, answer) {
 }
 
 export function init() {
-  onConnState((s) => { S.conn = s; });
+  onConnState((s, meta) => { S.conn = s; S.connMeta = meta || {}; });
   onOpen(refreshAll);
   wire();
   connect();
