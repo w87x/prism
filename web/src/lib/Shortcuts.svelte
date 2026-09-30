@@ -1,15 +1,18 @@
 <script>
   // Global keyboard shortcuts that aren't already owned by a specific component (Cmd+K lives in
   // CommandPalette; this one holds the rest, and doubles as the cheatsheet — see shortcuts.js).
-  import { S } from './store.svelte.js';
+  import { S, go } from './store.svelte.js';
   import Modal from './ui/Modal.svelte';
   import { SHORTCUTS } from './shortcuts.js';
 
   function onKey(e) {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
-    if (e.key.toLowerCase() === 'j') { e.preventDefault(); S.quickChatOpen = !S.quickChatOpen; }
+    const k = e.key.toLowerCase();
+    if (k === 'j') { e.preventDefault(); S.quickChatOpen = !S.quickChatOpen; }
     else if (e.key === '/') { e.preventDefault(); S.shortcutsOpen = !S.shortcutsOpen; }
+    else if (k === 'i') { e.preventDefault(); S.wallOpen = !S.wallOpen; } // thinking wall
+    else if (k === 'b') { e.preventDefault(); S.quickChatOpen = false; go('today'); } // today's briefings
   }
   $effect(() => {
     window.addEventListener('keydown', onKey);

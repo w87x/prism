@@ -3,7 +3,7 @@
   // page — a briefing missing a column, a tracker with a bad value — and you tell Atlas right there
   // instead of navigating to Chat first. Unlike Chat's own "Quick Ask" this is the real conversation
   // (full memory/context), just opened from wherever you are; the reply shows up in Chat as normal.
-  import { S, call, go, toast } from './store.svelte.js';
+  import { S, call, go, toast, ensureMaster } from './store.svelte.js';
   import Modal from './ui/Modal.svelte';
   import Textarea from './ui/Textarea.svelte';
   import Button from './ui/Button.svelte';
@@ -11,7 +11,7 @@
 
   let text = $state('');
   let sending = $state(false);
-  let ta;
+  let ta = $state();
 
   $effect(() => { if (S.quickChatOpen) queueMicrotask(() => ta?.focus()); });
 
@@ -19,6 +19,7 @@
     const t = text.trim();
     if (!t || sending) return;
     sending = true;
+    await ensureMaster(); // opening this from a view-only tab is a deliberate "let me act from here"
     const r = await call('chat.send', { topic: S.chatTopic, text: t });
     sending = false;
     if (r === undefined) return; // keep the draft if it failed

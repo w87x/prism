@@ -83,6 +83,9 @@ shortcuts.list skills.get skills.hubs skills.list tasks.get tasks.list tasks.tre
 web.providers`.split(/\s+/));
 setRpcGuard((method) => (S.editor.editor || READ_ONLY_OK.has(method) ? '' : 'This tab is view-only — another window is the master. Use the badge in the corner to make this one the master.'));
 export function takeOver() { return rpc('editor.claim'); }
+// A keyboard shortcut that writes (e.g. quick chat) is a deliberate "I want to act from here" — same
+// intent as clicking the view-only badge, so it should just take over rather than refuse with an error.
+export async function ensureMaster() { if (!S.editor.editor) await takeOver(); }
 export function go(page) { S.page = page; lsSet('prism.page', page); }
 export function toggleNav() { S.navOpen = !S.navOpen; lsSet('prism.navOpen', S.navOpen); }
 export function toggleWidget() { S.widgetOpen = !S.widgetOpen; lsSet('prism.widgetOpen', S.widgetOpen); }
