@@ -8,9 +8,13 @@
   let { value = 0, max = 100, tone = '', height = 5, label = '', color = '', equalize = false, live = false, liveMs = 750 } = $props();
   const pct = $derived(Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)));
   const t = $derived(tone || (pct > 90 ? 'err' : pct > 75 ? 'attn' : 'ok'));
+  // a random negative delay phase-shifts this instance into the middle of the cycle rather than starting
+  // at 0 — several agents thinking at once (often at the same liveMs, e.g. all idle-fallback) would
+  // otherwise all jump levels in perfect lockstep, which reads as one fake bar copy-pasted N times.
+  const jitter = (-Math.random() * 3).toFixed(2);
 </script>
 
-<div class="bar {t}" class:equalize style="height:{height}px;{color ? `--c:${color}` : ''}{equalize ? `--ms:${liveMs}ms` : ''}" title={label}>
+<div class="bar {t}" class:equalize style="height:{height}px;{color ? `--c:${color}` : ''}{equalize ? `--ms:${liveMs}ms;--delay:${jitter}s` : ''}" title={label}>
   {#if equalize}
     <i class="level" class:live></i>
   {:else}
@@ -23,7 +27,7 @@
   .accent { --c: var(--accent); } .attn { --c: var(--attn); } .warn { --c: var(--warn); } .err { --c: var(--err); }
   .bar i { display: block; height: 100%; background: var(--c); box-shadow: 0 0 6px var(--c); }
   .bar > i:not(.level) { transition: width 0.25s; }
-  .level { animation: level 2.4s ease-in-out infinite; }
+  .level { animation: level 2.4s ease-in-out infinite; animation-delay: var(--delay, 0s); }
   .level.live { animation-duration: var(--ms); }
   @keyframes level {
     0%   { width: 15%; }

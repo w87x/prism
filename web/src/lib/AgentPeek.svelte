@@ -40,7 +40,7 @@
       <span class="hi"><Glyph name={r.agent} /> {r.agent}</span>
       <span class="dim">{fmtTokens(r.tokens_in)}↑ {fmtTokens(r.tokens_out)}↓ · {r.calls}⚙</span>
       {#if r.task}<span class="dim">task #{r.task}</span>{/if}
-      {#if r.window}<span class="grow ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} live={r.live} liveMs={r.liveMs} /></span>{/if}
+      {#if r.window}<span class="grow ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} tone={r.phase === 'thinking' ? 'accent' : ''} live={r.live} liveMs={r.liveMs} /></span>{/if}
     </div>
     {#if detail?.task?.input}<Field label="Task"><div class="pre task">{detail.task.input}</div></Field>{:else if r.title}<Field label="Task"><div class="pre task">{r.title}</div></Field>{/if}
     <Field label="Right now">

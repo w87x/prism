@@ -26,7 +26,7 @@
         <span class="tk sm dim" title="tokens in / out · tool calls">{fmtTokens(r.tokens_in)}↑ {fmtTokens(r.tokens_out)}↓ · {r.calls}⚙</span>
       </div>
       {#if !r.done && lastLine(r.buf)}<div class="now" title={lastLine(r.buf)}>{lastLine(r.buf).slice(0, 90)}</div>{:else if r.task_text}<div class="now">{r.task_text}</div>{/if}
-      {#if r.window}<div class="ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} live={r.live} liveMs={r.liveMs} /></div>{/if}
+      {#if r.window}<div class="ctx" title="context {r.context}/{r.window} tokens"><Bar value={r.context} max={r.window} height={3} equalize={r.phase === 'thinking'} tone={r.phase === 'thinking' ? 'accent' : ''} live={r.live} liveMs={r.liveMs} /></div>{/if}
     </div>
   {/each}
 </Panel>
