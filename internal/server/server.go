@@ -13,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"prism/internal/app"
 	"prism/internal/hub"
@@ -36,9 +37,11 @@ func New(a *app.App, h *hub.Hub, ui fs.FS) *Server {
 		c.Send("status", a.Status(context.Background()))
 		// A connection from this same machine (the user's own browser) is the normal case and would be
 		// noisy to announce every reload/reconnect; a connection from anywhere else is worth surfacing —
-		// "who's on my PRISM" is exactly the point of listening beyond loopback with a token.
+		// "who's on my PRISM" is exactly the point of listening beyond loopback with a token. Routine, so
+		// it's not persisted — every reconnect from the user's own phone would otherwise bloat the bell;
+		// a live tab shows it as a toast and keeps the last one for a hover detail (see StatusBar.svelte).
 		if c.Remote {
-			a.Notify("connection", "info", "New connection", "from "+c.RemoteAddr)
+			a.NotifySeen("connection", map[string]any{"addr": c.RemoteAddr, "at": time.Now().Format(time.RFC3339)})
 		}
 	}
 	h.OnDenied = func(remoteAddr, reason string) {

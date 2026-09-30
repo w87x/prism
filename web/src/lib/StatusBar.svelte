@@ -1,5 +1,5 @@
 <script>
-  import { S, activeRuns, fmtTokens, go } from './store.svelte.js';
+  import { S, activeRuns, fmtTokens, go, ago } from './store.svelte.js';
   import Led from './ui/Led.svelte';
 
   const st = $derived(S.status);
@@ -17,6 +17,10 @@
     const s = Math.max(0, Math.ceil((nextRetryAt - now.getTime()) / 1000));
     return nextRetryAt ? `retrying in ${s}s (#${attempt})` : S.conn;
   });
+  // "new connection" used to be its own notification-bell entry — every reconnect from the user's own
+  // phone bloated the bell fast, so it's a toast now (store.svelte.js) plus just this: hover for the last
+  // one, rather than a permanent list of them. Reads `now` so the "Xm ago" stays fresh across a hover.
+  const connTitle = $derived.by(() => { now; return S.lastConn ? `Last connection: ${S.lastConn.addr} · ${ago(S.lastConn.at)} ago` : 'No remote connections seen this session'; });
 
   let now = $state(new Date());
   $effect(() => {
@@ -42,7 +46,7 @@
     {/if}
     {#if st && !st.pgvector}<span class="warnc" title="The pgvector extension is missing: memory search works, but compares embeddings in the app, which gets slow as memory grows.">vectors: fallback</span>{/if}
     <button class="wallbtn" title="Full-screen thinking wall" onclick={() => (S.wallOpen = true)}><Led state={runs.some((r) => !r.done) ? 'ok' : 'off'} live={runs.some((r) => !r.done)} size={6} /> thinking{#if runs.filter((r) => !r.done).length} · {runs.filter((r) => !r.done).length}{/if}</button>
-    <span class="conn"><Led state={connLed} pulse={S.conn !== 'open'} size={7} /> {connText}</span>
+    <span class="conn" title={connTitle}><Led state={connLed} pulse={S.conn !== 'open'} size={7} /> {connText}</span>
     <span class="clock" title="local time">{pad(now.getHours())}<span class="blink">:</span>{pad(now.getMinutes())}<span class="blink">:</span>{pad(now.getSeconds())}</span>
   </div>
 </footer>

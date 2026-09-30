@@ -19,6 +19,21 @@ var notifiedTasks sync.Map // task id → struct{}: unrecoverable failures are r
 // Notify records a notification and, when configured for its kind, pushes it to macOS/Telegram.
 func (a *App) Notify(kind, level, title, text string) { a.notifyRef(kind, level, title, text, "") }
 
+// NotifySeen broadcasts a low-noise, routine event (e.g. "a device connected") straight to open tabs —
+// gated by the same per-kind settings toggle as Notify, but never written to the notification bell.
+// Something like every reconnect from the user's own phone would otherwise pile up in the bell and bury
+// things that actually need attention; a live tab can show it as a toast or a hover detail instead.
+func (a *App) NotifySeen(kind string, data map[string]any) {
+	if !a.Ready() {
+		return
+	}
+	cfg := settings.Load(context.Background(), a.Settings, settings.KeyNotify, settings.DefaultNotify()).Of(kind)
+	if !cfg.Show {
+		return
+	}
+	a.Hub.Broadcast(kind+".seen", data)
+}
+
 // notifyRef is Notify with an explicit page hint (e.g. "proposal:12" opens that proposal's review).
 func (a *App) notifyRef(kind, level, title, text, ref string) {
 	if !a.Ready() {

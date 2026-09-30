@@ -9,6 +9,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 export const S = $state({
   conn: 'connecting',
   connMeta: {}, // { attempt, nextRetryAt } — see ws.js's onConnState
+  lastConn: null, // { addr, at } of the last remote device to connect — see StatusBar's hover tooltip
   status: null,
   page: lsGet('prism.page', 'today'),
   memoryBank: 0, // set before go('memory') to open the Memory page on that bank
@@ -260,6 +261,9 @@ function wire() {
     toast(`${n.title}${n.text ? ' — ' + short(n.text, 120) : ''}`, n.level === 'error' ? 'err' : n.level === 'attention' || n.level === 'warning' ? 'attn' : 'ok', n.level === 'info' ? 5000 : 10000);
   });
   on('toast', (e) => toast(e.text, e.level === 'err' ? 'err' : 'ok', 8000));
+  // routine, not the notification bell — every reconnect from the user's own phone would otherwise
+  // bloat it; a toast plus the last one for StatusBar's hover tooltip is enough (see server.go's OnConnect).
+  on('connection.seen', (e) => { S.lastConn = e; toast(`New connection — from ${e.addr}`); });
 }
 
 export async function loadAgents() {
