@@ -98,7 +98,7 @@
 </script>
 
 {#if !wallOnly}
-<div class="shell" class:mobile={narrow} class:sheet class:drawer class:nav-c={!narrow && !S.navOpen} class:w-c={!narrow && (!S.widgetOpen || S.page === 'trackers')}>
+<div class="shell" class:mobile={narrow} class:sheet class:drawer class:nav-c={!narrow && !S.navOpen} class:w-c={!narrow && (!S.widgetOpen || S.page === 'trackers')} class:reconnecting={S.conn !== 'open'}>
   <header class="top">
     {#if !narrow}<button class="ico" onclick={menu} title="Toggle menu"><Icon name="menu" /></button>{/if}
     <div class="brand"><Logo size={24} /><span class="wm">PRISM</span></div>
@@ -199,10 +199,15 @@
 <ProposalReview />
 
 <style>
-  .shell { height: 100%; display: grid; grid-template-columns: 158px minmax(0, 1fr) 286px; grid-template-rows: 38px minmax(0, 1fr) 24px; grid-template-areas: 'top top top' 'nav main wid' 'sb sb sb'; }
+  .shell { height: 100%; display: grid; grid-template-columns: 158px minmax(0, 1fr) 286px; grid-template-rows: 38px minmax(0, 1fr) 24px; grid-template-areas: 'top top top' 'nav main wid' 'sb sb sb'; transition: filter 0.6s ease; }
   .shell.nav-c { grid-template-columns: 42px minmax(0, 1fr) 286px; }
   .shell.w-c { grid-template-columns: 158px minmax(0, 1fr) 0; }
   .shell.nav-c.w-c { grid-template-columns: 42px minmax(0, 1fr) 0; }
+  /* the backend is unreachable right now (dropped/reconnecting) — a quiet whole-UI tint says so at a
+     glance instead of only the small status-bar dot, without blocking anything: nothing is disabled,
+     it is purely a "heads up" wash. Desaturated + warm rather than red/error — this is normal and
+     expected during a restart, not a fault. */
+  .shell.reconnecting { filter: saturate(0.3) sepia(0.45) hue-rotate(-8deg) brightness(0.9); }
   .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--line-2); box-shadow: 0 1px 12px rgba(62, 232, 166, 0.06); }
   /* centred both ways: on a phone every button has a 30px minimum height, which left the icon stuck at the top of it */
   .ico { background: none; border: 0; color: var(--ico); padding: 3px; display: flex; align-items: center; justify-content: center; } .ico:hover { color: var(--ico-hi); }
