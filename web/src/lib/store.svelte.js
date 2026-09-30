@@ -350,6 +350,18 @@ export function init() {
   connect();
 }
 
+// Reconnect progress as a line of text: which attempt this is, and — while waiting out the backoff
+// between attempts — a live countdown to the next one, so it reads as visibly retrying rather than
+// looking stuck. Shared by StatusBar's footer and ConnectingSplash's full-screen overlay so the two
+// can't drift apart. `now` is the caller's own ticking clock (each keeps a lightweight 1s interval).
+export function connStatusText(now) {
+  if (S.conn === 'open') return 'online';
+  const { attempt = 0, nextRetryAt = 0 } = S.connMeta || {};
+  if (S.conn === 'connecting') return attempt > 0 ? `connecting… (#${attempt})` : 'connecting…';
+  const s = Math.max(0, Math.ceil((nextRetryAt - now.getTime()) / 1000));
+  return nextRetryAt ? `retrying in ${s}s (#${attempt})` : S.conn;
+}
+
 // ── formatting helpers ──────────────────────────────────────────────────────
 export const fmtTokens = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n || 0));
 export function ago(ts) {

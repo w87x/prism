@@ -1,5 +1,5 @@
 <script>
-  import { S, activeRuns, fmtTokens, go, ago } from './store.svelte.js';
+  import { S, activeRuns, fmtTokens, go, ago, connStatusText } from './store.svelte.js';
   import Led from './ui/Led.svelte';
 
   const st = $derived(S.status);
@@ -7,16 +7,8 @@
   const total = $derived(runs.reduce((a, r) => a + r.tokens_in + r.tokens_out, 0));
   const tasks = $derived(st ? [st.queue && `${st.queue} queued`, st.running && `${st.running} running`, st.waiting && `${st.waiting} waiting`].filter(Boolean) : []);
   const connLed = $derived(S.conn === 'open' ? 'ok' : S.conn === 'connecting' ? 'warn' : 'error');
-  // reconnect progress, not just a static "connecting": which attempt this is, and — while waiting out
-  // the backoff between attempts — a live countdown to the next one, so it's visibly retrying rather
-  // than looking stuck. Rides the clock's existing 1s tick, so this costs nothing extra while online.
-  const connText = $derived.by(() => {
-    if (S.conn === 'open') return 'online';
-    const { attempt = 0, nextRetryAt = 0 } = S.connMeta || {};
-    if (S.conn === 'connecting') return attempt > 0 ? `connecting… (#${attempt})` : 'connecting…';
-    const s = Math.max(0, Math.ceil((nextRetryAt - now.getTime()) / 1000));
-    return nextRetryAt ? `retrying in ${s}s (#${attempt})` : S.conn;
-  });
+  // Rides the clock's existing 1s tick, so this costs nothing extra while online.
+  const connText = $derived.by(() => connStatusText(now));
   // "new connection" used to be its own notification-bell entry — every reconnect from the user's own
   // phone bloated the bell fast, so it's a toast now (store.svelte.js) plus just this: hover for the last
   // one, rather than a permanent list of them. Reads `now` so the "Xm ago" stays fresh across a hover.
