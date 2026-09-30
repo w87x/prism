@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -125,6 +126,23 @@ func apiError(resp *http.Response) error {
 		}
 	}
 	return e
+}
+
+// textOf coerces a streamed delta field to plain text. The common case is a JSON string, but some
+// servers' reasoning formats put an object or array there instead (seen in practice with some local
+// reasoning models) — decoding straight into a Go string would fail the type check and, since this field
+// lives inside the same chunk as ordinary content and tool calls, silently drop the entire chunk over it,
+// not just the reasoning. Coercion never fails: a non-string value falls back to its raw JSON text rather
+// than vanishing outright.
+func textOf(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return string(raw)
 }
 
 func isContextErr(e *APIError) bool {
@@ -247,9 +265,9 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 		Model   string `json:"model"`
 		Choices []struct {
 			Delta struct {
-				Content          string `json:"content"`
-				ReasoningContent string `json:"reasoning_content"`
-				Reasoning        string `json:"reasoning"`
+				Content          json.RawMessage `json:"content"`
+				ReasoningContent json.RawMessage `json:"reasoning_content"`
+				Reasoning        json.RawMessage `json:"reasoning"`
 				ToolCalls        []struct {
 					Index    *int   `json:"index"`
 					ID       string `json:"id"`
@@ -260,8 +278,8 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 				} `json:"tool_calls"`
 			} `json:"delta"`
 			Message *struct {
-				Content   string `json:"content"`
-				Reasoning string `json:"reasoning_content"`
+				Content   json.RawMessage `json:"content"`
+				Reasoning json.RawMessage `json:"reasoning_content"`
 				ToolCalls []struct {
 					ID       string `json:"id"`
 					Function struct {
@@ -280,10 +298,19 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 			Message string `json:"message"`
 		} `json:"error"`
 	}
+	loggedBadChunk := false
 	handle := func(data []byte) error {
 		var ch chunk
 		if err := json.Unmarshal(data, &ch); err != nil {
-			return nil // ignore keep-alives / malformed
+			// Every line reaching here already passed the SSE "data:" prefix filter, so this is a genuine
+			// decode failure, not a keep-alive — log it once per stream (not every line) so a server sending
+			// a shape this struct can't parse at all is at least diagnosable, instead of silently vanishing
+			// exactly like the reasoning-field bug this same fix addresses below.
+			if !loggedBadChunk {
+				loggedBadChunk = true
+				log.Printf("llm: stream chunk did not parse, dropping it (further ones this stream stay silent): %v", err)
+			}
+			return nil
 		}
 		if ch.Error != nil && ch.Error.Message != "" {
 			return fmt.Errorf("llm: stream error: %s", ch.Error.Message)
@@ -293,11 +320,11 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 		}
 		for _, choice := range ch.Choices {
 			d := choice.Delta
-			if rs := d.ReasoningContent + d.Reasoning; rs != "" {
+			if rs := textOf(d.ReasoningContent) + textOf(d.Reasoning); rs != "" {
 				emit("", rs)
 			}
-			if d.Content != "" {
-				emit(ts.feed(d.Content))
+			if content := textOf(d.Content); content != "" {
+				emit(ts.feed(content))
 			}
 			for i, tc := range d.ToolCalls {
 				idx := i
@@ -307,11 +334,11 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 				addCall(idx, tc.ID, tc.Function.Name, tc.Function.Arguments)
 			}
 			if m := choice.Message; m != nil { // non-streaming fallback
-				if m.Reasoning != "" {
-					emit("", m.Reasoning)
+				if r := textOf(m.Reasoning); r != "" {
+					emit("", r)
 				}
-				if m.Content != "" {
-					emit(ts.feed(m.Content))
+				if content := textOf(m.Content); content != "" {
+					emit(ts.feed(content))
 				}
 				for i, tc := range m.ToolCalls {
 					addCall(i, tc.ID, tc.Function.Name, tc.Function.Arguments)

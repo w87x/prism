@@ -50,6 +50,39 @@ func TestChatStreamThinkAndTools(t *testing.T) {
 	}
 }
 
+// A server whose reasoning field isn't a plain JSON string (seen in practice from some local reasoning
+// models/backends) used to fail json.Unmarshal for the WHOLE chunk, silently dropping its content and
+// tool calls along with the reasoning — a long reasoning burst would vanish from the live UI with nothing
+// to explain why, and the model looks "stuck" with no diagnostic. It must degrade to raw text instead.
+func TestNonStringReasoningFieldDoesNotDropTheWholeChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// reasoning_content and content in the SAME delta, as a real server commonly sends them together —
+		// this is what made the old strict-string decode lose both at once, not just the reasoning
+		sse(w,
+			`{"choices":[{"delta":{"reasoning_content":{"step":1,"note":"thinking"},"content":"Hel"}}]}`,
+			`{"choices":[{"delta":{"content":"lo"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	var reasoning, content strings.Builder
+	res, err := NewClient().Chat(context.Background(), Endpoint{BaseURL: srv.URL, Model: "m"},
+		Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		func(d Delta) { reasoning.WriteString(d.Reasoning); content.WriteString(d.Content) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the object shape can't become clean text, but it must still surface (as its raw JSON) rather than
+	// silently disappearing — and, the actually critical part, the CONTENT SHARING ITS OWN CHUNK must not
+	// be lost along with it (this is what the old strict-string decode did: one bad field failed the
+	// json.Unmarshal for the entire chunk, "Hel" included)
+	if !strings.Contains(reasoning.String(), "thinking") {
+		t.Fatalf("reasoning should have surfaced in some form: %q", reasoning.String())
+	}
+	if res.Content != "Hello" || content.String() != "Hello" {
+		t.Fatalf("content sharing a chunk with a malformed reasoning field must survive: res=%q streamed=%q", res.Content, content.String())
+	}
+}
+
 func TestThinkSplitterPartialTags(t *testing.T) {
 	ts := &thinkSplitter{}
 	var c, r strings.Builder
