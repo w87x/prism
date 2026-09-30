@@ -12,6 +12,8 @@
   import AskCard from './lib/AskCard.svelte';
   import ThinkingWall from './lib/ThinkingWall.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
+  import Shortcuts from './lib/Shortcuts.svelte';
+  import QuickChat from './lib/QuickChat.svelte';
   import Onboarding from './pages/Onboarding.svelte';
   import NotifyBell from './lib/NotifyBell.svelte';
 
@@ -109,6 +111,8 @@
     {#if S.status?.thinking}<span class="act"><Led state="ok" pulse size={8} /> {S.status.thinking} agent{S.status.thinking > 1 ? 's' : ''} working</span>{/if}
     {#if !(narrow && S.editor.editor)}<EditorBadge />{/if}
     <button class="ico" onclick={() => (S.searchOpen = true)} title="Search everything (⌘K)"><Icon name="search" /></button>
+    <button class="ico" onclick={() => (S.quickChatOpen = true)} title="Quick chat (⌘J)"><Icon name="send" size={13} /></button>
+    <button class="ico kbd" onclick={() => (S.shortcutsOpen = true)} title="Keyboard shortcuts (⌘/)">⌘</button>
     {#if narrow}<StatusSheet />{/if}
     <NotifyBell />
     {#if small && desktopView}<button class="ico" onclick={() => setDesktopView(false)} title="Back to the phone layout"><Icon name="panel" /></button>{/if}
@@ -192,6 +196,8 @@
 {#if showOb}<Onboarding />{/if}
 <BriefingReader />
 <CommandPalette />
+<Shortcuts />
+<QuickChat />
 <ThinkingWall />
 <Toasts />
 <ConfirmHost />
@@ -211,6 +217,7 @@
   .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--line-2); box-shadow: 0 1px 12px rgba(62, 232, 166, 0.06); }
   /* centred both ways: on a phone every button has a 30px minimum height, which left the icon stuck at the top of it */
   .ico { background: none; border: 0; color: var(--ico); padding: 3px; display: flex; align-items: center; justify-content: center; } .ico:hover { color: var(--ico-hi); }
+  .ico.kbd { font-size: 13px; font-weight: 700; }
   .brand { display: flex; align-items: center; gap: 8px; }
   .wm { font-weight: 700; letter-spacing: 0.32em; font-size: 15px; background: linear-gradient(90deg, #3ee8a6, #4499ee); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 4px rgba(62, 232, 166, 0.45)); }
   .sep { width: 1px; height: 18px; background: var(--line-2); }

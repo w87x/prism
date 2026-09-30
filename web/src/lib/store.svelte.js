@@ -40,6 +40,8 @@ export const S = $state({
   selectedKbPage: null, // kb page id to open (set before go('kb'))
   wallOpen: false, // full-screen thinking wall — see ThinkingWall.svelte
   searchOpen: false, // universal search palette (Cmd+K) — see CommandPalette.svelte
+  quickChatOpen: false, // send-a-message-from-anywhere overlay (Cmd+J) — see QuickChat.svelte
+  shortcutsOpen: false, // keyboard shortcuts cheatsheet (Cmd+/) — see ShortcutsHelp.svelte
   notifs: { items: [], unread: 0 },
   llm: { active: 0 }, // model calls in flight (any caller)
   peekRun: null, // run whose live view is open (held by reference, so it outlives its removal from `runs`)
