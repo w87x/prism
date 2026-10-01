@@ -189,6 +189,7 @@
   const kinds = ['user', 'profile', 'project', 'domain'];
   const grouped = $derived(kinds.map((k) => ({ kind: k, items: banks.filter((b) => b.kind === k) })).filter((g) => g.items.length));
   const bankOpts = $derived(banks.map((b) => ({ value: b.kind === 'user' ? 'user' : `${b.kind}:${b.name}`, label: b.kind === 'user' ? 'user' : `${b.kind}:${b.name}` })));
+  const moveBankOpts = $derived(banks.map((b) => ({ value: b.id, label: b.kind === 'user' ? 'user' : `${b.kind}:${b.name}` })));
 
   async function run(name, method, params = {}, msg) {
     busy = name;
@@ -207,6 +208,14 @@
   async function delFact(f, e) {
     e?.stopPropagation();
     if (await confirmBox({ title: 'Forget fact', text: f.text, ok: 'Forget', danger: true })) { await call('memory.fact_delete', { id: f.id }); loadFacts(); loadBanks(); }
+  }
+  async function moveFact(bankId) {
+    if (!bankId || bankId === edit.bank_id) return;
+    if (await call('memory.fact_move', { id: edit.id, bank_id: bankId })) {
+      toast(`Moved to ${labelOf(bankId)}`);
+      editOpen = false;
+      loadFacts(); loadBanks();
+    }
   }
   async function togglePin(f, e) {
     e?.stopPropagation();
@@ -473,6 +482,7 @@
       <Field label="Rank" hint="usage-weighted; decays when unused (unless pinned)"><NumberInput bind:value={edit.rank} min={0.05} max={5} step={0.25} /></Field>
       {#if edit.kind !== 'conclusion'}<Field label="Value" hint="how durable/reusable this is likely to be — a standing attribute vs. a one-off event"><NumberInput bind:value={edit.value_ratio} min={0} max={1} step={0.05} /></Field>{/if}
       {#if edit.kind !== 'conclusion'}<div class="pinfield"><Checkbox checked={edit.pinned} onchange={async (v) => { if (await call('memory.fact_pin', { id: edit.id, pinned: v })) edit.pinned = v; }} label="pinned — never auto-archived or decayed" /></div>{/if}
+      {#if edit.kind !== 'conclusion'}<Field label="Move to bank"><Select value={edit.bank_id} options={moveBankOpts} searchable onchange={moveFact} /></Field>{/if}
     </div>
     <div class="sm mute">
       source {edit.source || '—'} · confidence {(edit.confidence * 100).toFixed(0)}% · hits {edit.hits} · created {stamp(edit.created_at)}
