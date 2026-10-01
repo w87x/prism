@@ -197,7 +197,7 @@
     if (r !== undefined) { toast(typeof msg === 'function' ? msg(r) : msg); loadBanks(); loadFacts(); }
   }
   async function saveFact() {
-    const r = await call('memory.fact_update', { id: edit.id, text: edit.text, tags: edit.tags, rank: edit.rank });
+    const r = await call('memory.fact_update', { id: edit.id, text: edit.text, tags: edit.tags, rank: edit.rank, value_ratio: edit.value_ratio });
     if (r) {
       editOpen = false;
       if (r.id !== edit.id) toast(`Corrected — the old wording is kept in history as #${edit.id}`);
@@ -358,6 +358,22 @@
     : f.rank >= 1.5 ? (f.confidence >= 0.7 ? 'var(--ok)' : '#e6d84a')
     : f.rank >= 0.8 ? '#e6d84a' : f.rank >= 0.4 ? 'var(--attn)' : 'var(--err)';
   const rankName = (f) => f.tags?.includes('user-rank') ? 'set by you' : f.rank >= 3 ? 'highest' : f.rank >= 1.5 ? (f.confidence >= 0.7 ? 'high, trusted' : 'high, not fully trusted') : f.rank >= 0.8 ? 'middling' : f.rank >= 0.4 ? 'low' : 'lowest';
+  // value_ratio: how durable/reusable a fact is likely to be (a standing attribute vs. a one-off event) —
+  // distinct from rank (earned by usage) and confidence (how sure we are it's true).
+  const valueColor = (v) => v >= 0.7 ? 'var(--fg)' : v >= 0.4 ? 'var(--warn)' : 'var(--attn)';
+  const valueName = (v) => v >= 0.7 ? 'durable' : v >= 0.4 ? 'mixed' : 'transient';
+  async function splitFact(f, e) {
+    e?.stopPropagation();
+    const r = await call('memory.fact_split', { id: f.id });
+    if (r) { toast(`Split into ${r.length} facts`); loadFacts(); }
+  }
+  async function dedupeFacts() {
+    busy = 'dedupe';
+    const r = await call('memory.fact_dedupe', { bank: labelOf(bank) });
+    busy = '';
+    if (r) toast(r.merged ? `Checked ${r.checked}, merged ${r.merged} near-duplicate(s)` : `Checked ${r.checked}, no duplicates found`);
+    loadFacts(); loadBanks();
+  }
 </script>
 
 <div class="pg">
@@ -413,6 +429,7 @@
         <Button size="sm" variant="ghost" loading={busy === 'process'} onclick={() => run('process', 'memory.process', {}, (n) => `${n} facts distilled from raw`)}>Digest raw</Button>
         <Button size="sm" variant="ghost" loading={busy === 'reindex'} onclick={() => run('reindex', 'memory.reindex', {}, (n) => `${n} facts re-embedded`)}>Re-embed</Button>
         <Button size="sm" variant="ghost" loading={busy === 'prune'} onclick={() => run('prune', 'memory.prune', {}, (r) => `archived ${r.archived}, purged ${r.purged}`)}>Prune</Button>
+        {#if bank}<Button size="sm" variant="ghost" loading={busy === 'dedupe'} title="Find and merge near-duplicate facts in this bank" onclick={dedupeFacts}>Dedupe</Button>{/if}
       {/snippet}
       {#if view === 'graph'}
         <div class="gbody"><MemoryGraph {bank} {history} onopen={openId} onresearch={research} /></div>
@@ -423,7 +440,7 @@
           <tbody>
             {#each facts as f (f.id)}
               <tr class="click" onclick={() => openFact(f)} class:old={f.valid_to} class:concl={f.kind === 'conclusion'}>
-                <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
+                <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.kind !== 'conclusion'}<Bar value={f.value_ratio} max={1} color={valueColor(f.value_ratio)} height={3} label="value {Math.round(f.value_ratio * 100)}% — {valueName(f.value_ratio)} — how likely this is to still matter later, distinct from rank/confidence" />{/if}{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
                 <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.valid_to}<Badge tone="mute" title="superseded {stamp(f.valid_to)}">retired</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
                 {#if !bank || searching}<td class="dim nowrap">{f.bank}</td>{/if}
                 <td class="mute sm">{(f.tags || []).join(', ')}</td>
@@ -431,7 +448,8 @@
                 <td class="mute">{f.hits}</td>
                 <td class="mute sm">{ago(f.created_at)}</td>
                 <td class="nowrap">
-                  {#if f.kind !== 'conclusion'}<Button size="sm" variant={f.pinned ? 'accent' : 'ghost'} title={f.pinned ? 'unpin' : 'pin: never auto-archived or decayed'} onclick={(e) => togglePin(f, e)}><Icon name="pin" size={11} /></Button>{/if}
+                  {#if f.kind !== 'conclusion'}<Button size="sm" variant={f.pinned ? 'accent' : 'ghost'} title={f.pinned ? 'unpin' : 'pin: never auto-archived or decayed'} onclick={(e) => togglePin(f, e)}><Icon name="pin" size={11} /></Button>
+                  {#if !f.valid_to}<Button size="sm" variant="ghost" title="split into separate atomic facts, if this one bundles more than one claim" onclick={(e) => splitFact(f, e)}><Icon name="split" size={11} /></Button>{/if}{/if}
                   <Button size="sm" variant="ghost" title="forget" onclick={(e) => delFact(f, e)}><Icon name="trash" size={11} /></Button>
                 </td>
               </tr>
@@ -453,6 +471,7 @@
     <div class="row wrap gap-12">
       <Field label="Tags"><Tags bind:value={edit.tags} /></Field>
       <Field label="Rank" hint="usage-weighted; decays when unused (unless pinned)"><NumberInput bind:value={edit.rank} min={0.05} max={5} step={0.25} /></Field>
+      {#if edit.kind !== 'conclusion'}<Field label="Value" hint="how durable/reusable this is likely to be — a standing attribute vs. a one-off event"><NumberInput bind:value={edit.value_ratio} min={0} max={1} step={0.05} /></Field>{/if}
       {#if edit.kind !== 'conclusion'}<div class="pinfield"><Checkbox checked={edit.pinned} onchange={async (v) => { if (await call('memory.fact_pin', { id: edit.id, pinned: v })) edit.pinned = v; }} label="pinned — never auto-archived or decayed" /></div>{/if}
     </div>
     <div class="sm mute">

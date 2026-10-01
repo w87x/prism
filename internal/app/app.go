@@ -447,6 +447,24 @@ func (a *App) memJob(name, result string, acted bool, err error) {
 	}
 }
 
+// MemRunStart makes a maintenance job (memory synthesis/analysis/reflection and similar) visible in Active
+// Agents / the Thinking Wall / "N agents working" — these call the LLM directly rather than through the
+// agent engine, so without this they're invisible there even while real work (and real token spend) is
+// happening. The run id is negative, so it can never collide with a real (positive) task/run id. Returns a
+// function to call once with the outcome when the job finishes.
+func (a *App) MemRunStart(title string) func(err error) {
+	id := -time.Now().UnixNano()
+	a.Emit("run.start", map[string]any{"run": id, "agent": "Memory", "kind": "job", "title": title})
+	return func(err error) {
+		status := "done"
+		msg := ""
+		if err != nil {
+			status, msg = "failed", err.Error()
+		}
+		a.Emit("run.end", map[string]any{"run": id, "agent": "Memory", "status": status, "error": msg})
+	}
+}
+
 func (a *App) memStage(step string) {
 	a.memStepV.Store(step)
 	a.Emit("memory.step", map[string]any{"step": step})

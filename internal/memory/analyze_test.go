@@ -331,7 +331,7 @@ func TestProvenanceAndTimeView(t *testing.T) {
 	}
 	// the user corrects it ten days ago: a new wording replaces the old one
 	txt := "User lives in Berlin"
-	nf, err := s.UpdateFact(ctx, old.ID, &txt, nil, nil)
+	nf, err := s.UpdateFact(ctx, old.ID, &txt, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -106,7 +106,7 @@ func TestRetrievalQuality(t *testing.T) {
 			seed: func(t *testing.T, s *Service) map[string]int64 {
 				old := store(t, s, StoreReq{Bank: "user", Text: "User's WiFi password is oldpass123"})
 				newText := "User's WiFi password is newpass456"
-				r, err := s.UpdateFact(context.Background(), old.ID, &newText, nil, nil)
+				r, err := s.UpdateFact(context.Background(), old.ID, &newText, nil, nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

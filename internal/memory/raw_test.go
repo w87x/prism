@@ -28,7 +28,7 @@ func TestQueuePendingFactSurvivesAndFlushRetriesWithoutReextraction(t *testing.T
 	}
 
 	// Simulate what distil() does when the model extracted a fact but Store() failed for it.
-	s.queuePendingFact(ctx, []int64{rawID}, "user", "Atlas", "User prefers dark mode everywhere", []string{"ui"}, 0.8, false, errors.New("simulated store failure"))
+	s.queuePendingFact(ctx, []int64{rawID}, "user", "Atlas", "User prefers dark mode everywhere", []string{"ui"}, 0.8, 0.5, false, errors.New("simulated store failure"))
 
 	pending, err := s.PendingFacts(ctx)
 	if err != nil {

@@ -121,17 +121,17 @@ func TestSettingARankByHandIsRemembered(t *testing.T) {
 	s, _ := newSvc(t)
 	f := store(t, s, StoreReq{Bank: "user", Text: "User likes strong espresso in the morning"})
 	same := f.Rank
-	if g, err := s.UpdateFact(ctx, f.ID, nil, nil, &same); err != nil || slices.Contains(g.Tags, "user-rank") {
+	if g, err := s.UpdateFact(ctx, f.ID, nil, nil, &same, nil); err != nil || slices.Contains(g.Tags, "user-rank") {
 		t.Fatalf("an unchanged rank is not a rerank: %+v err=%v", g, err)
 	}
 	r := 4.0
-	g, err := s.UpdateFact(ctx, f.ID, nil, nil, &r)
+	g, err := s.UpdateFact(ctx, f.ID, nil, nil, &r, nil)
 	if err != nil || g.Rank != 4 || !slices.Contains(g.Tags, "user-rank") {
 		t.Fatalf("hand-set rank: %+v err=%v", g, err)
 	}
 	r2 := 2.0
 	txt := "User likes strong espresso in the morning, no sugar"
-	h, err := s.UpdateFact(ctx, f.ID, &txt, g.Tags, &r2)
+	h, err := s.UpdateFact(ctx, f.ID, &txt, g.Tags, &r2, nil)
 	if err != nil || !slices.Contains(h.Tags, "user-rank") || h.Rank != 2 {
 		t.Fatalf("a rerank survives a text edit: %+v err=%v", h, err)
 	}

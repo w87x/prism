@@ -84,6 +84,10 @@ type Fact struct {
 	TaskID int64 `json:"task_id,omitempty"`
 	// Pinned exempts a fact from Prune's auto-archival and from rank's time-decay in retrieval scoring.
 	Pinned bool `json:"pinned"`
+	// ValueRatio is how durable/reusable this fact is likely to be (a standing attribute vs. a one-off
+	// event), set at extraction time — see StoreReq.ValueRatio. Folds into Find's ranking weight; does not
+	// affect pruning, which stays driven by actual usage/staleness.
+	ValueRatio float64 `json:"value_ratio"`
 }
 
 type Service struct {
@@ -211,16 +215,16 @@ const factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact') ELSE 0 END,
 	CASE WHEN f.kind='conclusion' THEN EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL) ELSE false END,
-	f.origins,f.task_id,f.pinned`
+	f.origins,f.task_id,f.pinned,f.value_ratio`
 
 func scanFact(r pgx.Row) (Fact, error) {
 	var f Fact
-	var rk, cf float32
+	var rk, cf, vr float32
 	var taskID *int64
 	err := r.Scan(&f.ID, &f.BankID, &f.Bank, &f.Text, &f.Tags, &rk, &f.Hits, &cf, &f.Source,
 		&f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsed, &f.CreatedAt, &f.Embedded, &f.Links, &f.Kind, &f.Proof, &f.Stale, &f.Origins,
-		&taskID, &f.Pinned)
-	f.Rank, f.Confidence = float64(rk), float64(cf)
+		&taskID, &f.Pinned, &vr)
+	f.Rank, f.Confidence, f.ValueRatio = float64(rk), float64(cf), float64(vr)
 	if taskID != nil {
 		f.TaskID = *taskID
 	}
@@ -276,7 +280,7 @@ func (s *Service) GetFact(ctx context.Context, id int64) (Fact, error) {
 // path) and a new row takes its place. This also means any conclusion resting on the old text is
 // automatically flagged for review the next time it's read — factCols' "stale" column is a live computation
 // off valid_to, so superseding is enough; nothing extra needs to run reflection eagerly.
-func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags []string, rank *float64) (*Fact, error) {
+func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags []string, rank, valueRatio *float64) (*Fact, error) {
 	cur, err := s.GetFact(ctx, id)
 	if err != nil {
 		return nil, err
@@ -300,6 +304,10 @@ func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags [
 		if rank != nil {
 			newRank = *rank
 		}
+		newValue := cur.ValueRatio
+		if valueRatio != nil {
+			newValue = *valueRatio
+		}
 		emb, model := s.embedOne(ctx, newText)
 		var taskID any
 		if cur.TaskID != 0 {
@@ -312,13 +320,13 @@ func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags [
 		defer tx.Rollback(ctx)
 		var newID int64
 		if s.VectorOn {
-			err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,rank,embedding,vec,confidence,source,supersedes,pinned,task_id,embed_model)
-				VALUES($1,$2,$3,$4,$5,$6::vector,$7,$8,$9,$10,$11,$12) RETURNING id`,
-				cur.BankID, newText, newTags, float32(newRank), emb, s.vecArg(emb), float32(cur.Confidence), cur.Source, id, cur.Pinned, taskID, model).Scan(&newID)
+			err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,rank,embedding,vec,confidence,source,supersedes,pinned,task_id,embed_model,value_ratio)
+				VALUES($1,$2,$3,$4,$5,$6::vector,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+				cur.BankID, newText, newTags, float32(newRank), emb, s.vecArg(emb), float32(cur.Confidence), cur.Source, id, cur.Pinned, taskID, model, float32(newValue)).Scan(&newID)
 		} else {
-			err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,rank,embedding,confidence,source,supersedes,pinned,task_id,embed_model)
-				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-				cur.BankID, newText, newTags, float32(newRank), emb, float32(cur.Confidence), cur.Source, id, cur.Pinned, taskID, model).Scan(&newID)
+			err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,rank,embedding,confidence,source,supersedes,pinned,task_id,embed_model,value_ratio)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+				cur.BankID, newText, newTags, float32(newRank), emb, float32(cur.Confidence), cur.Source, id, cur.Pinned, taskID, model, float32(newValue)).Scan(&newID)
 		}
 		if err != nil {
 			return nil, err
@@ -340,6 +348,11 @@ func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags [
 	}
 	if rank != nil {
 		if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET rank=$2 WHERE id=$1`, id, float32(*rank)); err != nil {
+			return nil, err
+		}
+	}
+	if valueRatio != nil {
+		if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET value_ratio=$2 WHERE id=$1`, id, float32(*valueRatio)); err != nil {
 			return nil, err
 		}
 	}
@@ -459,6 +472,11 @@ type StoreReq struct {
 	// TaskID is the task/conversation this fact is being stored during, when known (0 = none) — see
 	// Fact.TaskID.
 	TaskID int64
+	// ValueRatio is how durable/reusable this fact is likely to be, 0..1 (0 = leave at the default/derived
+	// value below). Left to the caller to estimate — the raw-message distillation prompt classifies it
+	// per fact; a fact the user typed in directly is taken at their word as valuable regardless of what's
+	// passed here (see the Source=="user" override in Store).
+	ValueRatio float64
 }
 
 type StoreResult struct {
@@ -482,6 +500,12 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 	}
 	if r.Confidence == 0 {
 		r.Confidence = 0.7
+	}
+	switch {
+	case r.Source == "user" || r.Source == "user (confirmed)": // the user's own word, taken as durably valuable
+		r.ValueRatio = 0.95
+	case r.ValueRatio <= 0 || r.ValueRatio > 1:
+		r.ValueRatio = 0.5
 	}
 	bank, err := s.BankBySpec(ctx, r.Bank, r.Agent, true)
 	if err != nil {
@@ -603,13 +627,13 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 		taskID = r.TaskID
 	}
 	if s.VectorOn {
-		err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,embedding,vec,confidence,source,supersedes,origins,embed_model,task_id)
-			VALUES($1,$2,$3,$4,$5::vector,$6,$7,$8,$9,$10,$11) RETURNING id`,
-			bank.ID, r.Text, tags, emb, s.vecArg(emb), float32(r.Confidence), r.Source, sup, origins, embModel, taskID).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,embedding,vec,confidence,source,supersedes,origins,embed_model,task_id,value_ratio)
+			VALUES($1,$2,$3,$4,$5::vector,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+			bank.ID, r.Text, tags, emb, s.vecArg(emb), float32(r.Confidence), r.Source, sup, origins, embModel, taskID, float32(r.ValueRatio)).Scan(&id)
 	} else {
-		err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,embedding,confidence,source,supersedes,origins,embed_model,task_id)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-			bank.ID, r.Text, tags, emb, float32(r.Confidence), r.Source, sup, origins, embModel, taskID).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,embedding,confidence,source,supersedes,origins,embed_model,task_id,value_ratio)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+			bank.ID, r.Text, tags, emb, float32(r.Confidence), r.Source, sup, origins, embModel, taskID, float32(r.ValueRatio)).Scan(&id)
 	}
 	if err != nil {
 		return nil, err
@@ -650,6 +674,7 @@ type cand struct {
 	hits     int
 	conf     float64
 	pinned   bool
+	value    float64
 }
 
 // vecSims asks pgvector for the nearest facts to qv: id → cosine similarity.
@@ -689,7 +714,7 @@ func (s *Service) candidates(ctx context.Context, bankIDs []int64, history bool,
 	if s.VectorOn {
 		emb = "NULL::bytea" // similarity is computed by Postgres; don't ship vectors
 	}
-	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned FROM memory_facts WHERE bank_id=ANY($1)`
+	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio FROM memory_facts WHERE bank_id=ANY($1)`
 	if !history {
 		sql += ` AND valid_to IS NULL`
 	}
@@ -711,7 +736,7 @@ func (s *Service) candidatesByIDs(ctx context.Context, ids []int64) ([]cand, err
 	if s.VectorOn {
 		emb = "NULL::bytea"
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,bank_id,text,`+emb+`,rank,last_used,created_at,hits,confidence,embed_model,pinned FROM memory_facts WHERE id=ANY($1)`, ids)
+	rows, err := s.db.Query(ctx, `SELECT id,bank_id,text,`+emb+`,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio FROM memory_facts WHERE id=ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -724,11 +749,11 @@ func scanCands(rows pgx.Rows) ([]cand, error) {
 	for rows.Next() {
 		var c cand
 		var emb []byte
-		var rk, cf float32
-		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned); err != nil {
+		var rk, cf, vr float32
+		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned, &vr); err != nil {
 			return nil, err
 		}
-		c.vec, c.rank, c.conf = decodeVec(emb), float64(rk), float64(cf)
+		c.vec, c.rank, c.conf, c.value = decodeVec(emb), float64(rk), float64(cf), float64(vr)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -952,6 +977,7 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 		}
 		w := 0.8 + 0.2*math.Min(effRank(c.rank, c.lastUsed, c.created, c.pinned), 3)
 		w *= 0.85 + 0.15*c.conf/0.7
+		w *= 0.9 + 0.1*c.value // durable facts (a standing attribute) edge out equally-relevant transient ones
 		sc = append(sc, scoredIdx{i, (0.55*rel[i] + 0.45*fused[i]) * w})
 	}
 	sort.Slice(sc, func(a, b int) bool { return sc[a].score > sc[b].score })

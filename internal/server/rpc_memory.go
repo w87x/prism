@@ -36,12 +36,13 @@ func (s *Server) registerMemory() {
 		return a.Memory.FactsKind(ctx, r.BankID, r.Kind, r.Q, r.History, r.Limit, r.Offset)
 	})
 	rpc(s, "memory.fact_update", func(ctx context.Context, r struct {
-		ID   int64    `json:"id"`
-		Text *string  `json:"text"`
-		Tags []string `json:"tags"`
-		Rank *float64 `json:"rank"`
+		ID         int64    `json:"id"`
+		Text       *string  `json:"text"`
+		Tags       []string `json:"tags"`
+		Rank       *float64 `json:"rank"`
+		ValueRatio *float64 `json:"value_ratio"`
 	}) (*memory.Fact, error) {
-		return a.Memory.UpdateFact(ctx, r.ID, r.Text, r.Tags, r.Rank)
+		return a.Memory.UpdateFact(ctx, r.ID, r.Text, r.Tags, r.Rank, r.ValueRatio)
 	})
 	rpc(s, "memory.fact_delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
@@ -66,6 +67,16 @@ func (s *Server) registerMemory() {
 		BankID int64 `json:"bank_id"`
 	}) (bool, error) {
 		return true, a.Memory.MoveFact(ctx, r.ID, r.BankID)
+	})
+	rpc(s, "memory.fact_split", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) ([]memory.Fact, error) {
+		return a.Memory.SplitFact(ctx, r.ID)
+	})
+	rpc(s, "memory.fact_dedupe", func(ctx context.Context, r struct {
+		Bank string `json:"bank"`
+	}) (memory.DedupeFactsResult, error) {
+		return a.Memory.DedupeFacts(ctx, r.Bank)
 	})
 	rpc(s, "memory.find", func(ctx context.Context, r struct {
 		Query   string   `json:"query"`
@@ -142,9 +153,9 @@ func (s *Server) registerMemory() {
 	// reflection: bank_id 0 = every bank that has gathered enough new facts
 	rpc(s, "memory.reflect", func(ctx context.Context, r struct {
 		BankID int64 `json:"bank_id"`
-	}) ([]memory.ReflectResult, error) {
-		var rs []memory.ReflectResult
-		var err error
+	}) (rs []memory.ReflectResult, err error) {
+		end := a.MemRunStart("Reflecting")
+		defer func() { end(err) }()
 		if r.BankID != 0 {
 			var res memory.ReflectResult
 			res, err = a.Memory.Reflect(ctx, r.BankID, true, 0)
@@ -160,9 +171,9 @@ func (s *Server) registerMemory() {
 	// deep analysis: bank_id 0 = every bank with enough new facts
 	rpc(s, "memory.analyze", func(ctx context.Context, r struct {
 		BankID int64 `json:"bank_id"`
-	}) ([]memory.AnalyzeResult, error) {
-		var rs []memory.AnalyzeResult
-		var err error
+	}) (rs []memory.AnalyzeResult, err error) {
+		end := a.MemRunStart("Analyzing")
+		defer func() { end(err) }()
 		if r.BankID != 0 {
 			var res memory.AnalyzeResult
 			res, err = a.Memory.Analyze(ctx, r.BankID, true, 0)
@@ -178,14 +189,16 @@ func (s *Server) registerMemory() {
 	// levels of thinking: level 2 (synthesis across banks) and 3 (principles); 0 = both, in order
 	rpc(s, "memory.synthesize", func(ctx context.Context, r struct {
 		Level int `json:"level"`
-	}) ([]memory.SynthResult, error) {
-		var rs []memory.SynthResult
+	}) (rs []memory.SynthResult, err error) {
+		end := a.MemRunStart("Synthesizing")
+		defer func() { end(err) }()
 		levels := []int{2, 3}
 		if r.Level == 2 || r.Level == 3 {
 			levels = []int{r.Level}
 		}
 		for _, lv := range levels {
-			x, err := a.Memory.Synthesize(ctx, lv, true, 0)
+			var x memory.SynthResult
+			x, err = a.Memory.Synthesize(ctx, lv, true, 0)
 			if err != nil {
 				return rs, err
 			}
@@ -377,7 +390,12 @@ func (s *Server) registerMemory() {
 		return a.Memory.Undo(ctx, r.ID)
 	})
 	rpc(s, "memory.reindex", func(ctx context.Context, _ none) (int, error) { return a.Memory.Reindex(ctx) })
-	rpc(s, "memory.process", func(ctx context.Context, _ none) (int, error) { return a.Memory.Process(ctx, 60, true) })
+	rpc(s, "memory.process", func(ctx context.Context, _ none) (n int, err error) {
+		end := a.MemRunStart("Digesting raw messages")
+		defer func() { end(err) }()
+		n, err = a.Memory.Process(ctx, 60, true)
+		return
+	})
 	rpc(s, "memory.prune", func(ctx context.Context, _ none) (map[string]int, error) {
 		x, y, err := a.Memory.Prune(ctx, 180*24*3600*1e9)
 		return map[string]int{"archived": x, "purged": y}, err
@@ -390,18 +408,22 @@ func (s *Server) registerMemory() {
 	// entity graph: bank_id 0 = every bank that has gathered new facts since its last pass
 	rpc(s, "memory.entities_extract", func(ctx context.Context, r struct {
 		BankID int64 `json:"bank_id"`
-	}) ([]memory.EntityExtractResult, error) {
+	}) (out []memory.EntityExtractResult, err error) {
+		end := a.MemRunStart("Extracting entities")
+		defer func() { end(err) }()
 		if r.BankID != 0 {
-			res, err := a.Memory.ExtractEntities(ctx, r.BankID, true)
+			var res memory.EntityExtractResult
+			res, err = a.Memory.ExtractEntities(ctx, r.BankID, true)
 			return []memory.EntityExtractResult{res}, err
 		}
-		bs, err := a.Memory.Banks(ctx)
+		var bs []memory.Bank
+		bs, err = a.Memory.Banks(ctx)
 		if err != nil {
 			return nil, err
 		}
-		var out []memory.EntityExtractResult
 		for _, b := range bs {
-			res, err := a.Memory.ExtractEntities(ctx, b.ID, false)
+			var res memory.EntityExtractResult
+			res, err = a.Memory.ExtractEntities(ctx, b.ID, false)
 			if err != nil {
 				return out, err
 			}

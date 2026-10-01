@@ -15,7 +15,7 @@ func TestUpdateFactTextChangeSupersedesPreservingHistory(t *testing.T) {
 	old := store(t, s, StoreReq{Bank: "user", Text: "User lives in Berlin", Tags: []string{"home"}})
 
 	newText := "User lives in Munich"
-	got, err := s.UpdateFact(ctx, old.ID, &newText, nil, nil)
+	got, err := s.UpdateFact(ctx, old.ID, &newText, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestUpdateFactMetadataOnlyStaysInPlace(t *testing.T) {
 	ctx := context.Background()
 	f := store(t, s, StoreReq{Bank: "user", Text: "User prefers dark roast coffee"})
 	newRank := 2.5
-	got, err := s.UpdateFact(ctx, f.ID, nil, []string{"coffee", "preference"}, &newRank)
+	got, err := s.UpdateFact(ctx, f.ID, nil, []string{"coffee", "preference"}, &newRank, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestCorrectingAFactMarksDependentConclusionStale(t *testing.T) {
 	}
 
 	newText := "User works at Initech now"
-	if _, err := s.UpdateFact(ctx, a.ID, &newText, nil, nil); err != nil {
+	if _, err := s.UpdateFact(ctx, a.ID, &newText, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 

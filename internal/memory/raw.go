@@ -75,7 +75,9 @@ Example — researching local LLM models for the user: "User has a Mac M3 with 9
 Reuse an existing project/domain bank (listed below, if any) whenever a fact clearly belongs with it — do NOT invent a new, more specific name for the same ongoing topic (e.g. facts about different versions of one model family — GLM, GLM-4.6, GLM-5.3 — all belong in ONE bank such as "domain:GLM" or "project:<the task>", never one bank per version).
 
 Rules: one self-contained sentence per fact, third person ("User prefers tea over coffee"), include dates for time-sensitive facts. Skip small talk, transient states and trivia already obvious. Never extract today's date or the current time as a fact by itself (e.g. "Today is March 3rd") — it is available live from the clock tool and would be wrong the very next day; only mention a date when it matters for what's being remembered (a deadline, an event, when something changed). Prefer few high-value facts; return an empty list when nothing qualifies. When unsure between "user" and another bank, prefer the other bank — the user bank is pulled into every agent's context on every task, so keeping it to facts about the user keeps it useful.
-Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0}]}`
+
+For each fact, also give value_ratio: how likely this is to still matter in an unrelated future task. A standing attribute — identity, equipment/hardware, a preference, a relationship, a recurring habit — is high (0.7-1.0): "User has a Synology NAS" or "User prefers tea over coffee" will keep being relevant. A one-off event or transient state is low (0.1-0.3): "Downloaded files X and Y" or "The download failed with a 407 error" only matters right now and is very unlikely to help a later, unrelated task. This is independent of confidence (how sure you are it's true) — a one-off event can be 100% certain and still low value_ratio.
+Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0,"value_ratio":0.0-1.0}]}`
 
 // maxRawAttempts/maxPendingAttempts cap how many times a batch (or a single extracted fact) is retried
 // before it is given up on rather than blocking the queue forever behind a permanently failing item.
@@ -200,7 +202,7 @@ func (s *Service) bumpRawAttempts(ctx context.Context, ids []int64, cause error)
 
 // queuePendingFact durably records a fact the model already extracted but that failed to store, so the next
 // Process cycle can retry the exact same Store call instead of re-extracting (and re-duplicating).
-func (s *Service) queuePendingFact(ctx context.Context, rawIDs []int64, bank, agent, text string, tags []string, confidence float64, tainted bool, cause error) {
+func (s *Service) queuePendingFact(ctx context.Context, rawIDs []int64, bank, agent, text string, tags []string, confidence, valueRatio float64, tainted bool, cause error) {
 	if tags == nil {
 		tags = []string{}
 	}
@@ -208,8 +210,8 @@ func (s *Service) queuePendingFact(ctx context.Context, rawIDs []int64, bank, ag
 	if cause != nil {
 		msg = cause.Error()
 	}
-	_, _ = s.db.Exec(ctx, `INSERT INTO memory_pending_facts(raw_ids,bank,agent,text,tags,confidence,tainted,attempts,last_error)
-		VALUES($1,$2,$3,$4,$5,$6,$7,1,$8)`, rawIDs, bank, agent, text, tags, float32(confidence), tainted, msg)
+	_, _ = s.db.Exec(ctx, `INSERT INTO memory_pending_facts(raw_ids,bank,agent,text,tags,confidence,tainted,attempts,last_error,value_ratio)
+		VALUES($1,$2,$3,$4,$5,$6,$7,1,$8,$9)`, rawIDs, bank, agent, text, tags, float32(confidence), tainted, msg, float32(valueRatio))
 }
 
 // flushPendingFacts retries facts left over from an earlier partial failure — a deterministic Store() call,
@@ -217,7 +219,7 @@ func (s *Service) queuePendingFact(ctx context.Context, rawIDs []int64, bank, ag
 // hiccup) can never turn into a duplicate. Once every pending fact tied to a raw batch is resolved (stored,
 // or given up on after maxPendingAttempts), that batch's raw messages are finally deleted.
 func (s *Service) flushPendingFacts(ctx context.Context) (int, error) {
-	rows, err := s.db.Query(ctx, `SELECT id,raw_ids,bank,agent,text,tags,confidence,tainted,attempts FROM memory_pending_facts WHERE NOT given_up ORDER BY id LIMIT 200`)
+	rows, err := s.db.Query(ctx, `SELECT id,raw_ids,bank,agent,text,tags,confidence,tainted,attempts,value_ratio FROM memory_pending_facts WHERE NOT given_up ORDER BY id LIMIT 200`)
 	if err != nil {
 		return 0, err
 	}
@@ -226,19 +228,19 @@ func (s *Service) flushPendingFacts(ctx context.Context) (int, error) {
 		rawIDs            []int64
 		bank, agent, text string
 		tags              []string
-		conf              float64
+		conf, value       float64
 		tainted           bool
 		attempts          int
 	}
 	var pend []prow
 	for rows.Next() {
 		var p prow
-		var conf float32
-		if err := rows.Scan(&p.id, &p.rawIDs, &p.bank, &p.agent, &p.text, &p.tags, &conf, &p.tainted, &p.attempts); err != nil {
+		var conf, value float32
+		if err := rows.Scan(&p.id, &p.rawIDs, &p.bank, &p.agent, &p.text, &p.tags, &conf, &p.tainted, &p.attempts, &value); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		p.conf = float64(conf)
+		p.conf, p.value = float64(conf), float64(value)
 		pend = append(pend, p)
 	}
 	rows.Close()
@@ -250,7 +252,7 @@ func (s *Service) flushPendingFacts(ctx context.Context) (int, error) {
 		if p.tainted {
 			src = "raw (tainted)"
 		}
-		if _, err := s.Store(ctx, StoreReq{Bank: p.bank, Agent: p.agent, Text: p.text, Tags: p.tags, Source: src, Confidence: p.conf}); err != nil {
+		if _, err := s.Store(ctx, StoreReq{Bank: p.bank, Agent: p.agent, Text: p.text, Tags: p.tags, Source: src, Confidence: p.conf, ValueRatio: p.value}); err != nil {
 			attempts := p.attempts + 1
 			_, _ = s.db.Exec(ctx, `UPDATE memory_pending_facts SET attempts=$2, last_error=$3, given_up=$4 WHERE id=$1`,
 				p.id, attempts, err.Error(), attempts >= maxPendingAttempts)
@@ -388,6 +390,7 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			Bank       string   `json:"bank"`
 			Tags       []string `json:"tags"`
 			Confidence float64  `json:"confidence"`
+			ValueRatio float64  `json:"value_ratio"`
 		} `json:"facts"`
 	}
 	if err := s.llm.CompleteJSON(ctx, "role:fast", extractPrompt, sb.String(), &parsed); err != nil {
@@ -412,8 +415,8 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			bank = "domain:General"
 		}
 		conf, tags, src := rawFactPolicy(tainted, f.Confidence, f.Tags, "raw")
-		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, TaskID: taskID}); err != nil {
-			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, tainted, err)
+		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID}); err != nil {
+			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, f.ValueRatio, tainted, err)
 			pending++
 			continue
 		}
