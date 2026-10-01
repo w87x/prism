@@ -115,7 +115,12 @@ func (d Deps) denyRoots(ctx context.Context) []string {
 }
 
 func (d Deps) canRead(ctx context.Context, p string) error {
-	if !underAny(p, []string{homeDir(), d.DataDir, os.TempDir(), "/Volumes"}) {
+	// os.TempDir() is the Go runtime's own per-process scratch dir (/var/folders/…/T on macOS) — not what
+	// anyone means by "put it in /tmp". /tmp itself (symlinked to /private/tmp on macOS) is the single most
+	// common place a user drops a file for an agent to pick up, and canonical() already resolves the
+	// symlink, so listing it here is enough; without it, a plainly-stated "/tmp/foo" in a task prompt was
+	// silently rejected, pushing an agent into increasingly convoluted (and context-expensive) workarounds.
+	if !underAny(p, []string{homeDir(), d.DataDir, os.TempDir(), "/tmp", "/Volumes"}) {
 		return fmt.Errorf("reading outside your home directory is not allowed: %s", p)
 	}
 	if underRoots(canonical(p), d.denyRoots(ctx)) {
