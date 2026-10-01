@@ -446,7 +446,7 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 			evidence, err = env.Search(ctx, p.Query)
 		}
 		if err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("fetching evidence: %w", err)
 		}
 		if len(evidence) > 12000 {
 			evidence = evidence[:12000]
@@ -455,7 +455,7 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 Answer JSON only: {"holds": true|false, "evidence": "one short sentence quoting the decisive fact"}`,
 			"Condition: "+p.Question+"\n\nEvidence:\n"+evidence, true)
 		if err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("judging evidence: %w", err)
 		}
 		var j struct {
 			Holds    bool   `json:"holds"`

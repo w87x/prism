@@ -457,6 +457,19 @@ func (s *Service) tickIntents(ctx context.Context) {
 	}
 }
 
+// checkTimeout budgets a predicate check: most kinds are a single fast local/network call, but "llm" chains
+// a live web search (or page fetch) with an LLM judging up to 12000 chars of evidence, and "tool" can call
+// an arbitrary (possibly slow) MCP tool — both regularly outlast 2 minutes on real hardware, where the
+// earlier flat budget surfaced as a silent "context deadline exceeded" with no sign of which stage was slow.
+func checkTimeout(kind string) time.Duration {
+	switch kind {
+	case "llm", "tool":
+		return 5 * time.Minute
+	default:
+		return 2 * time.Minute
+	}
+}
+
 func (s *Service) check(ctx context.Context, i Intent) {
 	var p Predicate
 	if err := json.Unmarshal(i.Predicate, &p); err != nil {
@@ -479,7 +492,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 		s.logf("info", "intent %d: agent %q no longer exists, dispatching to %q instead", i.ID, i.Owner, owner)
 		i.Owner = owner
 	}
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, checkTimeout(p.Kind))
 	res, err := p.Eval(cctx, s.Env)
 	cancel()
 	next := time.Now().Add(time.Duration(i.CadenceS) * time.Second)
