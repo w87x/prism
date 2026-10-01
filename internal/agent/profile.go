@@ -282,7 +282,11 @@ func (s *ProfileStore) Search(ctx context.Context, query string, limit int) ([]P
 	var cand []Profile
 	var docs []string
 	for _, p := range all {
-		if !p.Enabled || p.Role == RoleEntry {
+		// Entry (Atlas) and maintenance staff (Oneiros, Hearth, …) are never a match here: this feeds
+		// delegation (agent_find/delegate) and the scheduler's "the owner was deleted, pick a replacement"
+		// fallback, and a system agent built for one narrow job (e.g. Oneiros only ever drafts briefings)
+		// has no business inheriting an arbitrary watch or cron just because its name/traits scored highest.
+		if !p.Enabled || p.Role == RoleEntry || p.Role == RoleMaint {
 			continue
 		}
 		cand = append(cand, p)
