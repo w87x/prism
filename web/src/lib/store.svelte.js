@@ -74,7 +74,7 @@ export async function openProposal(id) {
 }
 // Methods a view-only tab may still call: everything that only reads. Unknown methods are refused, so a
 // newly added writing RPC is safe by default.
-const READ_ONLY_OK = new Set(`agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
+const READ_ONLY_OK = new Set(`agents.activity agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
 browser.status chat.commands chat.history chats.list crons.list docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
 foldermap.list fs.browse intents.list kb.page_get kb.tree lists.list logs.list mail.accounts mail.himalaya mcp.list memory.banks memory.entity_facts
 memory.entity_graph memory.export memory.fact memory.facts memory.find memory.full_graph memory.graph memory.links memory.ops memory.review

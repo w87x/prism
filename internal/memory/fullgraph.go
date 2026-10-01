@@ -22,6 +22,8 @@ type FullNode struct {
 	Mentions int     `json:"mentions,omitempty"`
 	Retired  bool    `json:"retired,omitempty"`
 	Links    int     `json:"links,omitempty"`
+	Hits     int     `json:"hits,omitempty"`
+	Decay    float64 `json:"decay,omitempty"`
 }
 
 type FullEdge struct {
@@ -57,7 +59,7 @@ func (s *Service) FullGraph(ctx context.Context, bankID int64, history bool, lim
 	for _, n := range g.Nodes {
 		factIDs = append(factIDs, n.ID)
 		out.Nodes = append(out.Nodes, FullNode{ID: factNodeID(n.ID), Type: "fact", Text: n.Text, Kind: n.Kind,
-			Bank: n.Bank, BankKind: n.BankKind, Rank: n.Rank, Conf: n.Conf, Retired: n.Retired, Links: n.Links})
+			Bank: n.Bank, BankKind: n.BankKind, Rank: n.Rank, Conf: n.Conf, Retired: n.Retired, Links: n.Links, Hits: n.Hits, Decay: n.Decay})
 	}
 	for _, e := range g.Edges {
 		out.Edges = append(out.Edges, FullEdge{A: factNodeID(e.A), B: factNodeID(e.B), Kind: e.Kind, Weight: e.Weight})

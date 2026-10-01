@@ -235,11 +235,18 @@
       const n = nodes[i], p = pos[n.id]; if (!p) continue;
       const rad = r(n) * Math.max(0.8, Math.min(k, 1.6)), col = colorOf(n), { form, outline } = formOf(n);
       const isFocus = i === focus || i === selIdx;
+      // a frequently-retrieved fact glows more at rest; one whose rank has mostly decayed back toward
+      // Prune's floor desaturates, reading as "dissolving" rather than vanishing outright without warning.
+      // log-scaled: a fact can rack up hundreds of hits over time, and a flat divisor would saturate
+      // almost everything popular to the same max glow — this keeps spreading out 1 hit from 20 from 200.
+      const used = n.type === 'fact' ? Math.min(1, Math.log2(1 + (n.hits || 0)) / Math.log2(60)) : 0;
+      const decay = n.type === 'fact' ? Math.min(1, n.decay || 0) : 0;
       ctx.save();
       ctx.translate(sx(n), sy(n));
-      ctx.globalAlpha = hlOn ? (lit[i] ? 1 : 0.1) : focus >= 0 && i !== focus && !near.has(i) ? 0.18 : n.retired ? 0.5 : (n.type === 'fact' && n.confidence < 0.5 ? 0.55 : 1);
+      ctx.globalAlpha = (hlOn ? (lit[i] ? 1 : 0.1) : focus >= 0 && i !== focus && !near.has(i) ? 0.18 : n.retired ? 0.5 : (n.type === 'fact' && n.confidence < 0.5 ? 0.55 : 1)) * (1 - decay * 0.5);
+      ctx.filter = decay > 0.1 ? `saturate(${Math.round((1 - decay * 0.7) * 100)}%)` : 'none';
       ctx.shadowColor = col;
-      ctx.shadowBlur = (isFocus ? 12 : 4 + 2 * Math.sin(t / 1100 + i)) * (nodes.length <= 15 ? 0.3 : nodes.length <= 40 ? 0.6 : 1);
+      ctx.shadowBlur = (isFocus ? 12 : (4 + 2 * Math.sin(t / 1100 + i)) * (1 + used * 1.5)) * (nodes.length <= 15 ? 0.3 : nodes.length <= 40 ? 0.6 : 1);
       shape(ctx, form, rad);
       if (outline) { ctx.fillStyle = colors.bg2; ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.stroke(); }
       else {
@@ -373,7 +380,7 @@
       <div class="lg"><span class="lgh">arrange</span>
         {#each [['force', 'organic'], ['bank', 'by bank'], ['type', 'by type'], ['rings', 'rings']] as [k, label]}<button type="button" class="li" class:on={layout === k} onclick={() => (layout = k)}>{label}</button>{/each}
       </div>
-      <div class="sm mute">{g.nodes.length} node{g.nodes.length === 1 ? '' : 's'}{g.more ? ` (+${g.more} not shown — pick a bank)` : ''} · {g.edges.length} links · hover for detail · click selects · double-click opens a fact · drag to move · wheel zooms, drag the background pans</div>
+      <div class="sm mute">{g.nodes.length} node{g.nodes.length === 1 ? '' : 's'}{g.more ? ` (+${g.more} not shown — pick a bank)` : ''} · {g.edges.length} links · hover for detail · click selects · double-click opens a fact · drag to move · wheel zooms, drag the background pans · a fact glows more the more it's actually used, and desaturates as its rank decays toward being pruned</div>
       {#if node}
         <div class="card">
           {#if node.type === 'fact'}

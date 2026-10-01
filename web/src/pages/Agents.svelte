@@ -28,6 +28,14 @@
   const match = (a) => !filter || `${a.name} ${a.group} ${a.description} ${(a.traits || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase());
   function newAgent() { S.selectedAgent = 'new'; }
 
+  // activity heat: call volume over the last 24h, so a heavily-used agent still reads as such at rest —
+  // distinct from the live glow, which only says "is it running this instant".
+  let activity = $state({});
+  async function loadActivity() { activity = (await call('agents.activity', {}, { quiet: true })) || {}; }
+  $effect(() => { loadActivity(); const i = setInterval(loadActivity, 60000); return () => clearInterval(i); });
+  const maxActivity = $derived(Math.max(1, ...Object.values(activity)));
+  const heatOf = (name) => Math.min(1, (activity[name] || 0) / maxActivity);
+
   // agents proposed for a newly connected MCP server, waiting on the user's review
   let suggestions = $state([]);
   async function loadSuggestions() { suggestions = (await call('mcp.suggestions', {}, { quiet: true })) || []; }
@@ -149,9 +157,12 @@
     if (atlas) for (const n of nodes) {
       if (n === atlas) continue;
       const live = runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
+      // a spoke this agent is actually delegated to a lot reads thicker and more solid even when quiet —
+      // "how much does Atlas actually route here" instead of every spoke looking equally important.
+      const spokeHeat = n.a.role === 'maint' ? 0 : heatOf(n.a.name);
       ctx.beginPath(); ctx.moveTo(atlas.x, atlas.y); ctx.lineTo(n.x, n.y);
-      ctx.lineWidth = live ? 2 : 1; ctx.strokeStyle = live ? colors.fg : n.a.role === 'maint' ? '#1b3a5e' : colors.line;
-      ctx.globalAlpha = live ? 1 : 0.7; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
+      ctx.lineWidth = live ? 2 : 1 + spokeHeat * 0.8; ctx.strokeStyle = live ? colors.fg : n.a.role === 'maint' ? '#1b3a5e' : colors.line;
+      ctx.globalAlpha = live ? 1 : 0.4 + spokeHeat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
       ctx.stroke(); ctx.shadowBlur = 0;
     }
@@ -176,14 +187,19 @@
     for (const n of nodes) {
       const a = n.a, col = nodeColor(a), active = activeNames.has(a.name), blocked = S.asks.some((x) => x.agent === a.name);
       const selected = S.selectedAgent === a.id, hovered = hoverId === n.id;
+      const heat = a.role === 'entry' ? 0 : heatOf(a.name); // Atlas is always busy by construction; heat would say nothing
       const goal = hovered ? (a.role === 'entry' ? 1.35 : 1.7) : selected ? 1.25 : 1;
       n.k = (n.k || 1) + (goal - (n.k || 1)) * 0.2;
       const r = R(n);
       ctx.save(); ctx.translate(n.x, n.y); ctx.globalAlpha = match(a) ? 1 : 0.2;
       if (selected || hovered) { ctx.beginPath(); ctx.arc(0, 0, r + 5, 0, Math.PI * 2); ctx.strokeStyle = col; ctx.lineWidth = 0.6; ctx.globalAlpha *= 0.55; ctx.stroke(); ctx.globalAlpha = match(a) ? 1 : 0.2; }
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.fillStyle = active ? `color-mix(in srgb, ${col} ${20 + 10 * Math.sin(t / 160)}%, ${colors.bg})` : selected || hovered ? colors.bg4 : colors.bg2;
+      ctx.fillStyle = active ? `color-mix(in srgb, ${col} ${20 + 10 * Math.sin(t / 160)}%, ${colors.bg})`
+        : selected || hovered ? colors.bg4
+        : heat > 0.08 ? `color-mix(in srgb, ${col} ${Math.round(heat * 16)}%, ${colors.bg2})`
+        : colors.bg2;
       if (active || selected) { ctx.shadowColor = col; ctx.shadowBlur = 12; }
+      else if (heat > 0.15) { ctx.shadowColor = col; ctx.shadowBlur = heat * 7; } // a quiet, steady glow — not pulsing like "active" — for an agent that's been busy lately but isn't this instant
       ctx.fill(); ctx.shadowBlur = 0;
       ctx.strokeStyle = blocked ? colors.err : col; ctx.lineWidth = blocked ? 1.6 + 1.4 * (0.5 + 0.5 * Math.sin(t / 220)) : selected ? 2.6 : 1.6; ctx.stroke();
       ctx.fillStyle = col; ctx.font = `900 ${r * 0.9}px FA`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(iconOf(a.name), 0, 1);
@@ -260,7 +276,7 @@
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span class="mute">agents settle apart to avoid overlap · drag to move · click to edit</span>
+        <span class="mute">agents settle apart to avoid overlap · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>

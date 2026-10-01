@@ -133,6 +133,27 @@ type Dashboard struct {
 	Errors  []ErrorRow `json:"recent_errors"`
 }
 
+// ActivityByAgent counts LLM calls per agent in the last `window` — a lightweight sibling of Dashboard's own
+// by-agent breakdown, used by the Agents graph for a persistent "how much has this agent actually been used
+// lately" glow, distinct from whether it happens to be running at this exact instant.
+func (s *Store) ActivityByAgent(ctx context.Context, window time.Duration) (map[string]int, error) {
+	rows, err := s.DB.Query(ctx, `SELECT agent, count(*) FROM llm_calls WHERE agent<>'' AND ts >= $1 GROUP BY agent`, time.Now().Add(-window))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var agent string
+		var n int
+		if err := rows.Scan(&agent, &n); err != nil {
+			return nil, err
+		}
+		out[agent] = n
+	}
+	return out, rows.Err()
+}
+
 // Dashboard aggregates the last `days` days (1 → the last 24 hours in hourly buckets). tz is an IANA name
 // (empty → the server's zone) so that "a day" matches the user's calendar.
 func (s *Store) Dashboard(ctx context.Context, days int, tz string) (*Dashboard, error) {

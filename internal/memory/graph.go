@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // GraphNode and GraphEdge describe the fact graph for the Memory page.
 type GraphNode struct {
@@ -13,6 +16,11 @@ type GraphNode struct {
 	Conf     float64 `json:"confidence"`
 	Retired  bool    `json:"retired,omitempty"`
 	Links    int     `json:"links"`
+	// Hits and Decay drive the graph's "glow when used, fade as it dissolves" treatment: Hits is raw
+	// retrieval count, Decay is how much of its earned rank time has already eaten away (0 = fresh,
+	// approaching 1 = near Prune's floor) — see effRank.
+	Hits  int     `json:"hits"`
+	Decay float64 `json:"decay"`
 }
 
 type GraphEdge struct {
@@ -38,6 +46,7 @@ func (s *Service) Graph(ctx context.Context, bankID int64, history bool, limit i
 	g := &Graph{Nodes: []GraphNode{}, Edges: []GraphEdge{}}
 	rows, err := s.db.Query(ctx, `SELECT f.id, left(f.text, 240), b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END, b.kind, f.kind, f.rank, f.confidence,
 			f.valid_to IS NOT NULL, (SELECT count(*) FROM memory_links lk WHERE lk.a=f.id OR lk.b=f.id) AS nl,
+			f.hits, f.last_used, f.created_at, f.pinned,
 			count(*) OVER () AS total
 		FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
 		WHERE ($1=0 OR f.bank_id=$1) AND ($2 OR f.valid_to IS NULL)
@@ -52,10 +61,16 @@ func (s *Service) Graph(ctx context.Context, bankID int64, history bool, limit i
 	for rows.Next() {
 		var n GraphNode
 		var rk, cf float32
-		if err := rows.Scan(&n.ID, &n.Text, &n.Bank, &n.BankKind, &n.Kind, &rk, &cf, &n.Retired, &n.Links, &total); err != nil {
+		var lastUsed *time.Time
+		var created time.Time
+		var pinned bool
+		if err := rows.Scan(&n.ID, &n.Text, &n.Bank, &n.BankKind, &n.Kind, &rk, &cf, &n.Retired, &n.Links, &n.Hits, &lastUsed, &created, &pinned, &total); err != nil {
 			return nil, err
 		}
 		n.Rank, n.Conf = float64(rk), float64(cf)
+		if n.Rank > 0 {
+			n.Decay = 1 - effRank(n.Rank, lastUsed, created, pinned)/n.Rank
+		}
 		g.Nodes = append(g.Nodes, n)
 		in[n.ID] = true
 		ids = append(ids, n.ID)

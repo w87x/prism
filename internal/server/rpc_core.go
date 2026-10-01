@@ -196,6 +196,11 @@ func (s *Server) registerCore() {
 
 	// ── agents ──
 	rpc(s, "agents.list", func(ctx context.Context, _ none) ([]agent.Profile, error) { return a.Profiles.List(ctx) })
+	// call counts per agent over the last 24h, for the graph's persistent activity glow — not "is it running
+	// right now" (that's already live via run events) but "has it actually been doing anything lately".
+	rpc(s, "agents.activity", func(ctx context.Context, _ none) (map[string]int, error) {
+		return a.Metrics.ActivityByAgent(ctx, 24*time.Hour)
+	})
 	rpc(s, "agents.get", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (*agent.Profile, error) {
