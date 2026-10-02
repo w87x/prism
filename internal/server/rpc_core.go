@@ -295,6 +295,9 @@ func (s *Server) registerCore() {
 			return nil, err
 		}
 		out := map[string]any{"task": t}
+		if b := a.Tasks.Breakdown(ctx, t.ID); b != nil {
+			out["breakdown"] = b
+		}
 		if t.SessionID != nil {
 			if ms, err := a.Sessions.Messages(ctx, *t.SessionID); err == nil {
 				type m struct {

@@ -5,6 +5,7 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"prism/internal/textutil"
@@ -228,6 +229,24 @@ func (s *Store) SetSession(ctx context.Context, id, session int64) error {
 
 func (s *Store) AddTokens(ctx context.Context, id int64, in, out int) {
 	_, _ = s.db.Exec(ctx, `UPDATE tasks SET tokens_in=tokens_in+$2, tokens_out=tokens_out+$3 WHERE id=$1`, id, in, out)
+}
+
+// SetBreakdown stores the latest prompt-token breakdown of the run working on the task.
+func (s *Store) SetBreakdown(ctx context.Context, id int64, b map[string]int) {
+	if raw, err := json.Marshal(b); err == nil {
+		_, _ = s.db.Exec(ctx, `UPDATE tasks SET ctx_breakdown=$2 WHERE id=$1`, id, raw)
+	}
+}
+
+// Breakdown returns what SetBreakdown stored (nil if none).
+func (s *Store) Breakdown(ctx context.Context, id int64) map[string]int {
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT ctx_breakdown FROM tasks WHERE id=$1`, id).Scan(&raw); err != nil || len(raw) == 0 {
+		return nil
+	}
+	var b map[string]int
+	_ = json.Unmarshal(raw, &b)
+	return b
 }
 
 // Finish records the outcome and wakes waiters.

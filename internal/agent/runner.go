@@ -120,6 +120,8 @@ type activeRun struct {
 	tokensIn, tokensOut atomic.Int64
 	ctxTokens, window   atomic.Int64
 	task                atomic.Value // string: brief current task
+	calls               atomic.Int64 // tool calls started so far
+	breakdown           atomic.Value // map[string]int: prompt tokens by source, as of the latest turn
 	lastActive          atomic.Int64 // unix ms of the last sign of life: a model call, a tool call, tokens
 	approved            sync.Map     // tool name → true: user chose "allow for this task"
 	imgMu               sync.Mutex
@@ -174,6 +176,9 @@ type ActiveRun struct {
 	Started   int64  `json:"started"`
 	// LastActive is the unix ms of the run's last sign of life (see activeRun.touch).
 	LastActive int64 `json:"last_active"`
+	// Calls and Breakdown let a freshly loaded page show a run's progress, not just that it exists.
+	Calls     int64          `json:"calls"`
+	Breakdown map[string]int `json:"breakdown,omitempty"`
 }
 
 func (e *Engine) ActiveRuns() []ActiveRun {
@@ -182,7 +187,8 @@ func (e *Engine) ActiveRuns() []ActiveRun {
 	out := make([]ActiveRun, 0, len(e.runs))
 	for _, r := range e.runs {
 		t, _ := r.task.Load().(string)
-		out = append(out, ActiveRun{RunInfo: r.Info, TokensIn: r.tokensIn.Load(), TokensOut: r.tokensOut.Load(),
+		bd, _ := r.breakdown.Load().(map[string]int)
+		out = append(out, ActiveRun{Calls: r.calls.Load(), Breakdown: bd, RunInfo: r.Info, TokensIn: r.tokensIn.Load(), TokensOut: r.tokensOut.Load(),
 			Context: r.ctxTokens.Load(), Window: r.window.Load(), Task: t, Started: r.started.UnixMilli(), LastActive: r.lastActive.Load()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -459,8 +465,13 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		// turn finishes (run.usage below), so for a long response it sits frozen at 0 the entire time the agent is
 		// visibly generating — push what is already known (the prompt about to be sent) right away instead of
 		// waiting; token totals are unchanged from the last full turn, only context/window are fresher here.
+		bd := ctxBreakdown(sysTok, toolTok, view)
+		ar.breakdown.Store(bd)
+		if spec.Task != nil {
+			e.Tasks.SetBreakdown(ctx, spec.Task.ID, bd)
+		}
 		e.Emit("run.usage", map[string]any{"run": ar.Info.ID, "agent": p.Name, "tokens_in": ar.tokensIn.Load(), "tokens_out": ar.tokensOut.Load(),
-			"context": ar.ctxTokens.Load(), "window": window, "breakdown": ctxBreakdown(sysTok, toolTok, view)})
+			"context": ar.ctxTokens.Load(), "window": window, "breakdown": bd})
 
 		resp, err := e.chat(ctx, modelRef, sysPrompt, history, specs, ar, p.Name, &calib, func() {
 			// context overflow: compact hard and let the caller retry
@@ -1006,6 +1017,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	start := time.Now()
 	ar.touch()
 	defer ar.touch()
+	ar.calls.Add(1)
 	emit := func(phase string, ok bool, why ...string) {
 		ev := map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": brief(tc.Arguments, 140),
 			"phase": phase, "ok": ok, "ms": time.Since(start).Milliseconds()}

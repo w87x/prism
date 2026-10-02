@@ -308,7 +308,7 @@ export async function refreshAll() {
   if (hist) { S.chat = hist; if (hist.length) markRead(S.chatTopic, hist[hist.length - 1].id); }
   if (snap) {
     S.runs = {};
-    for (const r of snap.runs || []) S.runs[r.run] = { ...newRun(r), task_text: r.task_text, tokens_in: r.tokens_in, tokens_out: r.tokens_out, context: r.context, window: r.window, started: r.started };
+    for (const r of snap.runs || []) S.runs[r.run] = { ...newRun(r), task_text: r.task_text, tokens_in: r.tokens_in, tokens_out: r.tokens_out, context: r.context, window: r.window, started: r.started, calls: r.calls || 0, breakdown: r.breakdown, _baseCtx: r.context };
     S.asks = snap.asks || [];
     S.chatBusy = {};
     for (const r of snap.runs || []) if (r.is_chat && (r.depth || 0) === 0 && r.kind !== 'quick') S.chatBusy[r.chat_topic || ''] = true;

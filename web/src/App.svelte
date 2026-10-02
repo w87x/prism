@@ -97,7 +97,8 @@
   const setup = $derived(S.status?.setup);
   const needOnboarding = $derived(S.status && !S.skipOnboarding && (S.status.setup || !S.status.onboarded));
   const showOb = $derived(needOnboarding || S.onboardingOpen);
-  const otherAsks = $derived(S.page === 'chat' ? [] : S.asks);
+  // the chat page shows questions in its thinking panel, which is not drawn on a narrow screen — there they go in the bar too
+  const otherAsks = $derived(S.page === 'chat' && !narrow ? [] : S.asks);
 </script>
 
 {#if !wallOnly}
