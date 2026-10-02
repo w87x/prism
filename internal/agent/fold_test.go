@@ -76,3 +76,28 @@ func TestToolResultCapIsRoomyEarlyAndTightWhenFull(t *testing.T) {
 		t.Errorf("unknown window must be conservative, got %d", got)
 	}
 }
+
+func TestDedupeToolOutputsKeepsFirstAndRecentCopies(t *testing.T) {
+	blob := strings.Repeat("B", 3000)
+	var ms []Msg
+	for i := 0; i < 12; i++ {
+		ms = append(ms, Msg{Message: llm.Message{Role: "tool", Name: "shell", Content: blob}})
+	}
+	out := msgsOf(ms)
+	dedupeToolOutputs(ms, out)
+	if out[0].Content != blob {
+		t.Fatalf("the first copy must stay whole")
+	}
+	if !strings.HasPrefix(out[1].Content, "[identical to an earlier shell output") {
+		t.Fatalf("an old repeat was not deduped: %.60q", out[1].Content)
+	}
+	if out[11].Content != blob {
+		t.Fatalf("a repeat inside the recent window must stay verbatim")
+	}
+	short := []Msg{{Message: llm.Message{Role: "tool", Name: "x", Content: "ok"}}, {Message: llm.Message{Role: "tool", Name: "x", Content: "ok"}}}
+	o2 := msgsOf(short)
+	dedupeToolOutputs(short, o2)
+	if o2[1].Content != "ok" {
+		t.Fatalf("short outputs are not worth stubbing")
+	}
+}

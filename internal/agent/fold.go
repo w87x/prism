@@ -87,3 +87,28 @@ func toolResultCap(ctxTokens, window int64) int {
 	}
 	return toolResultCapTight
 }
+
+// dedupeToolOutputs replaces a repeat of an earlier identical tool output (same tool, same text, over
+// dedupeMinChars) with a pointer to it, in the model's view only. The FIRST copy stays untouched, so the
+// prompt prefix is stable as a run grows; copies in the newest messages stay verbatim. Run it after
+// foldFailures so a folded failure is not mistaken for content.
+func dedupeToolOutputs(ms []Msg, out []llm.Message) {
+	cutoff := len(ms) - foldKeepRecent
+	seen := map[string]bool{}
+	for i := range out {
+		m := out[i]
+		if m.Role != "tool" || len(m.Content) <= dedupeMinChars {
+			continue
+		}
+		key := m.Name + "\x00" + m.Content
+		if !seen[key] {
+			seen[key] = true
+			continue
+		}
+		if i < cutoff {
+			out[i].Content = fmt.Sprintf("[identical to an earlier %s output (%d chars) — not repeated]", m.Name, len(m.Content))
+		}
+	}
+}
+
+const dedupeMinChars = 400

@@ -576,6 +576,7 @@ const keepImages = 3
 func (e *Engine) msgsForModel(ctx context.Context, ms []Msg) []llm.Message {
 	out := msgsOf(ms)
 	foldFailures(ms, out)
+	dedupeToolOutputs(ms, out)
 	seen := 0
 	for i := len(ms) - 1; i >= 0; i-- {
 		if len(ms[i].ImageIDs) == 0 {
