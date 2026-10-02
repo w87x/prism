@@ -112,3 +112,51 @@ func dedupeToolOutputs(ms []Msg, out []llm.Message) {
 }
 
 const dedupeMinChars = 400
+
+const (
+	elideKeepRecent = 12   // newest messages never elided
+	elideMinChars   = 2500 // only bulky outputs are worth it
+	elideHead       = 700
+	elideTail       = 300
+)
+
+// elideStaleOutputs keeps the head and tail of an old, bulky, SUCCESSFUL tool output and drops the middle,
+// in the model's view only: by then the agent has acted on it, and re-reading is one tool call away.
+// Failures and duplicates are already one-liners by this point (they start with "[").
+func elideStaleOutputs(ms []Msg, out []llm.Message) {
+	cutoff := len(ms) - elideKeepRecent
+	for i := 0; i < cutoff; i++ {
+		m := out[i]
+		if m.Role != "tool" || strings.HasPrefix(m.Content, "[") {
+			continue
+		}
+		r := []rune(m.Content)
+		if len(r) <= elideMinChars {
+			continue
+		}
+		out[i].Content = string(r[:elideHead]) + fmt.Sprintf("\n…[%d chars of this older %s output omitted — call it again if you need them]…\n", len(r)-elideHead-elideTail, m.Name) + string(r[len(r)-elideTail:])
+	}
+}
+
+// foldedView is the history as the model should see it: stored messages with old failures folded, repeats
+// deduped and stale bulky outputs elided. The stored history itself is never changed.
+func foldedView(ms []Msg) []llm.Message {
+	out := msgsOf(ms)
+	foldFailures(ms, out)
+	dedupeToolOutputs(ms, out)
+	elideStaleOutputs(ms, out)
+	return out
+}
+
+// ctxBreakdown splits the estimated prompt into where the tokens go, for the live-run view.
+func ctxBreakdown(sys, toolSpecs int, view []llm.Message) map[string]int {
+	b := map[string]int{"system": sys, "tools": toolSpecs}
+	for _, m := range view {
+		k := m.Role
+		if k == "system" {
+			k = "user"
+		}
+		b[k] += llm.EstimateMessages([]llm.Message{m})
+	}
+	return b
+}

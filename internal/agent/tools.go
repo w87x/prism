@@ -83,7 +83,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
 						return
 					}
-					out[i] = formatTaskResult(t)
+					out[i] = formatDelegated(t)
 				}(i)
 			}
 			wg.Wait()
@@ -139,9 +139,20 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			if tainted && env.Taint != nil {
 				env.Taint()
 			}
-			return formatTaskResult(t), nil
+			return formatDelegated(t), nil
 		},
 	}
+}
+
+// maxDelegatedResult bounds a delegate's answer as it lands in the PARENT's context, where it is resent on
+// every remaining turn. The full text stays in the task record: task_status returns it uncapped.
+const maxDelegatedResult = 6000
+
+func formatDelegated(t tasks.Task) string {
+	if r := []rune(strings.TrimSpace(t.Result)); len(r) > maxDelegatedResult {
+		t.Result = string(r[:maxDelegatedResult]) + fmt.Sprintf("\n…[%d more chars not shown — task_status(%d) returns the full result]", len(r)-maxDelegatedResult, t.ID)
+	}
+	return formatTaskResult(t)
 }
 
 func formatTaskResult(t tasks.Task) string {

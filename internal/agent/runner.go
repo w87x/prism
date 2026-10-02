@@ -444,7 +444,9 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		specs := e.toolSpecs(active)
 		sysPrompt := e.buildSystem(ctx, spec, env, active)
 		// ── compaction (80% → 20% of the window) ──
-		est := int(float64(llm.EstimateMessages(msgsOf(history))+llm.EstimateTools(specs)+llm.EstimateTokens(sysPrompt)) * calib)
+		view := foldedView(history)
+		toolTok, sysTok := llm.EstimateTools(specs), llm.EstimateTokens(sysPrompt)
+		est := int(float64(llm.EstimateMessages(view)+toolTok+sysTok) * calib)
 		ar.ctxTokens.Store(int64(est))
 		if float64(est) > float64(window)*ctxCfg.CompactAt && len(history) > 6 {
 			if nh, err := e.compact(ctx, spec, sess, history, int(float64(window)*ctxCfg.Target), false); err == nil {
@@ -458,7 +460,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		// visibly generating — push what is already known (the prompt about to be sent) right away instead of
 		// waiting; token totals are unchanged from the last full turn, only context/window are fresher here.
 		e.Emit("run.usage", map[string]any{"run": ar.Info.ID, "agent": p.Name, "tokens_in": ar.tokensIn.Load(), "tokens_out": ar.tokensOut.Load(),
-			"context": ar.ctxTokens.Load(), "window": window})
+			"context": ar.ctxTokens.Load(), "window": window, "breakdown": ctxBreakdown(sysTok, toolTok, view)})
 
 		resp, err := e.chat(ctx, modelRef, sysPrompt, history, specs, ar, p.Name, &calib, func() {
 			// context overflow: compact hard and let the caller retry
@@ -574,9 +576,7 @@ const keepImages = 3
 
 // msgsForModel is msgsOf with the picture bytes loaded, for the request to the model.
 func (e *Engine) msgsForModel(ctx context.Context, ms []Msg) []llm.Message {
-	out := msgsOf(ms)
-	foldFailures(ms, out)
-	dedupeToolOutputs(ms, out)
+	out := foldedView(ms)
 	seen := 0
 	for i := len(ms) - 1; i >= 0; i-- {
 		if len(ms[i].ImageIDs) == 0 {

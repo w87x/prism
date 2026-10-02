@@ -101,3 +101,34 @@ func TestDedupeToolOutputsKeepsFirstAndRecentCopies(t *testing.T) {
 		t.Fatalf("short outputs are not worth stubbing")
 	}
 }
+
+func TestElideStaleOutputsKeepsHeadTailAndSparesRecentAndSmall(t *testing.T) {
+	big := strings.Repeat("H", 700) + strings.Repeat("m", 5000) + strings.Repeat("T", 300)
+	var ms []Msg
+	ms = append(ms, Msg{Message: llm.Message{Role: "tool", Name: "file_read", Content: big}})
+	ms = append(ms, Msg{Message: llm.Message{Role: "tool", Name: "file_read", Content: "small"}})
+	for i := 0; i < 12; i++ {
+		ms = append(ms, Msg{Message: llm.Message{Role: "tool", Name: "file_read", Content: big}})
+	}
+	view := foldedView(ms)
+	if !strings.HasPrefix(view[0].Content, strings.Repeat("H", 700)) || !strings.HasSuffix(view[0].Content, strings.Repeat("T", 300)) || len(view[0].Content) > 1300 {
+		t.Fatalf("old bulky output not elided to head+tail (len %d)", len(view[0].Content))
+	}
+	if view[1].Content != "small" {
+		t.Fatalf("small output must be untouched")
+	}
+	if view[len(view)-1].Content != big {
+		t.Fatalf("recent output must be untouched")
+	}
+	if ms[0].Content != big {
+		t.Fatalf("stored history must not change")
+	}
+}
+
+func TestCtxBreakdownSumsByRole(t *testing.T) {
+	view := []llm.Message{{Role: "user", Content: strings.Repeat("a", 400)}, {Role: "tool", Content: strings.Repeat("b", 4000)}}
+	b := ctxBreakdown(50, 70, view)
+	if b["system"] != 50 || b["tools"] != 70 || b["tool"] <= b["user"] || b["user"] == 0 {
+		t.Fatalf("unexpected breakdown %v", b)
+	}
+}

@@ -214,7 +214,7 @@ function wire() {
   });
   on('run.usage', (e) => {
     const r = S.runs[e.run];
-    if (r) Object.assign(r, { tokens_in: e.tokens_in, tokens_out: e.tokens_out, context: e.context, window: e.window, _baseCtx: e.context, _estChars: 0 });
+    if (r) Object.assign(r, { tokens_in: e.tokens_in, tokens_out: e.tokens_out, context: e.context, window: e.window, breakdown: e.breakdown || r.breakdown, _baseCtx: e.context, _estChars: 0 });
   });
   on('run.compacted', (e) => { const r = S.runs[e.run]; if (r) { r.buf += '\n⟲ context compacted\n'; r.compactions = (r.compactions || 0) + 1; } });
   on('run.end', (e) => {
