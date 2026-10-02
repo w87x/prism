@@ -458,6 +458,10 @@ func (m *Manager) tabCtx(id string) (context.Context, error) {
 	return tab, nil
 }
 
+// Tab returns the named tab's context (created on first use, persistent profile) for callers that drive one
+// specific site themselves, like the consult package.
+func (m *Manager) Tab(id string) (context.Context, error) { return m.tabCtx(sanitizeID(id)) }
+
 // closeTab closes one named tab; reports whether it was actually open.
 func (m *Manager) closeTab(id string) bool {
 	m.mu.Lock()

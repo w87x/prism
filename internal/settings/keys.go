@@ -17,6 +17,7 @@ const (
 	KeyRuntime    = "runtime"
 	KeyElevenLabs = "elevenlabs"
 	KeyGuardrails = "guardrails"
+	KeyConsult    = "consult"
 )
 
 type General struct {
@@ -78,6 +79,30 @@ type Browser struct {
 	Headless  bool   `json:"headless"`
 	RemoteURL string `json:"remote_url"` // ws:// or http:// DevTools endpoint of a running Chrome
 	ChromeBin string `json:"chrome_bin"`
+}
+
+// Consult configures the outside models agents may ask for a second opinion (see package consult).
+type Consult struct {
+	CodexBin   string `json:"codex_bin"`   // empty → "codex" on PATH
+	CodexModel string `json:"codex_model"` // empty → Codex's own default
+	// CodexEffort is the default reasoning effort: minimal | low | medium | high | xhigh (empty → Codex's default).
+	CodexEffort string `json:"codex_effort"`
+	// Sites overrides or adds chat websites (see consult.builtinSites): keyed by a short lowercase name.
+	Sites map[string]ConsultSite `json:"sites"`
+}
+
+// ConsultSite describes how to drive one chat website. Everything but URL is an optional CSS selector: with
+// no Input PRISM looks for the page's composer itself, with no Send it presses Enter, and with no Answer it
+// reads the page text that appeared after sending.
+type ConsultSite struct {
+	Label    string `json:"label"`
+	URL      string `json:"url"`
+	Input    string `json:"input"`
+	Send     string `json:"send"`
+	Stop     string `json:"stop"`   // present while the site is still generating
+	Answer   string `json:"answer"` // matches each assistant message; the last one is the answer
+	Login    string `json:"login"`  // present when signed out
+	Disabled bool   `json:"disabled"`
 }
 
 type Autonomy struct {
