@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"prism/internal/browser"
+	"prism/internal/consult"
 	"prism/internal/docsearch"
 	"prism/internal/foldermap"
 	"prism/internal/ingest"
@@ -34,6 +35,7 @@ type Extensions struct {
 	Skills   *skills.Store
 	Web      *web.Service
 	Browser  *browser.Manager
+	Consult  *consult.Service
 	MCP      *mcp.Manager
 	Sched    *scheduler.Service
 	Vault    *obsidian.Vault
@@ -104,6 +106,8 @@ func (a *App) buildExtensions(ctx context.Context) error {
 			return out
 		}}
 	x.Web.RegisterTools(a.Tools)
+	x.Consult = &consult.Service{Settings: a.Settings, Browser: x.Browser, LLM: a.LLM, DataDir: a.Cfg.DataDir, Emit: a.Emit}
+	consult.RegisterTools(a.Tools, x.Consult)
 
 	// MCP
 	x.MCP = mcp.NewManager(a.DB.Pool, a.Tools)

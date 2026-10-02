@@ -10,6 +10,7 @@ import (
 
 	"prism/internal/agent"
 	"prism/internal/app"
+	"prism/internal/consult"
 	"prism/internal/docsearch"
 	"prism/internal/foldermap"
 	"prism/internal/ingest"
@@ -333,6 +334,22 @@ func (s *Server) registerWeb() {
 	rpc(s, "browser.status", func(ctx context.Context, _ none) (map[string]any, error) {
 		st, d := a.Ext.Browser.State()
 		return map[string]any{"state": st, "detail": d, "available": a.Ext.Browser.Available()}, nil
+	})
+	rpc(s, "consult.status", func(ctx context.Context, _ none) (map[string]any, error) { return a.Ext.Consult.Status(ctx), nil })
+	rpc(s, "consult.test", func(ctx context.Context, r struct {
+		Provider string `json:"provider"`
+	}) (map[string]any, error) {
+		return a.Ext.Consult.Test(ctx, r.Provider)
+	})
+	rpc(s, "consult.tune", func(ctx context.Context, r struct {
+		Provider string `json:"provider"`
+	}) (*consult.TuneReport, error) {
+		return a.Ext.Consult.Tune(ctx, r.Provider)
+	})
+	rpc(s, "consult.cancel", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Ext.Consult.Cancel(r.ID)
 	})
 	rpc(s, "browser.stop", func(ctx context.Context, _ none) (bool, error) { a.Ext.Browser.Stop(); return true, nil })
 	rpc(s, "browser.test", func(ctx context.Context, r struct {

@@ -187,6 +187,55 @@
   let br = $state({ headless: true, remote_url: '', chrome_bin: '' });
   let brs = $state(null);
   let fs = $state({ write_roots: [], read_deny: [] });
+  // ── consulting models (Codex CLI + chat websites) ──
+  let cs = $state({ codex_bin: '', codex_model: '', codex_effort: '', sites: {} });
+  let cst = $state(null); // consult.status
+  let ctest = $state({}); // provider -> test result
+  let siteForm = $state(null);
+  let siteOpen = $state(false);
+  const effortOpts = [{ value: '', label: '(Codex default)' }, ...['minimal', 'low', 'medium', 'high', 'xhigh'].map((v) => ({ value: v, label: v }))];
+  const siteFields = ['label', 'url', 'input', 'send', 'stop', 'answer', 'login'];
+  async function loadConsult() {
+    cs = await loadSetting('consult', cs);
+    if (!cs.sites) cs.sites = {};
+    cst = await call('consult.status', {}, { quiet: true });
+  }
+  async function saveConsult() { await saveSetting('consult', cs, 'Consulting settings saved'); cst = await call('consult.status', {}, { quiet: true }); }
+  async function testConsult(name) {
+    ctest[name] = { busy: true };
+    const r = await call('consult.test', { provider: name }, { quiet: true, throw: true }).catch((e) => ({ ok: false, error: e.message }));
+    ctest[name] = r;
+  }
+  let tuned = $state({}); // provider -> tune report
+  async function tuneSite(site) {
+    tuned[site.name] = { busy: true };
+    const r = await call('consult.tune', { provider: site.name }, { quiet: true, throw: true }).catch((e) => ({ ok: false, error: e.message, steps: [] }));
+    tuned[site.name] = r;
+    if (r.ok) {
+      cs.sites[site.name] = { ...(cs.sites[site.name] || {}), ...r.site };
+      await saveConsult();
+      toast(`${site.label}: selectors found and verified`);
+    }
+  }
+  async function toggleSite(site, on) {
+    cs.sites[site.name] = { ...(cs.sites[site.name] || {}), disabled: !on };
+    await saveConsult();
+  }
+  function editSite(site) {
+    siteForm = site ? { name: site.name, builtin: site.builtin, orig: Object.fromEntries(siteFields.map((f) => [f, site[f] || ''])), ...Object.fromEntries(siteFields.map((f) => [f, site[f] || ''])) }
+      : { name: '', builtin: false, orig: {}, ...Object.fromEntries(siteFields.map((f) => [f, ''])) };
+    siteOpen = true;
+  }
+  async function saveSite() {
+    const name = siteForm.name.trim().toLowerCase();
+    const prev = cs.sites[name] || {};
+    const next = { ...prev };
+    for (const f of siteFields) if (siteForm[f] !== siteForm.orig[f] || !siteForm.builtin) next[f] = siteForm[f];
+    cs.sites[name] = next;
+    siteOpen = false;
+    await saveConsult();
+  }
+  async function removeSite(name) { delete cs.sites[name]; await saveConsult(); }
   let btest = $state(null);
   const sounds = ['Glass', 'Ping', 'Pop', 'Tink', 'Submarine', 'Hero', 'Funk', 'Basso', ''].map((s) => ({ value: s, label: s || '(silent)' }));
   async function loadInt() {
@@ -197,6 +246,7 @@
     br = await loadSetting('browser', br);
     brs = await call('browser.status', {}, { quiet: true });
     fs = await loadSetting('fs', fs);
+    loadConsult();
   }
   $effect(() => { if (tab === 'integrations') untrack(() => { loadInt(); loadEl(); loadMail(); }); });
   $effect(() => listen('status', () => { if (tab === 'integrations') call('telegram.status', {}, { quiet: true }).then((r) => r && (tgs = r)); }));
@@ -223,6 +273,7 @@
   const elModels = [{ value: 'eleven_flash_v2_5', label: 'Flash v2.5 — 0.5 credit/char, fast, 32 languages' }, { value: 'eleven_multilingual_v2', label: 'Multilingual v2 — 1 credit/char, richer' }, { value: 'eleven_turbo_v2_5', label: 'Turbo v2.5 — 0.5 credit/char' }];
   async function saveBrowser() { await saveSetting('browser', br, 'Browser settings saved'); brs = await call('browser.status', {}, { quiet: true }); }
   async function testBrowser() { btest = { busy: true }; const r = await call('browser.test', { url: 'https://example.com' }, { quiet: true, throw: true }).catch((e) => ({ error: e.message })); btest = r.error ? { err: r.error } : { ok: `“${r.title}” · ${r.bytes} bytes · ${r.ms} ms` }; brs = await call('browser.status', {}, { quiet: true }); }
+  $effect(() => listen('consult.update', () => { if (tab === 'integrations') call('consult.status', {}, { quiet: true }).then((r) => r && (cst = r)); }));
   const stLed = (s) => ({ ok: 'ok', error: 'error', standby: 'standby', warn: 'warn', off: 'off' })[s] || 'off';
 
   // ── logs ──
@@ -417,6 +468,39 @@
             <div class="row"><Button variant="primary" onclick={saveBrowser}>Save</Button><Button onclick={testBrowser} loading={btest?.busy}>Test render</Button><Button variant="ghost" onclick={() => call('browser.stop').then(() => toast('Browser closed'))}>Stop</Button></div>
             {#if btest?.ok}<div class="sm hi">✔ {btest.ok}</div>{/if}{#if btest?.err}<div class="sm err">✗ {btest.err}</div>{/if}
           </Panel>
+          <Panel title="Consulting models">
+            {#snippet right()}<span class="sm dim">default: {cst?.default || '—'}</span>{/snippet}
+            <div class="sm mute">Agents can ask an outside model for a detailed plan or second opinion (the <code>consult</code> tool) using your subscriptions, no API keys. Questions are sent out verbatim: the consultant never sees your files. Free tiers work too — a site you are not signed in to is used anonymously if it allows it.</div>
+            <div class="row"><Led state={cst?.codex?.found ? 'ok' : 'off'} size={8} /><b class="hi">Codex CLI</b>
+              <span class="sm mute grow ellipsis">{cst?.codex?.found ? cst.codex.path : (cst?.codex?.detail || '')}</span>
+              <Button size="sm" onclick={() => testConsult('codex')} loading={ctest.codex?.busy} disabled={!cst?.codex?.found}>Test</Button></div>
+            {#if ctest.codex && !ctest.codex.busy}<div class="sm {ctest.codex.ok ? 'hi' : 'err'}">{ctest.codex.ok ? `✔ “${ctest.codex.answer}” · ${(ctest.codex.ms / 1000).toFixed(1)} s` : `✗ ${ctest.codex.error}`}</div>{/if}
+            <div class="two">
+              <Field label="Codex model" hint="empty = Codex's default"><Input bind:value={cs.codex_model} mono placeholder="gpt-5-codex" /></Field>
+              <Field label="Reasoning effort"><Select bind:value={cs.codex_effort} options={effortOpts} /></Field>
+            </div>
+            <Field label="Codex binary" hint="empty = find it automatically"><Input bind:value={cs.codex_bin} mono /></Field>
+            <div class="row"><Button variant="primary" onclick={saveConsult}>Save</Button></div>
+            <div class="sm hi" style="margin-top:10px">Chat websites <span class="mute">(driven in PRISM's browser — turn Headless off to sign in or pass a bot check)</span></div>
+            {#each cst?.sites || [] as site (site.name)}
+              <div class="row">
+                <Switch checked={!site.disabled} onchange={(v) => toggleSite(site, v)} />
+                <b class="hi">{site.label}</b>
+                <Badge tone={site.verified ? 'ok' : 'mute'}>{site.verified ? 'verified' : site.builtin ? 'untested' : 'custom'}</Badge>
+                <span class="sm mute grow ellipsis">{site.url}</span>
+                <Button size="sm" onclick={() => testConsult(site.name)} loading={ctest[site.name]?.busy} disabled={site.disabled}>Test</Button>
+                <Button size="sm" variant="accent" onclick={() => tuneSite(site)} loading={tuned[site.name]?.busy} title="Let the chat model study the page and work out the selectors, then verify them with a real message">Auto-detect</Button>
+                <Button size="sm" variant="ghost" onclick={() => editSite(site)}>Edit</Button>
+                {#if !site.builtin}<Button size="sm" variant="ghost" onclick={() => removeSite(site.name)}><Icon name="trash" size={11} /></Button>{/if}
+              </div>
+              {#if ctest[site.name] && !ctest[site.name].busy}<div class="sm {ctest[site.name].ok ? 'hi' : 'err'}">{ctest[site.name].ok ? `✔ “${ctest[site.name].answer}”${ctest[site.name].pong ? '' : ' (answered, but not what was asked — check the selectors)'} · ${(ctest[site.name].ms / 1000).toFixed(1)} s` : `✗ ${ctest[site.name].error}`}</div>{/if}
+              {#if tuned[site.name] && !tuned[site.name].busy}
+                <details class="sm"><summary class={tuned[site.name].ok ? 'hi' : 'err'}>{tuned[site.name].ok ? '✔ selectors found and verified' : `✗ ${tuned[site.name].error}`}</summary>
+                  {#each tuned[site.name].steps || [] as st}<div class="mute">{st}</div>{/each}</details>
+              {/if}
+            {/each}
+            <div class="row"><Button size="sm" onclick={() => editSite(null)}><Icon name="plus" size={11} /> Add site</Button></div>
+          </Panel>
           <Panel title="File access">
             <Field label="Extra writable folders" hint="agents may write only in the PRISM data dir plus these"><Tags bind:value={fs.write_roots} placeholder="~/Documents/agents" /></Field>
             <Field label="Extra denied folders" hint="~/.ssh, ~/.aws, keychains… are always denied"><Tags bind:value={fs.read_deny} /></Field>
@@ -536,6 +620,25 @@
     <Switch bind:checked={prov.enabled} label="enabled" />
   {/if}
   {#snippet footer()}<Button variant="ghost" onclick={() => (pOpen = false)}>Cancel</Button><Button variant="primary" disabled={!prov?.name?.trim()} onclick={saveProv}>Save</Button>{/snippet}
+</Modal>
+
+<Modal bind:open={siteOpen} title={siteForm?.builtin ? `Edit ${siteForm.label || siteForm.name}` : 'Chat website'} width={620}>
+  {#if siteForm}
+    <div class="two">
+      <Field label="Name" hint="what agents pass as provider: lowercase, e.g. mistral"><Input bind:value={siteForm.name} disabled={siteForm.builtin} placeholder="mistral" /></Field>
+      <Field label="Label"><Input bind:value={siteForm.label} placeholder="Mistral" /></Field>
+    </div>
+    <Field label="Chat URL" hint="a page that opens a fresh chat"><Input bind:value={siteForm.url} mono placeholder="https://chat.mistral.ai/chat" /></Field>
+    <div class="sm mute">All selectors are optional CSS. Left empty, PRISM finds the text box itself, presses Enter to send, and reads the page text that appears afterwards (slower, since it waits for the page to go quiet).</div>
+    <div class="two">
+      <Field label="Text box"><Input bind:value={siteForm.input} mono placeholder="textarea" /></Field>
+      <Field label="Send button" hint="empty = press Enter"><Input bind:value={siteForm.send} mono /></Field>
+      <Field label="Answer messages" hint="matches every reply; the last one is used"><Input bind:value={siteForm.answer} mono /></Field>
+      <Field label="Still generating" hint="e.g. the Stop button"><Input bind:value={siteForm.stop} mono /></Field>
+    </div>
+    <Field label="Signed-out marker" hint="present only when you are not logged in"><Input bind:value={siteForm.login} mono /></Field>
+  {/if}
+  {#snippet footer()}<Button variant="ghost" onclick={() => (siteOpen = false)}>Cancel</Button><Button variant="primary" disabled={!/^[a-z][a-z0-9_-]{0,23}$/.test(siteForm?.name?.trim().toLowerCase() || '') || !/^https?:\/\//.test(siteForm?.url || '')} onclick={saveSite}>Save</Button>{/snippet}
 </Modal>
 
 <Modal bind:open={dOpen} title="Models on {disc.provider?.name || ''}" width={900}>
