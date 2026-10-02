@@ -85,6 +85,10 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 		if st != nil && !st.IsDir() {
 			if strings.HasPrefix(p, "assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				// index.html (and the manifest, icons) name the current hashed bundle: a cached copy — iOS home-screen
+				// apps keep one aggressively — pins the app to an old build. Always revalidate them.
+				w.Header().Set("Cache-Control", "no-cache")
 			}
 			http.ServeFileFS(w, r, s.UI, p)
 			return
