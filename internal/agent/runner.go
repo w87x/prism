@@ -575,6 +575,7 @@ const keepImages = 3
 // msgsForModel is msgsOf with the picture bytes loaded, for the request to the model.
 func (e *Engine) msgsForModel(ctx context.Context, ms []Msg) []llm.Message {
 	out := msgsOf(ms)
+	foldFailures(ms, out)
 	seen := 0
 	for i := len(ms) - 1; i >= 0; i-- {
 		if len(ms[i].ImageIDs) == 0 {
@@ -1158,9 +1159,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		guard.succeeded(tc.Name)
 	}
 	out = textutil.Clean(out)
-	if n := len([]rune(out)); n > maxToolResultChars {
+	if cp := toolResultCap(ar.ctxTokens.Load(), ar.window.Load()); len([]rune(out)) > cp {
 		r := []rune(out)
-		out = string(r[:maxToolResultChars]) + fmt.Sprintf("\n…[truncated %d chars — narrow the request or page through it]", n-maxToolResultChars)
+		out = string(r[:cp]) + fmt.Sprintf("\n…[truncated %d chars — narrow the request or page through it]", len(r)-cp)
 	}
 	if warn != "" {
 		out += "\n" + warn
