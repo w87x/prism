@@ -104,32 +104,32 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 	return sb.String()
 }
 
-// catalog lists specialists for the entry agent (compact; agent_find covers the rest).
+// catalog lists the specialists for the entry agent as bare names grouped by area: this is in Atlas's
+// prompt on every turn, so descriptions stay out of it — agent_find returns them on demand, and a delegation
+// that names no agent is routed to the best match. Kept short on purpose.
 func (e *Engine) catalog(ctx context.Context) string {
 	ps, err := e.Profiles.List(ctx)
 	if err != nil {
 		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString("\n## Specialists you can delegate to (agent_find searches by traits)\n")
-	n := 0
+	groups := map[string][]string{}
+	var order []string
 	for _, p := range ps {
 		if !p.Enabled || p.Role == RoleEntry {
 			continue
 		}
-		if n >= 30 {
-			sb.WriteString("…more available via agent_find\n")
-			break
+		if _, ok := groups[p.Group]; !ok {
+			order = append(order, p.Group)
 		}
-		d := p.Description
-		if r := []rune(d); len(r) > 110 {
-			d = string(r[:110]) + "…"
-		}
-		fmt.Fprintf(&sb, "- %s [%s]: %s\n", p.Name, p.Group, d)
-		n++
+		groups[p.Group] = append(groups[p.Group], p.Name)
 	}
-	if n == 0 {
+	var sb strings.Builder
+	sb.WriteString("\n## Specialists (agent_find shows what each does; delegate with no agent picks the best match)\n")
+	if len(order) == 0 {
 		sb.WriteString("(none yet — ask Forge to create one)\n")
+	}
+	for _, g := range order {
+		fmt.Fprintf(&sb, "- %s: %s\n", g, strings.Join(groups[g], ", "))
 	}
 	return sb.String()
 }

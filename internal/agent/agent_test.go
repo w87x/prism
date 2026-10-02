@@ -92,7 +92,7 @@ func TestAtlasDelegatesAndSynthesizes(t *testing.T) {
 		role, content, _ := msgAt(req, -1)
 		switch {
 		case strings.Contains(sys, "You are Atlas") && role == "user":
-			if !strings.Contains(sys, "Scout [Web]") {
+			if !strings.Contains(sys, "Web: Scout") {
 				return testutil.Reply{Content: "catalog missing Scout"}
 			}
 			return testutil.Reply{Tools: []llm.ToolCall{tc("d1", "delegate", map[string]any{"tasks": []map[string]string{{"agent": "Scout", "instruction": "find milk price"}}})}}

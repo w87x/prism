@@ -132,3 +132,27 @@ func TestCtxBreakdownSumsByRole(t *testing.T) {
 		t.Fatalf("unexpected breakdown %v", b)
 	}
 }
+
+func TestFoldDelegationsKeepsHeaderAndPointerButNotNeedsInput(t *testing.T) {
+	done := "## Task #212 → Cipher [done]\n" + strings.Repeat("Uploaded the files and verified each one. ", 40)
+	wait := "## Task #213 → Fetch [needs input]\nQuestion: which folder?\n(Answer it yourself…)"
+	ms := []Msg{{Message: llm.Message{Role: "tool", Name: "delegate", Content: done + "\n\n" + wait}}}
+	for i := 0; i < 8; i++ {
+		ms = append(ms, Msg{Message: llm.Message{Role: "user", Content: "x"}})
+	}
+	view := foldedView(ms)
+	got := view[0].Content
+	if !strings.Contains(got, "## Task #212 → Cipher [done]") || !strings.Contains(got, "task_status(212)") || len(got) > 700 {
+		t.Fatalf("delegation not folded to header+pointer (len %d): %q", len(got), got)
+	}
+	if !strings.Contains(got, "Question: which folder?") {
+		t.Fatalf("a task waiting for input must stay whole: %q", got)
+	}
+	if ms[0].Content != done+"\n\n"+wait {
+		t.Fatalf("stored history changed")
+	}
+	recent := []Msg{{Message: llm.Message{Role: "tool", Name: "delegate", Content: done}}}
+	if r := foldedView(recent); r[0].Content != done {
+		t.Fatalf("a recent delegation result must stay whole")
+	}
+}

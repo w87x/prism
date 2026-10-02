@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"prism/internal/llm"
@@ -143,6 +144,7 @@ func elideStaleOutputs(ms []Msg, out []llm.Message) {
 func foldedView(ms []Msg) []llm.Message {
 	out := msgsOf(ms)
 	foldFailures(ms, out)
+	foldDelegations(ms, out)
 	dedupeToolOutputs(ms, out)
 	elideStaleOutputs(ms, out)
 	return out
@@ -159,4 +161,41 @@ func ctxBreakdown(sys, toolSpecs int, view []llm.Message) map[string]int {
 		b[k] += llm.EstimateMessages([]llm.Message{m})
 	}
 	return b
+}
+
+const (
+	delegationKeepRecent = 6   // newest messages keep their delegation results whole
+	delegationMinChars   = 400 // a short result is not worth folding
+	delegationKeepChars  = 200 // what survives of each task's answer
+)
+
+var taskHeader = regexp.MustCompile(`^## Task #(\d+) → (.+?) \[([^\]]+)\]`)
+
+// foldDelegations shrinks OLD results of delegate / ask_colleague in the model's view to one short entry per
+// task: its header (id, agent, status) and the first sentences of the answer, plus where the full text lives.
+// This is what keeps the entry agent's history from growing by a whole sub-agent report per delegation; the
+// full result stays in the task record (task_status). Tasks that still need an answer are left whole.
+func foldDelegations(ms []Msg, out []llm.Message) {
+	cutoff := len(ms) - delegationKeepRecent
+	for i := 0; i < cutoff; i++ {
+		m := out[i]
+		if m.Role != "tool" || (m.Name != "delegate" && m.Name != "ask_colleague") || len(m.Content) < delegationMinChars {
+			continue
+		}
+		var parts []string
+		for _, sec := range strings.Split("\n"+m.Content, "\n## ")[1:] {
+			sec = "## " + sec
+			head, body, _ := strings.Cut(sec, "\n")
+			mm := taskHeader.FindStringSubmatch(head)
+			if mm == nil || strings.HasPrefix(mm[3], "needs input") {
+				parts = append(parts, strings.TrimSpace(sec))
+				continue
+			}
+			line := brief(body, delegationKeepChars)
+			parts = append(parts, fmt.Sprintf("%s\n%s (older result shortened — full text: task_status(%s))", head, line, mm[1]))
+		}
+		if len(parts) > 0 {
+			out[i].Content = strings.Join(parts, "\n\n")
+		}
+	}
 }

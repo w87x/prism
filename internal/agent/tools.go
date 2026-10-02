@@ -44,8 +44,8 @@ func (e *Engine) toolDelegate() *tools.Tool {
 		Name: "delegate", Category: "agents", Risk: tools.RiskRead,
 		Description: "Delegate work to specialist agents. Each item runs as its own task in an isolated context, in parallel; results come back together. " +
 			"Give every instruction full context — the agent does not see this conversation. To answer an agent's question or continue its task, pass its task_id and your reply as the instruction.",
-		Params: tools.Obj("tasks", tools.ObjList("tasks", "work items", "agent,instruction",
-			tools.Str("agent", "agent name (see the specialists list or agent_find)"),
+		Params: tools.Obj("tasks", tools.ObjList("tasks", "work items", "instruction",
+			tools.Str("agent", "agent name (see the specialists list or agent_find); leave out and the best-matching specialist is chosen"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
 			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
@@ -77,7 +77,15 @@ func (e *Engine) toolDelegate() *tools.Tool {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					t, tn, err := e.delegateOne(ctx, env, it.Agent, it.Instruction, it.Title, it.TaskID, false)
+					agentName := strings.TrimSpace(it.Agent)
+					if agentName == "" && it.TaskID == 0 {
+						var perr error
+						if agentName, perr = e.bestSpecialist(ctx, it.Instruction, env.Agent); perr != nil {
+							out[i] = "## delegation — error\n" + perr.Error()
+							return
+						}
+					}
+					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false)
 					tainted[i] = tn
 					if err != nil {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
@@ -118,18 +126,9 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			}
 			name := strings.TrimSpace(a.Agent)
 			if name == "" {
-				ps, err := e.Profiles.Search(ctx, a.Request, 12)
-				if err != nil {
+				var err error
+				if name, err = e.bestSpecialist(ctx, a.Request, env.Agent); err != nil {
 					return "", err
-				}
-				for _, p := range ps {
-					if p.Role == RoleWorker && p.Enabled && !strings.EqualFold(p.Name, env.Agent) {
-						name = p.Name
-						break
-					}
-				}
-				if name == "" {
-					return "", errors.New("no specialist matches that request; do it yourself, or say in your answer what is missing")
 				}
 			}
 			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true)
@@ -153,6 +152,21 @@ func formatDelegated(t tasks.Task) string {
 		t.Result = string(r[:maxDelegatedResult]) + fmt.Sprintf("\n…[%d more chars not shown — task_status(%d) returns the full result]", len(r)-maxDelegatedResult, t.ID)
 	}
 	return formatTaskResult(t)
+}
+
+// bestSpecialist picks the enabled worker agent that best matches a request (never the caller itself,
+// the entry agent or a maintenance agent — Profiles.Search already excludes those).
+func (e *Engine) bestSpecialist(ctx context.Context, request, caller string) (string, error) {
+	ps, err := e.Profiles.Search(ctx, request, 12)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range ps {
+		if p.Role == RoleWorker && p.Enabled && !strings.EqualFold(p.Name, caller) {
+			return p.Name, nil
+		}
+	}
+	return "", errors.New("no specialist matches that request; do it yourself, or say in your answer what is missing")
 }
 
 func formatTaskResult(t tasks.Task) string {
