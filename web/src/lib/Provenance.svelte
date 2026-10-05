@@ -4,8 +4,17 @@
 
   let { id, onopen } = $props();
   let p = $state(null);
+  let sources = $state([]);
+  let audit = $state([]);
   let loaded = 0;
-  $effect(() => { if (id && id !== loaded) { loaded = id; p = null; call('memory.provenance', { id }, { quiet: true }).then((r) => (p = r)); } });
+  $effect(() => {
+    if (id && id !== loaded) {
+      loaded = id; p = null; sources = []; audit = [];
+      call('memory.provenance', { id }, { quiet: true }).then((r) => (p = r));
+      call('memory.fact_evidence', { id }, { quiet: true }).then((r) => (sources = r || []));
+      call('memory.fact_audit', { id, limit: 20 }, { quiet: true }).then((r) => (audit = r || []));
+    }
+  });
   const tone = { you: 'ok', confirmed: 'ok', document: 'accent', web: 'attn', agent: 'accent', conversation: 'mute', reflection: 'accent', analysis: 'accent' };
 </script>
 
@@ -36,8 +45,22 @@
       <div class="sm mute">In conflict with</div>
       {#each p.contradicts as f (f.id)}<div class="hv"><button type="button" class="lk" onclick={() => onopen?.(f.id)}>{f.text}</button></div>{/each}
     {/if}
+    {#if sources.length}
+      <div class="sm mute">Sources</div>
+      {#each sources as e (e.id)}
+        <div class="hv" title={e.note}>
+          <Badge tone={e.supports ? 'ok' : 'warn'}>{e.supports ? 'supports' : 'refutes'}</Badge>
+          <span class="sm grow">{e.source_ref}</span>
+          <span class="sm mute nowrap">{e.group || 'unknown origin'}</span>
+        </div>
+      {/each}
+    {/if}
     <div class="sm mute">Timeline</div>
     {#each p.events as e}<div class="sm ev">{e}</div>{/each}
+    {#if audit.length}
+      <div class="sm mute">Audit trail</div>
+      {#each audit as a (a.id)}<div class="sm ev">{stamp(a.at)} · {a.actor} · {a.action}{a.detail ? ' — ' + a.detail : ''}</div>{/each}
+    {/if}
   </div>
 {/if}
 

@@ -56,25 +56,7 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				}
 				var sb strings.Builder
 				for _, f := range facts {
-					flag := ""
-					if f.ValidTo != nil {
-						flag = " [outdated since " + f.ValidTo.Format("2006-01-02") + "]"
-					}
-					if f.Confidence < 0.5 {
-						flag += " [unverified]"
-					} else if len(f.Origins) >= 2 {
-						flag += fmt.Sprintf(" [confirmed by %d sites]", len(f.Origins))
-					}
-					if f.Kind == ConclusionKind {
-						flag += fmt.Sprintf(" [conclusion from %d facts, %.0f%% sure", f.Proof, f.Confidence*100)
-						if f.Stale {
-							flag += "; some evidence was retired — needs review"
-						}
-						flag += "]"
-					}
-					if f.Via != nil {
-						flag += fmt.Sprintf(" [linked to #%d]", *f.Via)
-					}
+					flag := FactFlags(f)
 					fmt.Fprintf(&sb, "#%d (%s, %s)%s %s\n", f.ID, f.Bank, f.CreatedAt.Format("2006-01-02"), flag, f.Text)
 				}
 				return sb.String(), nil

@@ -139,16 +139,15 @@ func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 // ConfirmFact is the user vouching for an unverified (web-learned) fact: it becomes trusted and may serve
 // as evidence from now on.
 func (s *Service) ConfirmFact(ctx context.Context, id int64) error {
-	r, err := s.db.Exec(ctx, `UPDATE memory_facts SET confidence=0.95, tags=array_remove(tags,'unverified')
-		WHERE id=$1 AND kind='fact' AND valid_to IS NULL`, id)
-	if err != nil {
-		return err
-	}
-	if r.RowsAffected() == 0 {
+	f, err := s.GetFact(ctx, id)
+	if err != nil || f.Kind != "fact" || f.ValidTo != nil {
 		return fmt.Errorf("fact #%d is not an active fact", id)
 	}
-	s.changed()
-	return nil
+	if err := s.ConfirmByUser(ctx, "user", id); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `UPDATE memory_facts SET tags=array_remove(tags,'unverified') WHERE id=$1`, id)
+	return err
 }
 
 // ResolveInsight closes an open hypothesis or question from deep analysis. "confirm" turns a hypothesis into

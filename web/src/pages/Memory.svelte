@@ -43,7 +43,7 @@
   let reviewOpen = $state(false);
   async function loadReview() { review = await call('memory.review', {}, { quiet: true }); }
   $effect(() => { loadReview(); return listen('memory.update', loadReview); });
-  const reviewCount = $derived(review ? review.contradictions.length + review.stale_conclusions.length + review.prune_candidates.length + review.open.length + review.unverified.length : 0);
+  const reviewCount = $derived(review ? review.contradictions.length + review.stale_conclusions.length + review.prune_candidates.length + review.open.length + review.unverified.length + (review.proposed?.length || 0) : 0);
   async function extractEntities() {
     busy = 'entities';
     const rs = await call('memory.entities_extract', { bank_id: bank });
@@ -450,7 +450,7 @@
             {#each facts as f (f.id)}
               <tr class="click" onclick={() => openFact(f)} class:old={f.valid_to} class:concl={f.kind === 'conclusion'}>
                 <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.kind !== 'conclusion'}<Bar value={f.value_ratio} max={1} color={valueColor(f.value_ratio)} height={3} label="value {Math.round(f.value_ratio * 100)}% — {valueName(f.value_ratio)} — how likely this is to still matter later, distinct from rank/confidence" />{/if}{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
-                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.valid_to}<Badge tone="mute" title="superseded {stamp(f.valid_to)}">retired</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
+                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
                 {#if !bank || searching}<td class="dim nowrap">{f.bank}</td>{/if}
                 <td class="mute sm">{(f.tags || []).join(', ')}</td>
                 <td class="mute sm">{f.links || ''}</td>
@@ -481,6 +481,7 @@
       <Field label="Tags"><Tags bind:value={edit.tags} /></Field>
       <Field label="Rank" hint="usage-weighted; decays when unused (unless pinned)"><NumberInput bind:value={edit.rank} min={0.05} max={5} step={0.25} /></Field>
       {#if edit.kind !== 'conclusion'}<Field label="Value" hint="how durable/reusable this is likely to be — a standing attribute vs. a one-off event"><NumberInput bind:value={edit.value_ratio} min={0} max={1} step={0.05} /></Field>{/if}
+      {#if edit.kind !== 'conclusion' && !edit.valid_to}<div class="pinfield"><Checkbox checked={edit.confirmation === 'user_confirmed'} onchange={async (v) => { if (await call('memory.fact_confirm', { id: edit.id, confirm: v })) { edit.confirmation = v ? 'user_confirmed' : 'unconfirmed'; loadFacts(); } }} label="confirmed by me — trusted, and forgotten four times slower" /></div>{/if}
       {#if edit.kind !== 'conclusion'}<div class="pinfield"><Checkbox checked={edit.pinned} onchange={async (v) => { if (await call('memory.fact_pin', { id: edit.id, pinned: v })) edit.pinned = v; }} label="pinned — never auto-archived or decayed" /></div>{/if}
       {#if edit.kind !== 'conclusion'}<Field label="Move to bank"><Select value={edit.bank_id} options={moveBankOpts} searchable onchange={moveFact} /></Field>{/if}
     </div>
@@ -724,6 +725,17 @@
           {#if q}<Button size="sm" variant="ghost" disabled={!(answers[f.id] || '').trim()} onclick={() => resolveOpen(f, 'answer')}>Answer</Button>
           {:else}<Button size="sm" variant="ghost" title="Store it as a trusted fact" onclick={() => resolveOpen(f, 'confirm')}>True</Button>{/if}
           <Button size="sm" variant="ghost" title="Retire it" onclick={() => resolveOpen(f, 'reject')}>{q ? 'Skip' : 'False'}</Button>
+        </div>
+      </div>
+    {:else}<div class="sm mute">none</div>{/each}
+    <h4>Proposed by agents <span class="mute sm">{review.proposed?.length || 0}</span></h4>
+    {#each review.proposed || [] as f (f.id)}
+      <div class="rvrow">
+        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}>{f.text}</button>
+        <div class="sm mute">for {f.bank}; an agent on probation wants this remembered — it is not used until you accept it</div>
+        <div class="row end">
+          <Button size="sm" variant="primary" onclick={async () => { if (await call('memory.proposal_resolve', { id: f.id, accept: true })) { loadReview(); loadFacts(); } }}>Accept</Button>
+          <Button size="sm" variant="ghost" onclick={async () => { if (await call('memory.proposal_resolve', { id: f.id, accept: false })) { loadReview(); loadFacts(); } }}>Reject</Button>
         </div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}

@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLifecycleStatusConfirmAndAudit(t *testing.T) {
@@ -182,5 +184,38 @@ func TestProposalsStayOutOfRecallUntilPromoted(t *testing.T) {
 	log, _ := s.Audit(ctx, r2.Fact.ID, 10)
 	if len(log) < 2 {
 		t.Fatalf("propose + reject must both be audited: %+v", log)
+	}
+}
+
+func TestFactFlagsSayHowMuchToTrustAFact(t *testing.T) {
+	exp := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	gone := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for name, c := range map[string]struct {
+		f    Fact
+		want []string
+		not  []string
+	}{
+		"plain trusted":   {Fact{Confidence: 0.8, Status: StatusActive}, nil, []string{"["}},
+		"disputed":        {Fact{Confidence: 0.8, Status: StatusContested}, []string{"disputed"}, nil},
+		"unverified":      {Fact{Confidence: 0.4, Status: StatusActive}, []string{"unverified"}, nil},
+		"user vouches":    {Fact{Confidence: 0.95, Confirmation: ConfirmUser}, []string{"confirmed by the user"}, []string{"unverified"}},
+		"independent":     {Fact{Confidence: 0.7, Confirmation: ConfirmMulti}, []string{"independent sources"}, nil},
+		"volatile":        {Fact{Confidence: 0.7, ExpiresAt: &exp}, []string{"may go stale after 2026-11-01"}, nil},
+		"replaced":        {Fact{Confidence: 0.7, Status: StatusSuperseded, ValidTo: &gone}, []string{"replaced since 2026-09-01"}, nil},
+		"expired":         {Fact{Confidence: 0.7, Status: StatusExpired, ValidTo: &gone}, []string{"expired since 2026-09-01"}, []string{"may go stale"}},
+		"retracted":       {Fact{Confidence: 0.7, Status: StatusRetracted, ValidTo: &gone}, []string{"outdated since"}, nil},
+		"waiting approve": {Fact{Confidence: 0.7, Status: StatusProposed}, []string{"not yet approved"}, nil},
+	} {
+		got := FactFlags(c.f)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q lacks %q", name, got, w)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(got, w) {
+				t.Errorf("%s: %q must not contain %q", name, got, w)
+			}
+		}
 	}
 }

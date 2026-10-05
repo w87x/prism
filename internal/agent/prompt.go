@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/llm"
 	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tools"
@@ -134,10 +135,10 @@ func (e *Engine) catalog(ctx context.Context) string {
 	return sb.String()
 }
 
-// recallBudget bounds the auto-recalled context pack by characters, not tokens — a deliberately small,
-// cheap-to-estimate ceiling. It is not meant to replace memory_find, only to save an agent that didn't
+// recallBudget bounds the auto-recalled context pack in tokens (the whole rendered line counts, flags included) —
+// a deliberately small ceiling. It is not meant to replace memory_find, only to save an agent that didn't
 // think to search from starting cold on things it (or a colleague) was already told.
-const recallBudget = 900
+const recallBudget = 250
 
 // recall fetches a small, budgeted set of the most relevant durable facts for this turn's instruction —
 // essential preferences, project decisions, agent lessons — across the same banks memory_find would search
@@ -164,12 +165,13 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	sb.WriteString("\n## Relevant memory (auto-recalled for this turn — not exhaustive; memory_find can search further)\n")
 	used := 0
 	for _, f := range facts {
-		line := fmt.Sprintf("- [fact #%d · %s] %s\n", f.ID, f.Bank, strings.TrimSpace(f.Text))
-		if used > 0 && used+len(line) > recallBudget {
+		line := fmt.Sprintf("- [fact #%d · %s] %s%s\n", f.ID, f.Bank, strings.TrimSpace(f.Text), memory.FactFlags(f))
+		cost := llm.EstimateTokens(line)
+		if used > 0 && used+cost > recallBudget {
 			break
 		}
 		sb.WriteString(line)
-		used += len(line)
+		used += cost
 	}
 	return sb.String()
 }

@@ -88,6 +88,8 @@ type Fact struct {
 	// contradicts it), or — once retired — superseded, retracted or expired. Confirmation says who vouches for it.
 	Status       string `json:"status"`
 	Confirmation string `json:"confirmation"`
+	// ExpiresAt is when a volatile fact (a price, an availability) stops being served; nil = lasts.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// ValueRatio is how durable/reusable this fact is likely to be (a standing attribute vs. a one-off
 	// event), set at extraction time — see StoreReq.ValueRatio. Folds into Find's ranking weight; does not
 	// affect pruning, which stays driven by actual usage/staleness.
@@ -219,7 +221,7 @@ const factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact') ELSE 0 END,
 	CASE WHEN f.kind='conclusion' THEN EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL) ELSE false END,
-	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,
+	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,f.expires_at,
 	EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=f.id THEN ck.b ELSE ck.a END
 		WHERE (ck.a=f.id OR ck.b=f.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')`
 
@@ -233,7 +235,7 @@ func scanFactX(r pgx.Row, extra ...any) (Fact, error) {
 	var contested bool
 	dest := append([]any{&f.ID, &f.BankID, &f.Bank, &f.Text, &f.Tags, &rk, &f.Hits, &cf, &f.Source,
 		&f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsed, &f.CreatedAt, &f.Embedded, &f.Links, &f.Kind, &f.Proof, &f.Stale, &f.Origins,
-		&taskID, &f.Pinned, &vr, &f.Status, &f.Confirmation, &contested}, extra...)
+		&taskID, &f.Pinned, &vr, &f.Status, &f.Confirmation, &f.ExpiresAt, &contested}, extra...)
 	err := r.Scan(dest...)
 	f.Rank, f.Confidence, f.ValueRatio = float64(rk), float64(cf), float64(vr)
 	if taskID != nil {
