@@ -130,6 +130,7 @@ CREATE TABLE tasks (
   session_id  bigint,
   tokens_in   bigint NOT NULL DEFAULT 0,
   tokens_out  bigint NOT NULL DEFAULT 0,
+  ctx_breakdown jsonb,                        -- where the latest turn's prompt tokens went (system/tools/user/agent/tool results)
   created_at  timestamptz NOT NULL DEFAULT now(),
   started_at  timestamptz,
   finished_at timestamptz

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { nearEnd } from '../lib/nearend.js';
   import MemoryUsed from '../lib/MemoryUsed.svelte';
+  import Breakdown from '../lib/Breakdown.svelte';
   import { S, call, listen, toast, ago, fmtTokens, confirmBox, iconOf } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
@@ -168,6 +169,7 @@
       {:else if rerunnable(t)}<span class="grow"></span><Button size="sm" variant="primary" onclick={(e) => rerun(t, e)}>Rerun</Button>
       {:else if t.status === 'done' && t.to_agent !== 'Daedalus'}<span class="grow"></span><Button size="sm" variant="ghost" onclick={(e) => saveRoutine(t, e)}>Save as routine</Button>{/if}
     </div>
+    <Breakdown b={detail.breakdown} />
     <Field label="Input"><pre>{t.input}</pre></Field>
     {#if t.question}<Field label="Waiting for"><pre class="attn">{t.question}</pre></Field>{/if}
     {#if t.result}<details class="fold" open><summary>Result</summary><pre>{t.result}</pre></details>{/if}

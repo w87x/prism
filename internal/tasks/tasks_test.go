@@ -147,3 +147,22 @@ func TestNeedsSummary(t *testing.T) {
 		}
 	}
 }
+
+// A finished sub-agent's prompt-token breakdown must survive on its task so the UI can show it afterwards.
+func TestBreakdownRoundTrip(t *testing.T) {
+	d := testutil.DB(t)
+	s := NewStore(d.Pool)
+	ctx := context.Background()
+	tk, err := s.Create(ctx, Task{FromKind: "user", FromName: "user", ToAgent: "Scout", Input: "x"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Breakdown(ctx, tk.ID) != nil {
+		t.Fatal("no breakdown expected yet")
+	}
+	s.SetBreakdown(ctx, tk.ID, map[string]int{"system": 2000, "tool": 900})
+	s.SetBreakdown(ctx, tk.ID, map[string]int{"system": 2000, "tool": 1500})
+	if b := s.Breakdown(ctx, tk.ID); b["tool"] != 1500 || b["system"] != 2000 {
+		t.Fatalf("got %v", b)
+	}
+}
