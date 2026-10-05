@@ -43,6 +43,16 @@ func Reset(ctx context.Context, db *pgxpool.Pool, scope, dataDir string) error {
 	default:
 		return os.ErrInvalid
 	}
+	// a table this build knows but the database does not have yet (an older schema) must not stop the reset:
+	// TRUNCATE fails on the first missing name, so only existing tables are listed
+	var have []string
+	for _, t := range tables {
+		var ok bool
+		if err := db.QueryRow(ctx, `SELECT to_regclass('public.'||$1) IS NOT NULL`, t).Scan(&ok); err == nil && ok {
+			have = append(have, t)
+		}
+	}
+	tables = have
 	// artifact files first (the rows are about to go)
 	if rows, err := db.Query(ctx, `SELECT path FROM artifacts`); err == nil {
 		root := filepath.Clean(dataDir) + string(os.PathSeparator)
@@ -54,8 +64,10 @@ func Reset(ctx context.Context, db *pgxpool.Pool, scope, dataDir string) error {
 		}
 		rows.Close()
 	}
-	if _, err := db.Exec(ctx, `TRUNCATE `+strings.Join(tables, ", ")+` RESTART IDENTITY CASCADE`); err != nil {
-		return err
+	if len(tables) > 0 {
+		if _, err := db.Exec(ctx, `TRUNCATE `+strings.Join(tables, ", ")+` RESTART IDENTITY CASCADE`); err != nil {
+			return err
+		}
 	}
 	if scope == ScopeData {
 		// document sources stay, their chunks were dropped: mark them as not yet indexed

@@ -116,3 +116,31 @@ func TestResetKeepsIntegrationsUnlessAll(t *testing.T) {
 		t.Fatal("unknown scope must be rejected")
 	}
 }
+
+// Bug: Reset listed every table this build knows; on a database from an older schema (a table added since) the
+// TRUNCATE failed on the first missing name and "start over" did nothing.
+func TestResetToleratesTablesTheDatabaseDoesNotHaveYet(t *testing.T) {
+	d := testutil.DB(t)
+	ctx := context.Background()
+	for _, tbl := range []string{"memory_audit", "tracker_runs"} {
+		if _, err := d.Pool.Exec(ctx, `DROP TABLE `+tbl+` CASCADE`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Pool.Exec(ctx, `INSERT INTO settings(key,value) VALUES('keepme','{}') ON CONFLICT (key) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Pool.Exec(ctx, `INSERT INTO bookmarks(url,title) VALUES('https://x','x')`); err != nil {
+		t.Skipf("fixture column mismatch: %v", err)
+	}
+	if err := Reset(ctx, d.Pool, ScopeData, t.TempDir()); err != nil {
+		t.Fatalf("reset on an older schema: %v", err)
+	}
+	var n int
+	_ = d.Pool.QueryRow(ctx, `SELECT count(*) FROM bookmarks`).Scan(&n)
+	var kept int
+	_ = d.Pool.QueryRow(ctx, `SELECT count(*) FROM settings WHERE key='keepme'`).Scan(&kept)
+	if n != 0 || kept != 1 {
+		t.Fatalf("produced data must go (%d left) and settings stay (%d)", n, kept)
+	}
+}
