@@ -40,7 +40,7 @@ func recentlyTried(tags []string, now time.Time) bool {
 func (s *Service) VerifyQueue(ctx context.Context, max int) ([]VerifyItem, error) {
 	rows, err := s.db.Query(ctx, `SELECT f.id, f.text, f.kind, f.tags, b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END
 		FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.valid_to IS NULL AND ((f.kind='fact' AND f.confidence<0.5) OR (f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis']))
+		WHERE f.valid_to IS NULL AND f.status<>'proposed' AND ((f.kind='fact' AND f.confidence<0.5) OR (f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis']))
 		ORDER BY (f.kind='fact') DESC, f.rank DESC, f.id DESC LIMIT 200`)
 	if err != nil {
 		return nil, err

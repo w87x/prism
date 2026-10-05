@@ -198,7 +198,7 @@ func (s *Service) ExtractEntities(ctx context.Context, bankID int64, force bool)
 		return res, nil
 	}
 
-	q := `SELECT id,text FROM memory_facts WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL`
+	q := `SELECT id,text FROM memory_facts WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND status<>'proposed'`
 	args := []any{bankID}
 	if !force && since != nil {
 		q += ` AND created_at > $2`
@@ -577,7 +577,7 @@ func (s *Service) EntitiesDue(ctx context.Context, minNew, maxBanks int) ([]Enti
 		minNew = DefaultEntitiesMin
 	}
 	rows, err := s.db.Query(ctx, `SELECT b.id FROM memory_banks b WHERE b.status='active' AND
-		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5
+		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.status<>'proposed' AND f.confidence>=0.5
 			AND (b.entities_at IS NULL OR f.created_at>b.entities_at)) >= $1
 		ORDER BY b.entities_at NULLS FIRST LIMIT $2`, minNew, maxBanks)
 	if err != nil {

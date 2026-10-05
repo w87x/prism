@@ -37,7 +37,7 @@ type Model struct {
 }
 
 const modelCols = `m.id,m.name,m.query,m.bank_id,m.body,m.sources,m.refreshed_at,m.created_at,
-	(SELECT count(*) FROM memory_facts f WHERE f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5
+	(SELECT count(*) FROM memory_facts f WHERE f.kind='fact' AND f.valid_to IS NULL AND f.status<>'proposed' AND f.confidence>=0.5
 		AND (m.bank_id IS NULL OR f.bank_id=m.bank_id) AND (m.refreshed_at IS NULL OR f.created_at>m.refreshed_at))`
 
 func (s *Service) Models(ctx context.Context) ([]Model, error) {

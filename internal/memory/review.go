@@ -119,7 +119,7 @@ func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 	}
 
 	prows, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.valid_to IS NULL AND NOT f.pinned AND f.kind='fact' AND f.rank<0.25 AND COALESCE(f.last_used,f.created_at) < now()-interval '90 days'
+		WHERE f.valid_to IS NULL AND f.status<>'proposed' AND NOT f.pinned AND f.kind='fact' AND f.rank<0.25 AND COALESCE(f.last_used,f.created_at) < now()-interval '90 days'
 		ORDER BY f.rank ASC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

@@ -169,7 +169,7 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 		minNew = DefaultAnalyzeMin
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,text,created_at FROM memory_facts
-		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND confidence>=0.5 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, bankID, maxAnalyzeFacts, offset)
+		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND status<>'proposed' AND confidence>=0.5 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, bankID, maxAnalyzeFacts, offset)
 	if err != nil {
 		return res, err
 	}
@@ -395,7 +395,7 @@ func (s *Service) AnalyzeDue(ctx context.Context, minNew, maxBanks int) ([]Analy
 		minNew = DefaultAnalyzeMin
 	}
 	rows, err := s.db.Query(ctx, `SELECT b.id FROM memory_banks b WHERE b.status='active' AND
-		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5
+		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.status<>'proposed' AND f.confidence>=0.5
 			AND (b.analyzed_at IS NULL OR f.created_at>b.analyzed_at)) >= $1
 		ORDER BY b.analyzed_at NULLS FIRST LIMIT $2`, minNew, maxBanks)
 	if err != nil {
@@ -458,7 +458,7 @@ func (s *Service) Health(ctx context.Context) ([]BankHealth, error) {
 		(SELECT count(*) FROM memory_links l JOIN memory_facts a ON a.id=l.a JOIN memory_facts c ON c.id=l.b
 			WHERE l.kind='contradicts' AND a.bank_id=b.id AND a.valid_to IS NULL AND c.valid_to IS NULL),
 		count(*) FILTER (WHERE f.kind='fact' AND f.source LIKE 'document:%')
-		FROM memory_banks b LEFT JOIN memory_facts f ON f.bank_id=b.id AND f.valid_to IS NULL
+		FROM memory_banks b LEFT JOIN memory_facts f ON f.bank_id=b.id AND f.valid_to IS NULL AND f.status<>'proposed'
 		WHERE b.status='active' GROUP BY b.id ORDER BY b.id`)
 	if err != nil {
 		return nil, err

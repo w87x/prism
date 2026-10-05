@@ -84,7 +84,7 @@ func (s *Service) Reflect(ctx context.Context, bankID int64, force bool, minNew 
 	// Facts learned from untrusted content (confidence < 0.5) never serve as evidence: a poisoned fact must
 	// not be laundered into a confident conclusion.
 	frows, err := s.db.Query(ctx, `SELECT id,text,created_at FROM memory_facts
-		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND confidence>=0.5 ORDER BY rank DESC, id DESC LIMIT $2`, bankID, maxReflectFacts)
+		WHERE bank_id=$1 AND kind='fact' AND valid_to IS NULL AND status<>'proposed' AND confidence>=0.5 ORDER BY rank DESC, id DESC LIMIT $2`, bankID, maxReflectFacts)
 	if err != nil {
 		return res, err
 	}
@@ -225,7 +225,7 @@ func (s *Service) ReflectDue(ctx context.Context, minNew, maxBanks int) ([]Refle
 		minNew = DefaultReflectMin
 	}
 	rows, err := s.db.Query(ctx, `SELECT b.id FROM memory_banks b WHERE b.status='active' AND (
-			(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5
+			(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.status<>'proposed' AND f.confidence>=0.5
 				AND (b.reflected_at IS NULL OR f.created_at>b.reflected_at)) >= $1
 			OR (b.reflected_at < now()-interval '12 hours' AND (SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact'
 				AND f.valid_to IS NULL AND f.confidence>=0.5 AND f.created_at>b.reflected_at) >= 3)
@@ -372,7 +372,7 @@ func (s *Service) addEvidence(ctx context.Context, id int64, evidence []int64, l
 	}
 	var proof int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=$1 THEN e.b ELSE e.a END
-		WHERE (e.a=$1 OR e.b=$1) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NULL`, id).Scan(&proof)
+		WHERE (e.a=$1 OR e.b=$1) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NULL AND x.status<>'proposed'`, id).Scan(&proof)
 	_, _ = s.db.Exec(ctx, `UPDATE memory_facts SET confidence=GREATEST(confidence,$2), last_used=now() WHERE id=$1`, id, float32(conclusionConfidence(llmConf, proof)))
 	return true
 }
@@ -427,7 +427,7 @@ func (s *Service) AnalyzeAll(ctx context.Context, maxRuns int) ([]AnalyzeResult,
 // busyBanks lists active banks by how many usable facts they hold, most first.
 func (s *Service) busyBanks(ctx context.Context) ([]int64, error) {
 	rows, err := s.db.Query(ctx, `SELECT b.id FROM memory_banks b WHERE b.status='active' ORDER BY
-		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.confidence>=0.5) DESC, b.id`)
+		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.kind='fact' AND f.valid_to IS NULL AND f.status<>'proposed' AND f.confidence>=0.5) DESC, b.id`)
 	if err != nil {
 		return nil, err
 	}
