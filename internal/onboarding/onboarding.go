@@ -23,8 +23,12 @@ import (
 
 // Draft is a proposed agent that the user can review before it is created.
 type Draft struct {
-	Name        string   `json:"name"`
-	Icon        string   `json:"icon"`
+	Name string `json:"name"`
+	Icon string `json:"icon"`
+	// IconHint is a quick keyword guess from the agent's purpose, only so the preview does not show every generated
+	// agent as the default robot. It is never saved: a created agent without an Icon gets one chosen by the model
+	// from its soul (see agent.AssignIcon).
+	IconHint    string   `json:"icon_hint,omitempty"`
 	Group       string   `json:"group"`
 	Description string   `json:"description"`
 	Soul        string   `json:"soul"`
@@ -327,6 +331,9 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			}
 			items[i].Soul = soul // each goroutine owns its own element
 			items[i].Exists = have[strings.ToLower(items[i].Name)]
+			if items[i].Icon == "" {
+				items[i].IconHint = agent.GuessIcon(items[i].Name + " " + items[i].Group + " " + items[i].Description + " " + strings.Join(items[i].Traits, " "))
+			}
 			d := items[i]
 			report(Progress{Stage: "writing", Draft: &d, Total: len(items)})
 		}(i)

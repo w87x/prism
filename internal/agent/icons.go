@@ -48,34 +48,44 @@ func (e *Engine) AssignIcon(ctx context.Context, id int64) {
 		return
 	}
 	text := p.Name + " " + p.Group + " " + p.Description + " " + strings.Join(p.Traits, " ")
-	icon := ""
-	if e.LLM.HasChat(ctx) {
-		names := make([]string, len(agentIcons))
-		for i, ic := range agentIcons {
-			names[i] = ic.Name
-		}
-		soul := p.Soul
-		if len(soul) > 1200 {
-			soul = soul[:1200]
-		}
-		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		out, err := e.LLM.Complete(cctx, "role:fast", "You choose a Font Awesome icon that best represents an AI agent. Pick exactly one name from this list: "+strings.Join(names, ", ")+
-			`. Answer JSON only: {"icon":"<name>"}`, "Agent: "+p.Name+"\nGroup: "+p.Group+"\nPurpose: "+p.Description+"\nSoul:\n"+soul, true)
-		cancel()
-		if err == nil {
-			var r struct {
-				Icon string `json:"icon"`
-			}
-			if json.Unmarshal([]byte(llm.ExtractJSON(out)), &r) == nil {
-				icon = normIcon(r.Icon)
-			}
-		}
+	// A purpose-based icon right away (keywords, no model): a slow local model may take a minute to answer, and until
+	// then every new agent would show the default robot. The model's pick, if it differs, replaces this guess.
+	guess := GuessIcon(text)
+	if tag, err := e.DB.Exec(ctx, `UPDATE agent_profiles SET icon=$2 WHERE id=$1 AND icon=''`, id, guess); err != nil || tag.RowsAffected() == 0 {
+		return
 	}
-	if icon == "" {
-		icon = GuessIcon(text)
-	}
-	if _, err := e.DB.Exec(ctx, `UPDATE agent_profiles SET icon=$2 WHERE id=$1 AND icon=''`, id, icon); err == nil && e.Emit != nil {
+	if e.Emit != nil {
 		e.Emit("agents.update", nil)
+	}
+	if !e.LLM.HasChat(ctx) {
+		return
+	}
+	names := make([]string, len(agentIcons))
+	for i, ic := range agentIcons {
+		names[i] = ic.Name
+	}
+	soul := p.Soul
+	if len(soul) > 1200 {
+		soul = soul[:1200]
+	}
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	out, err := e.LLM.Complete(cctx, "role:fast", "You choose a Font Awesome icon that best represents an AI agent. Pick exactly one name from this list: "+strings.Join(names, ", ")+
+		`. Answer JSON only: {"icon":"<name>"}`, "Agent: "+p.Name+"\nGroup: "+p.Group+"\nPurpose: "+p.Description+"\nSoul:\n"+soul, true)
+	cancel()
+	if err != nil {
+		return
+	}
+	var r struct {
+		Icon string `json:"icon"`
+	}
+	if json.Unmarshal([]byte(llm.ExtractJSON(out)), &r) != nil {
+		return
+	}
+	// only replace OUR guess: an icon the user set meanwhile stays
+	if icon := normIcon(r.Icon); icon != "" && icon != guess {
+		if tag, err := e.DB.Exec(ctx, `UPDATE agent_profiles SET icon=$2 WHERE id=$1 AND icon=$3`, id, icon, guess); err == nil && tag.RowsAffected() > 0 && e.Emit != nil {
+			e.Emit("agents.update", nil)
+		}
 	}
 }
 

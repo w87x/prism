@@ -187,3 +187,38 @@ func TestSeedAddsNewToolsToExistingBuiltInAgentsOnce(t *testing.T) {
 		t.Fatalf("a tool the user removed must not be re-added: %v", m.Tools)
 	}
 }
+
+// A new agent used to show the default robot until the (possibly slow, local) model answered. It now gets a
+// purpose-based icon immediately, the model's pick replaces it, and an icon the user chose meanwhile is kept.
+func TestNewAgentGetsAnIconAtOnceThenTheModelRefinesIt(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{DelayMS: 500, Content: `{"icon":"pen-nib"}`}
+	}
+	p, _ := h.e.Profiles.Save(ctx, Profile{Name: "Ledger", Soul: "You keep the books.", Description: "calculator for accounting and math", Enabled: true}, "")
+	done := make(chan struct{})
+	go func() { h.e.AssignIcon(ctx, p.ID); close(done) }()
+	waitFor(t, 3*time.Second, func() bool { q, _ := h.e.Profiles.GetID(ctx, p.ID); return q.Icon != "" })
+	q, _ := h.e.Profiles.GetID(ctx, p.ID)
+	if q.Icon != "calculator" {
+		t.Fatalf("the immediate icon must match the purpose, got %q", q.Icon)
+	}
+	<-done
+	if q, _ = h.e.Profiles.GetID(ctx, p.ID); q.Icon != "pen-nib" {
+		t.Fatalf("the model's pick replaces the guess, got %q", q.Icon)
+	}
+
+	// an icon chosen by the user while the model is still thinking is not overwritten
+	r, _ := h.e.Profiles.Save(ctx, Profile{Name: "Scribe2", Soul: "x", Description: "writing and editing documents", Enabled: true}, "")
+	done = make(chan struct{})
+	go func() { h.e.AssignIcon(ctx, r.ID); close(done) }()
+	waitFor(t, 3*time.Second, func() bool { x, _ := h.e.Profiles.GetID(ctx, r.ID); return x.Icon != "" })
+	if _, err := h.e.DB.Exec(ctx, `UPDATE agent_profiles SET icon='hammer' WHERE id=$1`, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if x, _ := h.e.Profiles.GetID(ctx, r.ID); x.Icon != "hammer" {
+		t.Fatalf("a user-chosen icon must survive the model's answer, got %q", x.Icon)
+	}
+}

@@ -3,6 +3,7 @@ package onboarding
 import (
 	"context"
 	"encoding/json"
+	"prism/internal/agent"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -157,5 +158,53 @@ func TestProposeWritesSoulsInParallelButReportsInOrder(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "Alpha,Beta,Gamma,Delta" {
 		t.Fatalf("the final team keeps the planner's order: %v", names)
+	}
+}
+
+// While a team is being generated the preview showed every agent with the default robot (a generated draft has
+// no icon yet). Each draft now carries a purpose-based hint for the preview — but the hint is never saved, so the
+// created agent still gets its icon chosen by the model from its soul.
+func TestGeneratedDraftsGetAnIconHintThatIsNotSaved(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := tools.NewRegistry(d.Pool)
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Scout, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		return testutil.Reply{Content: `{"agents":[
+			{"name":"Scout","group":"Web","description":"searches the web, checks prices and news","traits":["web","search","prices"]},
+			{"name":"Ledger","group":"Finance","description":"parses spreadsheets and csv files, computes statistics","traits":["data","csv","statistics"]}]}`}
+	}
+	out, used, err := Propose(context.Background(), r, reg, nil, "hints", 2, "", nil)
+	if err != nil || !used {
+		t.Fatalf("propose: %v %v", used, err)
+	}
+	hints := map[string]string{}
+	for _, dr := range out {
+		hints[dr.Name] = dr.IconHint
+		if dr.IconHint == "" {
+			t.Fatalf("%s has no icon hint", dr.Name)
+		}
+		if dr.Icon != "" {
+			t.Fatalf("the hint must not be the saved icon: %+v", dr)
+		}
+	}
+	if hints["Scout"] == hints["Ledger"] {
+		t.Fatalf("different purposes should not share one icon: %v", hints)
+	}
+	ps := agent.NewProfileStore(d.Pool)
+	if _, err := Apply(context.Background(), ps, out, false); err != nil {
+		t.Fatal(err)
+	}
+	p, err := ps.Get(context.Background(), "Scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Icon != "" {
+		t.Fatalf("a created agent must start without an icon so the model can pick one, got %q", p.Icon)
 	}
 }

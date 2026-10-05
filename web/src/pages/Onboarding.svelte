@@ -325,7 +325,7 @@
               <div class="draft" class:exists={d.exists}>
                 <div class="row">
                   {#if d.exists}<Badge tone="mute">exists</Badge>{:else}<Checkbox bind:checked={pick[i]} />{/if}
-                  <span class="hi"><i class="fa">{FA[d.icon] || FA.robot}</i> {d.name}</span><Badge tone="accent">{d.group}</Badge><span class="dim sm grow ellipsis">{d.description}</span>
+                  <span class="hi"><i class="fa">{FA[d.icon] || FA[d.icon_hint] || FA.robot}</i> {d.name}</span><Badge tone="accent">{d.group}</Badge><span class="dim sm grow ellipsis">{d.description}</span>
                   <Button size="sm" variant="ghost" onclick={() => (open = open === i ? -1 : i)}>{open === i ? 'hide' : 'edit'}</Button>
                   <Button size="sm" variant="ghost" title="remove from the list" onclick={() => removeDraft(i)}><Icon name="x" size={11} /></Button>
                 </div>
