@@ -68,6 +68,9 @@ fi
 
 restore() { # $1 = backup folder holding keep.sql and count.<table> files
   local out="$1" t ids
+  # a pg_dump NEWER than the server writes settings the server does not know (SET transaction_timeout is PostgreSQL 17+);
+  # drop those lines so the dump loads on any server version
+  grep -v -e '^SET transaction_timeout' "$out/keep.sql" > "$out/keep.clean.sql"
   PRESENT=(); for f in "$out"/count.*; do PRESENT+=("${f##*/count.}"); done
   echo "Restoring the kept tables …"
   # only tables whose id is a serial have a sequence to bring up to date (checked one table at a time: a table
@@ -81,7 +84,7 @@ restore() { # $1 = backup folder holding keep.sql and count.<table> files
     echo "SET session_replication_role = replica;"   # kept tables reference each other: load them in any order
     echo "BEGIN;"
     for t in "${PRESENT[@]}"; do echo "DELETE FROM $t;"; done
-    echo "\\i $out/keep.sql"
+    echo "\\i $out/keep.clean.sql"
     echo "SET search_path TO public;"   # pg_dump output empties the search path
     for t in "${PRESENT[@]}"; do
       if [[ " $ids " == *" $t "* ]]; then
