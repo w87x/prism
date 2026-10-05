@@ -219,3 +219,49 @@ func (s *Service) RejectProposal(ctx context.Context, actor string, id int64, no
 	s.changed()
 	return nil
 }
+
+// ── membership: one fact, several banks ─────────────────────────────────────────────────────────────────────
+
+// ShareFact makes a fact visible in another bank as well, without copying it: the claim, its evidence and its
+// lifecycle stay single. The bank is created if it does not exist yet, like memory_store does.
+func (s *Service) ShareFact(ctx context.Context, actor string, id int64, bankSpec string) error {
+	f, err := s.GetFact(ctx, id)
+	if err != nil {
+		return fmt.Errorf("fact %d not found", id)
+	}
+	b, err := s.BankBySpec(ctx, bankSpec, actor, true)
+	if err != nil {
+		return err
+	}
+	if b.ID == f.BankID {
+		return fmt.Errorf("fact #%d already lives in %s", id, b.Label())
+	}
+	tag, err := s.db.Exec(ctx, `INSERT INTO memory_fact_banks(fact_id,bank_id,added_by) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, b.ID, actor)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("fact #%d is already visible in %s", id, b.Label())
+	}
+	s.audit(ctx, actor, "share", id, "also in "+b.Label())
+	s.changed()
+	return nil
+}
+
+// UnshareFact removes the fact from one of its extra banks (its home bank cannot be detached — move it instead).
+func (s *Service) UnshareFact(ctx context.Context, actor string, id int64, bankSpec string) error {
+	b, err := s.BankBySpec(ctx, bankSpec, actor, false)
+	if err != nil {
+		return err
+	}
+	tag, err := s.db.Exec(ctx, `DELETE FROM memory_fact_banks WHERE fact_id=$1 AND bank_id=$2`, id, b.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("fact #%d is not shared into %s (its home bank cannot be detached; move it instead)", id, b.Label())
+	}
+	s.audit(ctx, actor, "unshare", id, "no longer in "+b.Label())
+	s.changed()
+	return nil
+}

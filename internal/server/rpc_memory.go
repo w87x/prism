@@ -101,6 +101,17 @@ func (s *Server) registerMemory() {
 		}
 		return true, a.Memory.RejectProposal(ctx, "user", r.ID, r.Note)
 	})
+	// show a fact in another bank as well (or take it out of one) — no copy is made
+	rpc(s, "memory.fact_share", func(ctx context.Context, r struct {
+		ID    int64  `json:"id"`
+		Bank  string `json:"bank"`
+		Share bool   `json:"share"`
+	}) (bool, error) {
+		if r.Share {
+			return true, a.Memory.ShareFact(ctx, "user", r.ID, r.Bank)
+		}
+		return true, a.Memory.UnshareFact(ctx, "user", r.ID, r.Bank)
+	})
 	rpc(s, "memory.fact_move", func(ctx context.Context, r struct {
 		ID     int64 `json:"id"`
 		BankID int64 `json:"bank_id"`

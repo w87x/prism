@@ -278,6 +278,31 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_share", Category: "memory", Only: maintainers, Risk: tools.RiskWrite,
+			Description: "Make a fact visible in one more bank WITHOUT copying it (e.g. a fact about the user's NAS that also belongs to project:homelab). The fact keeps its home bank, evidence and history; searching either bank finds it. To take it out of an extra bank again, pass remove=true.",
+			Params:      tools.Obj("id,bank", tools.Int("id", "fact id"), tools.Str("bank", "bank spec to show it in: user | profile:<agent> | project:<name> | domain:<name>"), tools.Bool("remove", "take the fact out of that extra bank instead")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					ID     int64
+					Bank   string
+					Remove bool
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				if a.Remove {
+					if err := s.UnshareFact(ctx, env.Agent, a.ID, a.Bank); err != nil {
+						return "", err
+					}
+					return fmt.Sprintf("fact %d is no longer shown in %s", a.ID, a.Bank), nil
+				}
+				if err := s.ShareFact(ctx, env.Agent, a.ID, a.Bank); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("fact %d is now also visible in %s", a.ID, a.Bank), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_consolidate", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
 			Description: "Run memory housekeeping now: distil pending raw messages into facts, archive long-unused low-rank facts, purge old history.",
 			Params:      tools.Obj(""),

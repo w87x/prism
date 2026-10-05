@@ -88,6 +88,14 @@ type Fact struct {
 	// contradicts it), or — once retired — superseded, retracted or expired. Confirmation says who vouches for it.
 	Status       string `json:"status"`
 	Confirmation string `json:"confirmation"`
+	// AlsoIn lists the other banks this fact is visible in (it lives in Bank).
+	AlsoIn []string `json:"also_in,omitempty"`
+	// Subject/Predicate/Object/Qualifiers are the optional structure of a fact that is a plain statement
+	// ("Synology DS923" · "is the user's" · "NAS"); empty for free text. See BundleFacts.
+	Subject    string            `json:"subject,omitempty"`
+	Predicate  string            `json:"predicate,omitempty"`
+	Object     string            `json:"object,omitempty"`
+	Qualifiers map[string]string `json:"qualifiers,omitempty"`
 	// ExpiresAt is when a volatile fact (a price, an availability) stops being served; nil = lasts.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// ValueRatio is how durable/reusable this fact is likely to be (a standing attribute vs. a one-off
@@ -177,7 +185,7 @@ func (s *Service) BankBySpec(ctx context.Context, spec, agent string, create boo
 
 func (s *Service) Banks(ctx context.Context) ([]Bank, error) {
 	rows, err := s.db.Query(ctx, `SELECT b.id,b.kind,b.name,b.owner,b.description,b.status,b.created_at,
-		(SELECT count(*) FROM memory_facts f WHERE f.bank_id=b.id AND f.valid_to IS NULL)
+		(SELECT count(*) FROM memory_facts f WHERE (f.bank_id=b.id OR f.id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=b.id)) AND f.valid_to IS NULL)
 		FROM memory_banks b ORDER BY b.kind, b.name`)
 	if err != nil {
 		return nil, err
@@ -221,7 +229,8 @@ const factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact') ELSE 0 END,
 	CASE WHEN f.kind='conclusion' THEN EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL) ELSE false END,
-	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,f.expires_at,
+	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,f.expires_at,f.subject,f.predicate,f.object,f.qualifiers,
+	ARRAY(SELECT mb.kind||CASE WHEN mb.kind='user' THEN '' ELSE ':'||mb.name END FROM memory_fact_banks fb JOIN memory_banks mb ON mb.id=fb.bank_id WHERE fb.fact_id=f.id ORDER BY mb.id),
 	EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=f.id THEN ck.b ELSE ck.a END
 		WHERE (ck.a=f.id OR ck.b=f.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')`
 
@@ -235,7 +244,7 @@ func scanFactX(r pgx.Row, extra ...any) (Fact, error) {
 	var contested bool
 	dest := append([]any{&f.ID, &f.BankID, &f.Bank, &f.Text, &f.Tags, &rk, &f.Hits, &cf, &f.Source,
 		&f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsed, &f.CreatedAt, &f.Embedded, &f.Links, &f.Kind, &f.Proof, &f.Stale, &f.Origins,
-		&taskID, &f.Pinned, &vr, &f.Status, &f.Confirmation, &f.ExpiresAt, &contested}, extra...)
+		&taskID, &f.Pinned, &vr, &f.Status, &f.Confirmation, &f.ExpiresAt, &f.Subject, &f.Predicate, &f.Object, &f.Qualifiers, &f.AlsoIn, &contested}, extra...)
 	err := r.Scan(dest...)
 	f.Rank, f.Confidence, f.ValueRatio = float64(rk), float64(cf), float64(vr)
 	if taskID != nil {
@@ -254,7 +263,7 @@ func (s *Service) FactsKind(ctx context.Context, bankID int64, kind, q string, h
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	sql := `SELECT ` + factCols + ` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id WHERE ($1=0 OR f.bank_id=$1)`
+	sql := `SELECT ` + factCols + ` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id WHERE ($1=0 OR f.bank_id=$1 OR f.id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=$1))`
 	if kind == "fact" || kind == ConclusionKind {
 		sql += ` AND f.kind='` + kind + `'`
 	}
@@ -408,6 +417,7 @@ func (s *Service) DeleteFact(ctx context.Context, id int64) error {
 func (s *Service) MoveFact(ctx context.Context, id, bankID int64) error {
 	_, err := s.db.Exec(ctx, `UPDATE memory_facts SET bank_id=$2 WHERE id=$1`, id, bankID)
 	if err == nil {
+		_, _ = s.db.Exec(ctx, `DELETE FROM memory_fact_banks WHERE fact_id=$1 AND bank_id=$2`, id, bankID)
 		s.audit(ctx, "user", "move", id, fmt.Sprintf("to bank %d", bankID))
 	}
 	s.changed()
@@ -490,6 +500,10 @@ type StoreReq struct {
 	// per fact; a fact the user typed in directly is taken at their word as valuable regardless of what's
 	// passed here (see the Source=="user" override in Store).
 	ValueRatio float64
+	// Subject, Predicate, Object (and Qualifiers) give the fact a structure when it is a plain statement; all three
+	// are needed, else the fact stays free text.
+	Subject, Predicate, Object string
+	Qualifiers                 map[string]string
 	// Propose files the fact as a proposal (status proposed): it is stored and visible to a curator but never
 	// retrieved, and it retires nothing, until someone promotes it (Promote). Used for what a probationary agent
 	// wants to put into a shared bank.
@@ -668,6 +682,15 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 			return nil, err
 		}
 	}
+	if sub, pred, obj := strings.TrimSpace(r.Subject), strings.TrimSpace(r.Predicate), strings.TrimSpace(r.Object); sub != "" && pred != "" && obj != "" {
+		q := r.Qualifiers
+		if q == nil {
+			q = map[string]string{}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET subject=$2,predicate=$3,object=$4,qualifiers=$5 WHERE id=$1`, id, sub, pred, obj, q); err != nil {
+			return nil, err
+		}
+	}
 	if r.TTLDays > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET expires_at=now()+make_interval(days=>$2) WHERE id=$1`, id, r.TTLDays); err != nil {
 			return nil, err
@@ -733,7 +756,7 @@ func (s *Service) vecSims(ctx context.Context, bankIDs []int64, history bool, qv
 	}
 	model := s.embedModel(ctx)
 	rows, err := s.db.Query(ctx, `SELECT id, 1 - (vec <=> $1::vector) FROM memory_facts
-		WHERE bank_id=ANY($2) AND ($3 OR valid_to IS NULL) AND status<>'proposed' AND vec IS NOT NULL AND vector_dims(vec)=$4 AND (embed_model='' OR embed_model=$6)
+		WHERE (bank_id=ANY($2) OR id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=ANY($2))) AND ($3 OR valid_to IS NULL) AND status<>'proposed' AND vec IS NOT NULL AND vector_dims(vec)=$4 AND (embed_model='' OR embed_model=$6)
 		ORDER BY vec <=> $1::vector LIMIT $5`, lit, bankIDs, history, len(qv), limit, model)
 	if err != nil {
 		return out
@@ -757,7 +780,7 @@ func (s *Service) candidates(ctx context.Context, bankIDs []int64, history bool,
 	if s.VectorOn {
 		emb = "NULL::bytea" // similarity is computed by Postgres; don't ship vectors
 	}
-	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio,` + candExtra + ` FROM memory_facts WHERE bank_id=ANY($1)`
+	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio,` + candExtra + ` FROM memory_facts WHERE (bank_id=ANY($1) OR id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=ANY($1)))`
 	if !history {
 		sql += ` AND valid_to IS NULL`
 	}
@@ -857,7 +880,7 @@ func (s *Service) textCandidateIDs(ctx context.Context, bankIDs []int64, history
 	if q == "" {
 		return nil
 	}
-	sql := `SELECT f.id FROM memory_facts f, plainto_tsquery('simple', $1) q WHERE f.bank_id=ANY($2) AND f.status<>'proposed' AND f.tsv @@ q`
+	sql := `SELECT f.id FROM memory_facts f, plainto_tsquery('simple', $1) q WHERE (f.bank_id=ANY($2) OR f.id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=ANY($2))) AND f.status<>'proposed' AND f.tsv @@ q`
 	if !history {
 		sql += ` AND f.valid_to IS NULL`
 	}

@@ -78,7 +78,8 @@ Rules: one self-contained sentence per fact, third person ("User prefers tea ove
 
 For each fact, also give value_ratio: how likely this is to still matter in an unrelated future task. A standing attribute — identity, equipment/hardware, a preference, a relationship, a recurring habit — is high (0.7-1.0): "User has a Synology NAS" or "User prefers tea over coffee" will keep being relevant. A one-off event or transient state is low (0.1-0.3): "Downloaded files X and Y" or "The download failed with a 407 error" only matters right now and is very unlikely to help a later, unrelated task. This is independent of confidence (how sure you are it's true) — a one-off event can be 100% certain and still low value_ratio.
 Facts that are only true for a while — a price, stock or availability, a version "currently" in use, a status of something in progress — also get ttl_days: roughly how many days until they are likely stale (a price: 7-30, a status: 3-14). Leave ttl_days out (or 0) for anything lasting.
-Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0,"value_ratio":0.0-1.0,"ttl_days":0}]}`
+When a fact is a plain statement about one thing, also split it into subject, predicate and object ("The user owns a Synology DS923" → subject "user", predicate "owns", object "Synology DS923"); keep the predicate a short verb phrase, reuse the same wording for the same relation, and leave all three out for anything that does not split cleanly.
+Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0,"value_ratio":0.0-1.0,"ttl_days":0,"subject":"","predicate":"","object":""}]}`
 
 // maxRawAttempts/maxPendingAttempts cap how many times a batch (or a single extracted fact) is retried
 // before it is given up on rather than blocking the queue forever behind a permanently failing item.
@@ -393,6 +394,9 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			Confidence float64  `json:"confidence"`
 			ValueRatio float64  `json:"value_ratio"`
 			TTLDays    int      `json:"ttl_days"`
+			Subject    string   `json:"subject"`
+			Predicate  string   `json:"predicate"`
+			Object     string   `json:"object"`
 		} `json:"facts"`
 	}
 	if err := s.llm.CompleteJSON(ctx, "role:fast", extractPrompt, sb.String(), &parsed); err != nil {
@@ -417,7 +421,7 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			bank = "domain:General"
 		}
 		conf, tags, src := rawFactPolicy(tainted, f.Confidence, f.Tags, "raw")
-		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID, TTLDays: clampTTL(f.TTLDays)}); err != nil {
+		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID, TTLDays: clampTTL(f.TTLDays), Subject: f.Subject, Predicate: f.Predicate, Object: f.Object}); err != nil {
 			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, f.ValueRatio, tainted, err)
 			pending++
 			continue

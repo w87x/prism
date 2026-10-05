@@ -149,8 +149,10 @@ func (s *Service) undoMerge(ctx context.Context, op mergeOp) (string, error) {
 	}
 	restored := 0
 	for _, d := range op.Dropped { // duplicates the merge collapsed come back (without their links)
-		tag, err := tx.Exec(ctx, `INSERT INTO memory_facts(id,bank_id,text,tags,rank,hits,confidence,source,kind,origins,valid_from,valid_to,created_at,last_used)
-			SELECT id,$2,text,tags,rank,hits,confidence,source,kind,origins,valid_from,valid_to,created_at,last_used
+		tag, err := tx.Exec(ctx, `INSERT INTO memory_facts(id,bank_id,text,tags,rank,hits,confidence,source,kind,origins,valid_from,valid_to,created_at,last_used,
+				status,confirmation,subject,predicate,object,qualifiers,expires_at)
+			SELECT id,$2,text,tags,rank,hits,confidence,source,kind,origins,valid_from,valid_to,created_at,last_used,
+				status,confirmation,subject,predicate,object,qualifiers,expires_at
 			FROM jsonb_populate_record(NULL::memory_facts, $1::jsonb) ON CONFLICT (id) DO NOTHING`, []byte(d.Row), d.Bank)
 		if err != nil {
 			return "", err

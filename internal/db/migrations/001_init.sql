@@ -183,10 +183,26 @@ CREATE TABLE memory_facts (
   status        text NOT NULL DEFAULT 'active' CHECK (status IN ('proposed','active','superseded','retracted','expired')),
   -- unconfirmed | user_confirmed (the user vouched: strong, forgets slowly) | multi_source_confirmed (independent sources agree)
   confirmation  text NOT NULL DEFAULT 'unconfirmed' CHECK (confirmation IN ('unconfirmed','user_confirmed','multi_source_confirmed')),
+  -- Optional structure (a memo-style claim): filled in when the fact is a plain statement. Facts that share a
+  -- subject and predicate are bundled into one line when recalled. All empty = free text only.
+  subject       text NOT NULL DEFAULT '',
+  predicate     text NOT NULL DEFAULT '',
+  object        text NOT NULL DEFAULT '',
+  qualifiers    jsonb NOT NULL DEFAULT '{}',
   expires_at    timestamptz,                  -- volatile facts (prices, availability, "currently…") retire themselves at this moment
   tsv           tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
 );
 CREATE INDEX memory_facts_expiry_idx ON memory_facts(expires_at) WHERE expires_at IS NOT NULL AND valid_to IS NULL;
+-- A fact lives in one home bank (memory_facts.bank_id) and can additionally be visible in others ("Fire is hot" in
+-- physics, chemistry and cooking) without being copied: one claim, one set of evidence, many shelves.
+CREATE TABLE memory_fact_banks (
+  fact_id  bigint NOT NULL REFERENCES memory_facts ON DELETE CASCADE,
+  bank_id  bigint NOT NULL REFERENCES memory_banks ON DELETE CASCADE,
+  added_by text NOT NULL DEFAULT '',
+  added_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (fact_id, bank_id)
+);
+CREATE INDEX memory_fact_banks_bank_idx ON memory_fact_banks(bank_id);
 -- What backs (or refutes) a fact: one row per piece of evidence. Independence is counted by source_group (the
 -- registrable domain, or whatever origin the evidence ultimately comes from), never by the number of rows — ten
 -- pages repeating one press release are one group.

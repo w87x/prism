@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -53,4 +54,74 @@ func FactFlags(f Fact) string {
 		return ""
 	}
 	return " [" + strings.Join(fl, "; ") + "]"
+}
+
+// ── bundling ────────────────────────────────────────────────────────────────────────────────────────────────
+
+// Bundle is facts that say the same kind of thing about the same subject, rendered as one line:
+// "The user owns Synology DS923, Mac Studio and iPhone 17" instead of three. Every fact keeps its own id,
+// evidence and lifecycle; a bundle is only a view.
+type Bundle struct {
+	Facts []Fact
+}
+
+func normKey(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+
+func qualKey(q map[string]string) string {
+	keys := make([]string, 0, len(q))
+	for k := range q {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k + "=" + q[k] + ";")
+	}
+	return b.String()
+}
+
+// bundleKey is empty for a fact that cannot be bundled (no structure). Facts bundle only when subject,
+// predicate, qualifiers, bank and standing flags all agree — a weak or disputed fact is never folded into a
+// strong one's line.
+func bundleKey(f Fact) string {
+	if f.Subject == "" || f.Predicate == "" || f.Object == "" || f.Kind == ConclusionKind || f.Via != nil {
+		return ""
+	}
+	return strings.Join([]string{f.Bank, normKey(f.Subject), normKey(f.Predicate), qualKey(f.Qualifiers), FactFlags(f)}, "\x1f")
+}
+
+// BundleFacts groups the facts (keeping the order of first appearance).
+func BundleFacts(facts []Fact) []Bundle {
+	var out []Bundle
+	at := map[string]int{}
+	for _, f := range facts {
+		k := bundleKey(f)
+		if k != "" {
+			if i, ok := at[k]; ok {
+				out[i].Facts = append(out[i].Facts, f)
+				continue
+			}
+			at[k] = len(out)
+		}
+		out = append(out, Bundle{Facts: []Fact{f}})
+	}
+	return out
+}
+
+// Line renders the bundle as one recall line.
+func (b Bundle) Line() string {
+	first := b.Facts[0]
+	if len(b.Facts) == 1 {
+		return fmt.Sprintf("- [fact #%d · %s] %s%s\n", first.ID, first.Bank, strings.TrimSpace(first.Text), FactFlags(first))
+	}
+	ids := make([]string, len(b.Facts))
+	objs := make([]string, len(b.Facts))
+	for i, f := range b.Facts {
+		ids[i], objs[i] = fmt.Sprintf("#%d", f.ID), f.Object
+	}
+	list := objs[0]
+	if n := len(objs); n > 1 {
+		list = strings.Join(objs[:n-1], ", ") + " and " + objs[n-1]
+	}
+	return fmt.Sprintf("- [facts %s · %s] %s %s %s%s\n", strings.Join(ids, " "), first.Bank, first.Subject, first.Predicate, list, FactFlags(first))
 }

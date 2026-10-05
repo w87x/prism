@@ -222,7 +222,7 @@ func (s *Service) expand(ctx context.Context, picked map[int64]float64, allowed 
 		want = append(want, e.to)
 	}
 	fr, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.id=ANY($1) AND f.valid_to IS NULL AND f.bank_id=ANY($2)`, want, allowed)
+		WHERE f.id=ANY($1) AND f.valid_to IS NULL AND (f.bank_id=ANY($2) OR f.id IN (SELECT fact_id FROM memory_fact_banks WHERE bank_id=ANY($2)))`, want, allowed)
 	if err != nil {
 		return nil
 	}

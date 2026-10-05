@@ -164,8 +164,8 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	var sb strings.Builder
 	sb.WriteString("\n## Relevant memory (auto-recalled for this turn — not exhaustive; memory_find can search further)\n")
 	used := 0
-	for _, f := range facts {
-		line := fmt.Sprintf("- [fact #%d · %s] %s%s\n", f.ID, f.Bank, strings.TrimSpace(f.Text), memory.FactFlags(f))
+	for _, b := range memory.BundleFacts(facts) {
+		line := b.Line()
 		cost := llm.EstimateTokens(line)
 		if used > 0 && used+cost > recallBudget {
 			break

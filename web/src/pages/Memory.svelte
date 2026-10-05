@@ -217,6 +217,16 @@
       loadFacts(); loadBanks();
     }
   }
+  // one fact on several shelves: show it in another bank too (no copy), or take it out of one
+  const specOf = (b) => (b.kind === 'user' ? 'user' : `${b.kind}:${b.name}`);
+  const shareOpts = $derived(banks.filter((b) => b.id !== edit?.bank_id && !(edit?.also_in || []).includes(specOf(b))).map((b) => ({ value: specOf(b), label: specOf(b) })));
+  async function shareFact(spec) {
+    if (!spec) return;
+    if (await call('memory.fact_share', { id: edit.id, bank: spec, share: true })) { edit.also_in = [...(edit.also_in || []), spec]; toast(`Also shown in ${spec}`); loadFacts(); loadBanks(); }
+  }
+  async function unshareFact(spec) {
+    if (await call('memory.fact_share', { id: edit.id, bank: spec, share: false })) { edit.also_in = (edit.also_in || []).filter((x) => x !== spec); loadFacts(); loadBanks(); }
+  }
   async function togglePin(f, e) {
     e?.stopPropagation();
     if (await call('memory.fact_pin', { id: f.id, pinned: !f.pinned })) { f.pinned = !f.pinned; loadFacts(); }
@@ -450,7 +460,7 @@
             {#each facts as f (f.id)}
               <tr class="click" onclick={() => openFact(f)} class:old={f.valid_to} class:concl={f.kind === 'conclusion'}>
                 <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.kind !== 'conclusion'}<Bar value={f.value_ratio} max={1} color={valueColor(f.value_ratio)} height={3} label="value {Math.round(f.value_ratio * 100)}% — {valueName(f.value_ratio)} — how likely this is to still matter later, distinct from rank/confidence" />{/if}{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
-                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
+                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.also_in?.length}<Badge tone="mute" title="also shown in {f.also_in.join(', ')}">+{f.also_in.length}</Badge>{/if}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
                 {#if !bank || searching}<td class="dim nowrap">{f.bank}</td>{/if}
                 <td class="mute sm">{(f.tags || []).join(', ')}</td>
                 <td class="mute sm">{f.links || ''}</td>
@@ -484,6 +494,9 @@
       {#if edit.kind !== 'conclusion' && !edit.valid_to}<div class="pinfield"><Checkbox checked={edit.confirmation === 'user_confirmed'} onchange={async (v) => { if (await call('memory.fact_confirm', { id: edit.id, confirm: v })) { edit.confirmation = v ? 'user_confirmed' : 'unconfirmed'; loadFacts(); } }} label="confirmed by me — trusted, and forgotten four times slower" /></div>{/if}
       {#if edit.kind !== 'conclusion'}<div class="pinfield"><Checkbox checked={edit.pinned} onchange={async (v) => { if (await call('memory.fact_pin', { id: edit.id, pinned: v })) edit.pinned = v; }} label="pinned — never auto-archived or decayed" /></div>{/if}
       {#if edit.kind !== 'conclusion'}<Field label="Move to bank"><Select value={edit.bank_id} options={moveBankOpts} searchable onchange={moveFact} /></Field>{/if}
+      {#if edit.kind !== 'conclusion' && !edit.valid_to}<Field label="Also shown in" hint="the same fact on another shelf — not a copy: one history, one set of sources">
+        <div class="row wrap gap-6">{#each edit.also_in || [] as b (b)}<Badge tone="accent">{b} <button type="button" class="x" title="stop showing it there" onclick={() => unshareFact(b)}>×</button></Badge>{/each}
+          <Select value="" options={shareOpts} searchable placeholder="add a bank…" onchange={shareFact} /></div></Field>{/if}
     </div>
     <div class="sm mute">
       source {edit.source || '—'} · confidence {(edit.confidence * 100).toFixed(0)}% · hits {edit.hits} · created {stamp(edit.created_at)}
@@ -813,4 +826,5 @@
   .rvrow { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-2); }
   .rvpair { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .rvpair .ltx { flex: 1 1 auto; min-width: 160px; white-space: normal; }
+  .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; }
 </style>

@@ -38,6 +38,14 @@ type DumpFact struct {
 	ValidFrom    time.Time  `json:"valid_from"`
 	ValidTo      *time.Time `json:"valid_to,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
+	// lifecycle and structure (absent in dumps from before they existed: they import as active, unconfirmed, free text)
+	Status       string            `json:"status,omitempty"`
+	Confirmation string            `json:"confirmation,omitempty"`
+	ExpiresAt    *time.Time        `json:"expires_at,omitempty"`
+	Subject      string            `json:"subject,omitempty"`
+	Predicate    string            `json:"predicate,omitempty"`
+	Object       string            `json:"object,omitempty"`
+	Qualifiers   map[string]string `json:"qualifiers,omitempty"`
 }
 
 type DumpLink struct {
@@ -74,7 +82,8 @@ func (s *Service) Export(ctx context.Context, bankIDs []int64) (*Dump, error) {
 		}
 	}
 	brows.Close()
-	frows, err := s.db.Query(ctx, `SELECT id,bank_id,text,tags,kind,rank,hits,confidence,source,origins,supersedes,superseded_by,valid_from,valid_to,created_at
+	frows, err := s.db.Query(ctx, `SELECT id,bank_id,text,tags,kind,rank,hits,confidence,source,origins,supersedes,superseded_by,valid_from,valid_to,created_at,
+		status,confirmation,expires_at,subject,predicate,object,qualifiers
 		FROM memory_facts WHERE bank_id=ANY($1) ORDER BY id`, ids)
 	if err != nil {
 		return nil, err
@@ -83,7 +92,8 @@ func (s *Service) Export(ctx context.Context, bankIDs []int64) (*Dump, error) {
 	for frows.Next() {
 		var f DumpFact
 		var rk, cf float32
-		if frows.Scan(&f.ID, &f.Bank, &f.Text, &f.Tags, &f.Kind, &rk, &f.Hits, &cf, &f.Source, &f.Origins, &f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.CreatedAt) == nil {
+		if frows.Scan(&f.ID, &f.Bank, &f.Text, &f.Tags, &f.Kind, &rk, &f.Hits, &cf, &f.Source, &f.Origins, &f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.CreatedAt,
+			&f.Status, &f.Confirmation, &f.ExpiresAt, &f.Subject, &f.Predicate, &f.Object, &f.Qualifiers) == nil {
 			f.Rank, f.Confidence = float64(rk), float64(cf)
 			d.Facts = append(d.Facts, f)
 			have[f.ID] = true
@@ -193,9 +203,25 @@ func (s *Service) Import(ctx context.Context, d *Dump) (*ImportResult, error) {
 			f.CreatedAt = f.ValidFrom
 		}
 		var id int64
-		err := s.db.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,kind,rank,hits,confidence,source,origins,valid_from,valid_to,created_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-			bid, text, tags, kind, float32(rank), max(f.Hits, 0), float32(conf), "import", origins, f.ValidFrom, f.ValidTo, f.CreatedAt).Scan(&id)
+		status, confirm := f.Status, f.Confirmation
+		if status == "" || (f.ValidTo == nil && status != StatusProposed) {
+			status = StatusActive
+		}
+		if f.ValidTo != nil && status == StatusActive {
+			status = StatusRetracted
+		}
+		if confirm == "" {
+			confirm = ConfirmNone
+		}
+		qual := f.Qualifiers
+		if qual == nil {
+			qual = map[string]string{}
+		}
+		err := s.db.QueryRow(ctx, `INSERT INTO memory_facts(bank_id,text,tags,kind,rank,hits,confidence,source,origins,valid_from,valid_to,created_at,
+				status,confirmation,expires_at,subject,predicate,object,qualifiers)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+			bid, text, tags, kind, float32(rank), max(f.Hits, 0), float32(conf), "import", origins, f.ValidFrom, f.ValidTo, f.CreatedAt,
+			status, confirm, f.ExpiresAt, f.Subject, f.Predicate, f.Object, qual).Scan(&id)
 		if err != nil {
 			return res, err
 		}
