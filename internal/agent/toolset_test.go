@@ -222,3 +222,41 @@ func TestNewAgentGetsAnIconAtOnceThenTheModelRefinesIt(t *testing.T) {
 		t.Fatalf("a user-chosen icon must survive the model's answer, got %q", x.Icon)
 	}
 }
+
+// A coder is not a web agent or an orchestrator: it gets its own tools plus a small shared set — not every tool
+// that happens to be marked "base" (task cancelling, image fetching, mental models…), and not web tools.
+func TestWorkersGetOnlyTheSmallSharedSetAndTheirOwnTools(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	coder, err := h.e.Profiles.Get(ctx, "Coder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"web_search", "web_fetch", "consult", "plugin_create"} {
+		for _, tl := range coder.Tools {
+			if tl == bad {
+				t.Errorf("Coder must not carry %s", bad)
+			}
+		}
+	}
+	active := h.e.initialTools(ctx, coder, RunSpec{})
+	for _, bad := range []string{"task_cancel", "task_steer", "image_fetch", "folder_map", "memory_models", "artifact_list"} {
+		if active[bad] {
+			t.Errorf("a coder must not get %s", bad)
+		}
+	}
+	for _, want := range []string{"shell", "file_edit", "ask_colleague", "report_blocked", "memory_check", "artifact_save", "scratchpad_share"} {
+		if !active[want] {
+			t.Errorf("a coder needs %s", want)
+		}
+	}
+	if len(active) > 45 {
+		t.Errorf("a coder's toolset is bloated: %d tools", len(active))
+	}
+	atlas, _ := h.e.Profiles.Get(ctx, "Atlas")
+	for _, want := range []string{"task_steer", "task_cancel"} {
+		if !h.e.initialTools(ctx, atlas, RunSpec{})[want] {
+			t.Errorf("Atlas's soul tells it to use %s, so it must have it", want)
+		}
+	}
+}

@@ -109,11 +109,24 @@
   // of letting it oscillate, MAXV caps how fast a node can catch up (so a roster change eases in rather than
   // snapping).
   const REPEL = 2.6, RADIAL = 0.02, DAMP = 0.82, MAXV = 9;
-  function place() {
+  // drift: every agent wanders a little, on slow overlapping sine "currents" of its own phase — never a straight
+  // line or a pattern you can read, but small and slow enough (a few seconds per turn, a few tens of px) that the
+  // orbits and clusters stay legible. The forces above keep pulling it back, so it is a wobble, not an escape.
+  const DRIFT = 0.04;
+  let drift = $state(true);
+  try { drift = localStorage.getItem('prism.graphDrift') !== '0'; } catch {}
+  const toggleDrift = () => { drift = !drift; try { localStorage.setItem('prism.graphDrift', drift ? '1' : '0'); } catch {} };
+  const wander = (n, t) => {
+    const p = (n.ph ||= Array.from({ length: 6 }, () => Math.random() * Math.PI * 2));
+    const s = t / 1000;
+    return [DRIFT * (Math.sin(s * 0.61 + p[0]) + 0.7 * Math.sin(s * 0.23 + p[1]) + 0.4 * Math.sin(s * 1.37 + p[2])),
+            DRIFT * (Math.sin(s * 0.53 + p[3]) + 0.7 * Math.sin(s * 0.29 + p[4]) + 0.4 * Math.sin(s * 1.19 + p[5]))];
+  };
+  function place(t = 0, force = false) {
     const { cx, cy, ex, ey } = spec();
     const atlas = nodes.find((n) => n.a.role === 'entry');
     if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
-    if (reduced) return; // prefers-reduced-motion: settle once via CSS-free snap, no continuous simulation
+    if (reduced && !force) return; // prefers-reduced-motion: no continuous simulation (a shuffle settles in one go, see shuffle())
     for (const n of nodes) {
       if (n.a.role === 'entry' || n.pinned) { n.vx = 0; n.vy = 0; continue; }
       let fx = 0, fy = 0;
@@ -127,11 +140,30 @@
       const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
       const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
       fx += (sx / sd) * err * ex * RADIAL; fy += (sy / sd) * err * ey * RADIAL;
+      if (drift && !reduced && !force) { const [wx, wy] = wander(n, t); fx += wx; fy += wy; }
       n.vx = (n.vx + fx) * DAMP; n.vy = (n.vy + fy) * DAMP;
       const sp = Math.hypot(n.vx, n.vy);
       if (sp > MAXV) { n.vx = (n.vx / sp) * MAXV; n.vy = (n.vy / sp) * MAXV; }
       n.x += n.vx; n.y += n.vy;
     }
+  }
+  // Shuffle: a fresh arrangement. The groups swap bands (which one sits nearest Atlas is random), every agent is
+  // thrown to a random spot and a random nudge, pins are released, and the simulation settles them into the new
+  // layout — so the result still respects the bands and never overlaps.
+  function shuffle() {
+    const { cx, cy, ex, ey } = spec();
+    const bands = orbits.filter((o) => o.key !== 'staff');
+    const ks = bands.map((o) => o.k);
+    for (let i = ks.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ks[i], ks[j]] = [ks[j], ks[i]]; }
+    bands.forEach((o, i) => (o.k = ks[i]));
+    for (const n of nodes) {
+      if (n.a.role === 'entry') continue;
+      n.pinned = false;
+      const k = (orbitOf(n.orbit)?.k ?? 0.6) * (0.5 + Math.random() * 0.9), ang = Math.random() * Math.PI * 2;
+      n.x = cx + Math.cos(ang) * k * ex; n.y = cy + Math.sin(ang) * k * ey;
+      n.vx = (Math.random() - 0.5) * 7; n.vy = (Math.random() - 0.5) * 7;
+    }
+    if (reduced) for (let i = 0; i < 120; i++) place(0, true); // no animation: settle immediately
   }
   const arcPath = (ctx, a, b) => {
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, k = Math.min(60, len * 0.28);
@@ -147,7 +179,7 @@
     if (!canvas || view !== 'graph') return;
     const ctx = canvas.getContext('2d'), dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
-    place();
+    place(t);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const atlas = nodes.find((n) => n.a.role === 'entry');
@@ -249,6 +281,10 @@
     <Segmented bind:value={view} options={[{ value: 'graph', label: 'Graph' }, { value: 'list', label: 'List' }]} />
     <div class="f"><Input bind:value={filter} size="sm" placeholder="filter agents / traits…" /></div>
     <span class="grow"></span>
+    {#if view === 'graph'}
+      <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
+      <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a little slow, chaotic wandering of the agents (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
+    {/if}
     <span class="sm dim">{agents.length} agents · {activeNames.size} active</span>
     <Button size="sm" onclick={newAgent}><Icon name="plus" size={11} /> New agent</Button>
     <Button size="sm" variant="accent" onclick={reopenOnboarding}><Icon name="refresh" size={11} /> Regenerate profiles</Button>
@@ -276,7 +312,7 @@
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span class="mute">agents settle apart to avoid overlap · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
+        <span class="mute">agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>

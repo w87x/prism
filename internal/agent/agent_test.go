@@ -135,9 +135,10 @@ func TestAtlasDelegatesAndSynthesizes(t *testing.T) {
 	if h.events.count("run.start") != 2 || h.events.count("run.end") != 2 {
 		t.Fatalf("expected 2 runs, events=%v", h.events.ev)
 	}
-	// Atlas must have stayed lean: only its handful of tools were offered.
+	// Atlas must have stayed lean: only its handful of tools were offered (its own: delegate, agent_find, task_status,
+	// task_steer, task_cancel — its soul tells it to steer and cancel — plus the six chat basics).
 	for _, c := range h.fake.Recorded() {
-		if strings.Contains(c.Messages[0].Content, "You are Atlas") && len(c.Tools) > 9 {
+		if strings.Contains(c.Messages[0].Content, "You are Atlas") && len(c.Tools) > 11 {
 			t.Fatalf("Atlas got %d tools", len(c.Tools))
 		}
 	}

@@ -722,6 +722,17 @@ var warnedTools sync.Map // "agent\x00tool" already reported by initialTools
 
 var minimalBase = map[string]bool{"memory_find": true, "memory_banks": true, "memory_store": true, "clock": true, "ask_user": true, "artifact_read": true}
 
+// workerBase is what every non-entry agent gets on top of its own toolset: ask for help or report back, remember and
+// look things up, hand material over by reference, and keep notes. Everything else a base tool can do (cancel or
+// steer tasks, fetch images, map folders, read mental models, list artifacts…) belongs to the agents whose job it
+// is and is listed on their profile — a coder does not need web or orchestration tools just because they exist.
+var workerBase = map[string]bool{
+	"clock": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
+	"memory_find": true, "memory_check": true, "memory_store": true, "memory_banks": true, "memory_feedback": true, "memory_verify": true,
+	"artifact_read": true, "artifact_save": true, "scratchpad_read": true, "scratchpad_write": true, "scratchpad_share": true,
+	"skill_load": true, "skill_search": true,
+}
+
 func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map[string]bool {
 	active := map[string]bool{}
 	for _, t := range e.Tools.All() {
@@ -729,6 +740,9 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 			continue
 		}
 		if p.Role == RoleEntry && !minimalBase[t.Name] { // keep the main chat lean
+			continue
+		}
+		if p.Role != RoleEntry && !workerBase[t.Name] { // workers get the small shared set, not every base tool
 			continue
 		}
 		active[t.Name] = true

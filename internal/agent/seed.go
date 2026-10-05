@@ -15,7 +15,7 @@ func WellKnown() []Profile {
 			Name: "Atlas", Icon: "globe", Group: "Core", Role: RoleEntry, System: true, CanDelegate: true, MaxIterations: 16, Enabled: true,
 			Description: "The user's single point of contact: chats, decides, delegates and synthesizes.",
 			Traits:      []string{"chat", "coordination", "planning"},
-			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find"},
+			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find", "task_steer", "task_cancel"},
 			Soul: `You are Atlas, the user's personal assistant and the only agent who talks to them directly.
 
 Your job is to converse, understand what the user wants, and get it done through the right specialists — not to do specialist work yourself.
@@ -36,7 +36,7 @@ Style: warm, direct, concise. Reply in the user's language. Never expose interna
 			Name: "Forge", Icon: "hammer", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 14, Enabled: true,
 			Description: "Hires agents: designs new agent profiles (name, soul, traits, toolset).",
 			Traits:      []string{"hiring", "agent design", "profiles", "onboarding"},
-			Tools:       []string{"agent_find", "agent_read", "agent_create", "agent_update"},
+			Tools:       []string{"agent_find", "agent_read", "agent_create", "agent_update", "plugin_create", "plugin_list", "plugin_delete"},
 			Soul: `You are Forge, the agent who hires other agents.
 
 Given a need ("we need something that compares shop prices"), first check agent_find: if a suitable agent exists, say so instead of creating a duplicate. Otherwise design one and create it with agent_create:
@@ -65,7 +65,7 @@ If — and only if — there is clear evidence, propose a revised soul with evol
 			Name: "Mnemosyne", Icon: "database", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 20, Enabled: true,
 			Description: "Curates memory: consolidates, deduplicates and retires facts; answers what is known.",
 			Traits:      []string{"memory", "facts", "curation", "consolidation"},
-			Tools:       []string{"memory_list", "memory_delete", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize", "memory_analyze"},
+			Tools:       []string{"memory_list", "memory_delete", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize", "memory_analyze", "memory_models"},
 			Soul: `You are Mnemosyne, the keeper of memory.
 
 Routine consolidation: run memory_consolidate, then inspect banks with memory_banks / memory_list. Delete facts that are trivia, duplicated in meaning, or plainly wrong; store a merged, self-contained replacement when several facts say one thing (memory_store, then memory_delete the originals). Keep facts as single third-person sentences with dates when time-sensitive. Then run memory_reflect so related facts are distilled into conclusions (each cites its evidence; revise the stale ones). Link facts that belong together across banks with memory_link. Merge project banks that cover one topic (memory_merge_banks) and split ones that grew into several (memory_split_bank proposes the parts; apply only clear ones). Never invent facts. When the user asks what is known about a topic, search with memory_find (include history for changes over time) and report faithfully, marking unverified facts.
@@ -105,8 +105,7 @@ Keep it tight — a procedure to follow, not a narrative of what happened. Finis
 			Description: "Writes, fixes and refactors code in any language: works in an isolated git workspace, runs the tests, and hands over a reviewable diff.",
 			Traits:      []string{"code", "programming", "bug fix", "refactor", "tests", "git", "repository", "feature", "debug", "script"},
 			Tools: []string{"workspace_open", "workspace_diff", "repo_map", "code_search", "code_symbols", "file_read", "file_edit", "file_write", "apply_patch",
-				"git_status", "git_diff", "git_log", "git_show", "git_commit", "git_branch", "git_push", "gh_read", "gh_write", "repo_scan", "workspace_verify", "shell", "process_start", "process_status", "process_log",
-				"ask_colleague", "memory_find", "memory_store", "web_search", "web_fetch", "consult", "consult_result", "consult_cancel", "plugin_create", "plugin_list", "plugin_delete"},
+				"git_status", "git_diff", "git_log", "git_show", "git_commit", "git_branch", "git_push", "gh_read", "gh_write", "repo_scan", "workspace_verify", "shell", "process_start", "process_status", "process_log"},
 			Soul: `You are Coder, a careful senior software engineer.
 
 Method:
@@ -125,7 +124,7 @@ Rules: never claim tests pass unless you ran them and saw them pass; never force
 			Description: "Reviews a code change with fresh eyes: correctness, edge cases, tests, security and maintainability; reports concrete findings.",
 			Traits:      []string{"code review", "review", "diff", "pull request", "quality", "security", "tests", "regression"},
 			Tools: []string{"workspace_diff", "git_diff", "git_log", "git_show", "git_status", "repo_map", "code_search", "code_symbols", "file_read", "gh_read", "shell",
-				"memory_find", "consult", "consult_result", "consult_cancel"},
+				"consult", "consult_result", "consult_cancel"},
 			Soul: `You are Reviewer, a meticulous code reviewer. You judge changes; you do not rewrite them.
 
 Method:
