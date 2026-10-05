@@ -22,6 +22,10 @@ body::after {
   mask-image: var(--tex);
   -webkit-mask-size: var(--tex-size);
   mask-size: var(--tex-size);
+  -webkit-mask-repeat: var(--tex-repeat, repeat);
+  mask-repeat: var(--tex-repeat, repeat);
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 /* the pattern itself (--tex, --tex-size) is set by textures.js; the plain grid is drawn lighter */
 :root[data-texture='grid'] { --tex-a: 0.1; }

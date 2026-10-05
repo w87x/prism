@@ -1,4 +1,5 @@
-import { paintTexture } from './textures.js';
+import { paintTexture, MINERAL_IDS, MAX_MIX } from './textures.js';
+export { MINERAL_IDS, MAX_MIX };
 
 // Colour themes. The tokens live in app.css (default "emerald") and themes.css; this picks one, remembers it
 // on this device, and applies it before the app mounts so there is no flash of the default colours.
@@ -43,6 +44,19 @@ const TKEY = 'prism.texture';
 export function currentTexture() {
   try { const t = JSON.parse(localStorage.getItem(TKEY)); if (TEXTURES.some((x) => x.id === t)) return t; } catch {}
   return 'mineral';
+}
+
+// Which minerals blend into the background (up to 3). Empty = the theme's own. Remembered per device.
+const MKEY = 'prism.mix';
+export function currentMix() {
+  try { const m = JSON.parse(localStorage.getItem(MKEY)); if (Array.isArray(m)) return m.filter((x) => MINERAL_IDS.includes(x)).slice(0, MAX_MIX); } catch {}
+  return [];
+}
+export function applyMix(ids, save = true) {
+  ids = [...new Set(ids)].filter((x) => MINERAL_IDS.includes(x)).slice(0, MAX_MIX);
+  if (save) { try { localStorage.setItem(MKEY, JSON.stringify(ids)); } catch {} }
+  paintTexture(currentTheme(), undefined, ids);
+  return ids;
 }
 
 export function applyTexture(id, save = true) {
