@@ -1,4 +1,4 @@
-/* Themes. The default ("terminal": mint on black) lives in app.css; a theme overrides its tokens through
+/* Themes, named after gems. The default (Emerald: mint on black) lives in app.css; a theme overrides its tokens through
    <html data-theme="…">. Anything that glows or tints is built from the --rgb-* triplets, so changing those and
    the solid colours below re-colours the whole app. Semantic colours (attention orange, warning yellow, error red)
    stay readable in every theme. */
@@ -69,8 +69,8 @@
 }
 @keyframes tanzanite-flash { to { transform: rotate(360deg); } }
 
-/* ── Cobalt ─ blue, silver and cobalt, with an orange accent ── */
-:root[data-theme='cobalt'] {
+/* ── Cobaltite ─ blue, silver and cobalt, with an orange accent ── */
+:root[data-theme='cobaltite'] {
   --rgb-fg: 196 210 230;
   --rgb-accent: 255 138 31;
   --rgb-attn: 255 197 51;
@@ -109,7 +109,7 @@
   --warn-dim: #a39c2f;
   --warn-bg: #1d1b00;
 }
-:root[data-theme='cobalt'] body {
+:root[data-theme='cobaltite'] body {
   background:
     linear-gradient(rgb(var(--rgb-fg) / 0.03) 1px, transparent 1px) 0 0 / 19px 19px,
     linear-gradient(90deg, rgb(var(--rgb-fg) / 0.03) 1px, transparent 1px) 0 0 / 19px 19px,
@@ -120,6 +120,182 @@
   background-attachment: fixed;
 }
 
+/* ── Amber ─ honey-brown resin with a warm glow; a cool blue accent opposite the amber text ── */
+:root[data-theme='amber'] {
+  --rgb-fg: 255 179 71;
+  --rgb-accent: 94 184 255;
+  --rgb-attn: 255 111 74;
+
+  --bg: #0d0702;
+  --bg-1: #150d04;
+  --bg-2: #1f1407;
+  --bg-3: #301d0a;
+  --bg-4: #47290e;
+  --line: #3a2410;
+  --line-2: #6b4318;
+  --line-3: #a8661f;
+
+  --fg: #ffb347;
+  --fg-hi: #ffe7bd;
+  --fg-dim: #d08a2a;
+  --fg-mute: #a56b22;
+  --fg-faint: #6d4719;
+
+  --ico: #c9a15f;
+  --ico-hi: #e8cd96;
+
+  --accent: #5eb8ff;
+  --accent-hi: #a5d9ff;
+  --accent-dim: #3578ad;
+  --accent-bg: #071524;
+
+  /* amber text is orange already, so "attention" moves to a red-orange */
+  --attn: #ff6f4a;
+  --attn-hi: #ff9d82;
+  --attn-dim: #a84428;
+  --attn-bg: #2a0e07;
+}
+:root[data-theme='amber'] body {
+  background:
+    radial-gradient(1.5px 1.5px at 22% 31%, rgb(255 220 150 / 0.35), transparent 70%),
+    radial-gradient(1px 1px at 61% 18%, rgb(255 220 150 / 0.3), transparent 70%),
+    radial-gradient(1.5px 1.5px at 78% 72%, rgb(255 220 150 / 0.3), transparent 70%),
+    radial-gradient(1px 1px at 38% 84%, rgb(255 220 150 / 0.28), transparent 70%),
+    linear-gradient(rgb(var(--rgb-fg) / 0.022) 1px, transparent 1px) 0 0 / 19px 19px,
+    linear-gradient(90deg, rgb(var(--rgb-fg) / 0.022) 1px, transparent 1px) 0 0 / 19px 19px,
+    radial-gradient(ellipse 90% 60% at 50% -14%, rgb(255 160 40 / 0.20), transparent 62%),
+    radial-gradient(ellipse 65% 55% at 104% 106%, rgb(200 90 20 / 0.16), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* ── Amethyst ─ lilac crystal with magenta depth; an aqua flash as accent ── */
+:root[data-theme='amethyst'] {
+  --rgb-fg: 211 166 255;
+  --rgb-accent: 94 224 200;
+
+  --bg: #0b0414;
+  --bg-1: #12071f;
+  --bg-2: #1a0b2e;
+  --bg-3: #29114a;
+  --bg-4: #3b1969;
+  --line: #2f1458;
+  --line-2: #53259a;
+  --line-3: #7c3dd6;
+
+  --fg: #d3a6ff;
+  --fg-hi: #f4e6ff;
+  --fg-dim: #b27de6;
+  --fg-mute: #9560cc;
+  --fg-faint: #623d92;
+
+  --ico: #b9a0e6;
+  --ico-hi: #dccaf5;
+
+  --accent: #5ee0c8;
+  --accent-hi: #a6f3e4;
+  --accent-dim: #2f9c88;
+  --accent-bg: #06201c;
+}
+:root[data-theme='amethyst'] body {
+  background:
+    /* crystal facets: broad, soft wedges of light */
+    conic-gradient(from 35deg at 15% 0%, transparent 0 14%, rgb(190 110 255 / 0.10) 20%, transparent 28% 100%),
+    conic-gradient(from 200deg at 100% 100%, transparent 0 18%, rgb(255 90 220 / 0.09) 25%, transparent 34% 100%),
+    radial-gradient(ellipse 75% 55% at 20% 8%, rgb(150 80 255 / 0.22), transparent 62%),
+    radial-gradient(ellipse 55% 50% at 95% 90%, rgb(220 70 200 / 0.13), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* ── Opal ─ play of colour: a pale aqua-white stone whose pink, teal and gold flashes slowly move ── */
+:root[data-theme='opal'] {
+  --rgb-fg: 191 233 238;
+  --rgb-accent: 255 158 224;
+
+  --bg: #060a11;
+  --bg-1: #0a111b;
+  --bg-2: #101a28;
+  --bg-3: #182739;
+  --bg-4: #213650;
+  --line: #1b2d42;
+  --line-2: #2f5169;
+  --line-3: #4a7d97;
+
+  --fg: #bfe9ee;
+  --fg-hi: #f5ffff;
+  --fg-dim: #8fc3cc;
+  --fg-mute: #6a9aa6;
+  --fg-faint: #46707a;
+
+  --ico: #8fb6d8;
+  --ico-hi: #c4dcf0;
+
+  --accent: #ff9ee0;
+  --accent-hi: #ffc9f0;
+  --accent-dim: #b5629f;
+  --accent-bg: #2a0f24;
+}
+:root[data-theme='opal'] body {
+  background:
+    radial-gradient(ellipse 70% 50% at 22% 8%, rgb(80 220 210 / 0.14), transparent 62%),
+    radial-gradient(ellipse 55% 45% at 92% 40%, rgb(255 140 220 / 0.09), transparent 64%),
+    radial-gradient(ellipse 60% 50% at 40% 108%, rgb(255 210 120 / 0.08), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+}
+:root[data-theme='opal'] body::before {
+  content: '';
+  position: fixed;
+  inset: -40%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    conic-gradient(from 0deg at 35% 45%, rgb(80 230 210 / 0.10), rgb(255 150 225 / 0.09) 25%, rgb(255 215 120 / 0.08) 50%, rgb(130 150 255 / 0.10) 75%, rgb(80 230 210 / 0.10));
+  animation: opal-shift 140s linear infinite;
+}
+@keyframes opal-shift { to { transform: rotate(360deg); } }
+
+/* ── Obsidian ─ volcanic glass: near-black, neutral greys, a cool cyan accent and a faint sheen ── */
+:root[data-theme='obsidian'] {
+  --rgb-fg: 212 212 216;
+  --rgb-accent: 68 217 230;
+
+  --bg: #060606;
+  --bg-1: #0c0c0d;
+  --bg-2: #131415;
+  --bg-3: #1c1d1f;
+  --bg-4: #28292c;
+  --line: #232427;
+  --line-2: #3c3e43;
+  --line-3: #5b5e66;
+
+  --fg: #d4d4d8;
+  --fg-hi: #fafafa;
+  --fg-dim: #a1a1a8;
+  --fg-mute: #7a7a82;
+  --fg-faint: #52525a;
+
+  --ico: #9a9aa3;
+  --ico-hi: #c8c8cf;
+
+  --accent: #44d9e6;
+  --accent-hi: #96eff6;
+  --accent-dim: #2a8c96;
+  --accent-bg: #061a1c;
+}
+:root[data-theme='obsidian'] body {
+  background:
+    linear-gradient(115deg, transparent 0 38%, rgb(255 255 255 / 0.028) 46%, transparent 54% 100%),
+    linear-gradient(rgb(var(--rgb-fg) / 0.02) 1px, transparent 1px) 0 0 / 19px 19px,
+    linear-gradient(90deg, rgb(var(--rgb-fg) / 0.02) 1px, transparent 1px) 0 0 / 19px 19px,
+    radial-gradient(ellipse 80% 50% at 50% -14%, rgb(var(--rgb-fg) / 0.07), transparent 62%),
+    radial-gradient(ellipse 55% 50% at 104% 106%, rgb(var(--rgb-accent) / 0.07), transparent 62%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme='tanzanite'] body::before { animation: none; }
+  :root[data-theme='tanzanite'] body::before,
+  :root[data-theme='opal'] body::before { animation: none; }
 }
