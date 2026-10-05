@@ -8,7 +8,8 @@
   .b { display: inline-block; padding: 0 5px; font-size: 10px; line-height: 1.5; text-transform: uppercase; letter-spacing: 0.07em;
     border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); color: var(--c); border-radius: var(--r); white-space: nowrap; }
   .fx { text-align: center; box-sizing: border-box; }
-  .ok { --c: var(--fg); }
+  .ok { --c: var(--ok); }
+  .info { --c: var(--info); }
   .mute { --c: var(--fg-mute); }
   .accent { --c: var(--accent); }
   .attn { --c: var(--attn); }

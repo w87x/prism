@@ -2,7 +2,7 @@
 // Perlin-style noise (feTurbulence) shaped into a mask, optionally layered, domain-warped, grown, or lit like a surface
 // in relief — and the mask is then painted with the theme's own colours (body::after in themes.css).
 //
-// A texture is a list of layers whose alphas are added together:
+// Each mineral is 2–4 styles (layers) blended into one; their alphas are added together:
 //   type 'noise' (default)  alpha = curve(gain·noise + bias)
 //   type 'light'            the noise is read as a height map and lit from a direction — embossed facets, glassy sheen
 //   kind   'fractalNoise' (soft clouds) | 'turbulence' (creased ridges, veins)
@@ -14,7 +14,7 @@
 //   light  {az, el, scale}: direction and relief of a 'light' layer
 // A texture tiles seamlessly (default) or, with cover:true, is one image stretched over the whole screen — the only
 // mode where warping is allowed, since a warp would break a tile's seams.
-import { currentTheme, currentMix } from './themes.js';
+import { currentTheme } from './themes.js';
 
 const hump = [0, 0.05, 0.3, 0.7, 1, 0.7, 0.3, 0.05, 0];
 const bands = (a, b) => [0, 0, a, 0, 0, b, 0, 0, a, 0, 0, b * 0.8, 0, 0, a, 0, 0, b, 0, 0];
@@ -24,52 +24,58 @@ const MINERALS = {
   emerald: { cover: true, layers: [
     { freq: 0.0085, oct: 3, seed: 3, gain: 2.6, bias: -0.8, curve: bands(0.9, 0.55), warp: { freq: 0.005, oct: 2, scale: 140, seed: 7 } },
     { freq: 0.35, oct: 1, seed: 12, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 0.8 },
+    { kind: 'turbulence', freq: 0.018, oct: 3, seed: 27, gain: 1, bias: 0, curve: [1, 0.45, 0, 0, 0, 0, 0, 0, 0, 0], amp: 0.4, warp: { freq: 0.006, oct: 2, scale: 90, seed: 4 } },   // the fine cracks (jardin) of a real emerald
   ] },
   // a galaxy in a pocket: swirling nebula, thin spiral dust lanes, a few glowing cores, and a field of stars
   tanzanite: { cover: true, layers: [
     { freq: 0.0042, oct: 5, seed: 4, gain: 2.7, bias: -0.85, curve: hump, amp: 0.8, warp: { freq: 0.0032, oct: 2, scale: 280, seed: 9 } },
     { kind: 'turbulence', freq: 0.0075, oct: 4, seed: 2, gain: 1, bias: 0, curve: [1, 0.55, 0, 0, 0, 0, 0, 0, 0, 0], amp: 0.5, warp: { freq: 0.0032, oct: 2, scale: 280, seed: 9 } },
     { freq: 0.0016, oct: 1, seed: 21, gain: 5, bias: -2.1, curve: hump, amp: 0.9 },
-    { freq: 0.75, oct: 1, seed: 5, gain: 3, bias: -1.3, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], amp: 0.95 },
-    { freq: 0.2, oct: 1, seed: 33, gain: 3.2, bias: -1.5, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 1 },
+    { freq: 0.6, oct: 1, seed: 5, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 1 },
   ] },
   // creased veins running through ore, with the odd metallic glint
   cobaltite: { layers: [
     { kind: 'turbulence', freq: 0.009, oct: 4, seed: 5, gain: 1, bias: 0, curve: [1, 0.7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
     { freq: 0.3, oct: 1, seed: 40, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], amp: 0.9 },
+    { freq: 0.004, oct: 2, seed: 33, gain: 2.4, bias: -0.7, curve: hump, amp: 0.35 },   // a broad metallic sheen over the ore
   ] },
   // resin flowing in slow strata, with bubbles caught in it
   amber: { cover: true, layers: [
     { freq: '0.0025 0.02', oct: 2, seed: 8, gain: 2.6, bias: -0.8, curve: bands(0.75, 0.45), warp: { freq: '0.003 0.006', oct: 2, scale: 90, seed: 3 } },
     { freq: 0.06, oct: 1, seed: 15, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 2, amp: 0.8 },
+    { type: 'light', freq: 0.007, oct: 2, seed: 4, gain: 3, bias: -1.2, curve: [0, 0, 0, 0.1, 0.5, 1], amp: 0.4, light: { az: 70, el: 40, scale: 9 } },   // the glossy surface of polished resin
   ] },
   // a druzy crust of tiny crystals, lit so each one has a bright facet
   amethyst: { layers: [
-    { type: 'light', kind: 'turbulence', freq: 0.035, oct: 2, seed: 21, gain: 2.2, bias: -0.2, curve: [0, 0, 0.1, 0.5, 0.9, 1], light: { az: 55, el: 38, scale: 6 } },
+    { type: 'light', kind: 'turbulence', freq: 0.035, oct: 2, seed: 21, gain: 2.2, bias: -0.2, curve: [0, 0, 0.1, 0.5, 0.9, 1], amp: 0.8, light: { az: 55, el: 38, scale: 6 } },
+    { freq: 0.006, oct: 3, seed: 8, gain: 2.5, bias: -0.75, curve: hump, amp: 0.4 },   // the deeper glow of the geode
+    { freq: 0.5, oct: 1, seed: 19, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 0.9 },   // sparks off single crystals
   ] },
   // soft shifting bands of colour with fleeting bright flecks
   opal: { cover: true, layers: [
     { freq: 0.014, oct: 3, seed: 14, gain: 2.5, bias: -0.75, curve: [0, 0.15, 0.7, 0.2, 0, 0.1, 0.8, 0.15, 0, 0, 0.6, 0.1, 0, 0], warp: { freq: 0.006, oct: 2, scale: 120, seed: 5 } },
     { freq: 0.18, oct: 1, seed: 30, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 0.8 },
+    { type: 'light', freq: 0.01, oct: 2, seed: 2, gain: 3, bias: -1.2, curve: [0, 0, 0, 0.1, 0.5, 1], amp: 0.35, light: { az: 100, el: 45, scale: 7 } },   // the smooth, rounded surface of the stone
   ] },
   // growth striations along the crystal
   aquamarine: { layers: [
     { freq: '0.045 0.004', oct: 2, seed: 6, gain: 2.6, bias: -0.8, curve: bands(0.6, 0.7) },
     { freq: '0.02 0.0035', oct: 2, seed: 19, gain: 2.4, bias: -0.7, curve: hump, amp: 0.3 },
+    { type: 'light', freq: '0.03 0.008', oct: 2, seed: 12, gain: 3, bias: -1.2, curve: [0, 0, 0, 0.1, 0.5, 1], amp: 0.3, light: { az: 90, el: 35, scale: 6 } },   // light caught on the facets of the prism
   ] },
   // adularescence: a milky sheen floating over a smooth, glassy relief
   moonstone: { cover: true, layers: [
     { freq: '0.004 0.012', oct: 2, seed: 17, gain: 2.4, bias: -0.7, curve: hump, amp: 0.7, warp: { freq: 0.004, oct: 2, scale: 160, seed: 2 } },
     { type: 'light', freq: 0.006, oct: 3, seed: 6, gain: 3, bias: -1.2, curve: [0, 0, 0, 0.1, 0.5, 1], amp: 0.6, light: { az: 120, el: 30, scale: 12 } },
+    { freq: 0.25, oct: 1, seed: 44, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], grow: 1, amp: 0.7 },   // pin-points of light in the sheen
   ] },
   // volcanic glass: smooth conchoidal relief with fine fracture contours
   obsidian: { layers: [
     { type: 'light', freq: 0.011, oct: 4, seed: 9, gain: 3, bias: -1.3, curve: [0, 0, 0, 0.1, 0.5, 1], amp: 0.7, light: { az: 40, el: 32, scale: 10 } },
     { freq: 0.014, oct: 4, seed: 9, gain: 2.8, bias: -0.9, curve: [0, 0, 0, 0.95, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, 0.95, 0, 0, 0, 0, 0.7, 0, 0], amp: 0.8 },
+    { freq: 0.4, oct: 1, seed: 55, gain: 3, bias: -1.35, curve: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1], amp: 0.8 },   // tiny glints on the glass
   ] },
 };
-export const MINERAL_IDS = Object.keys(MINERALS);
-export const MAX_MIX = 3;
 const TILE = 480;            // a seamless tile, px
 const COVER = [1440, 900];   // a screen-filling image, px (stretched with mask-size: cover)
 
@@ -106,10 +112,7 @@ function layer(L, i, cover) {
   return s + `<feOffset in='${out}' dx='0' dy='0' result='L${i}'/>`;
 }
 
-// up to MAX_MIX minerals blend into one texture: their layers are all added, a little fainter the more there are
-function noise(ids) {
-  const ms = ids.map((id) => MINERALS[id]).filter(Boolean);
-  const m = { cover: ms.some((x) => x.cover), layers: ms.flatMap((x) => x.layers.map((L) => ({ ...L, amp: (L.amp ?? 1) * [1, 1, 0.8, 0.65][ms.length] }))) };
+function noise(m) {
   const [w, h] = m.cover ? COVER : [TILE, TILE];
   let f = '';
   m.layers.forEach((L, i) => { f += layer(L, i, m.cover); });
@@ -133,10 +136,10 @@ function grid() {
 }
 
 // Point --tex / --tex-size at the right pattern for the current theme and texture choice. Called by applyTheme/applyTexture.
-export function paintTexture(theme = currentTheme(), mode = document.documentElement.dataset.texture || 'mineral', mix = currentMix()) {
+export function paintTexture(theme = currentTheme(), mode = document.documentElement.dataset.texture || 'mineral') {
   const root = document.documentElement;
   if (mode === 'none') return;
-  const t = mode === 'grid' ? grid() : noise(mix.length ? mix.slice(0, MAX_MIX) : [MINERALS[theme] ? theme : 'emerald']);
+  const t = mode === 'grid' ? grid() : noise(MINERALS[theme] || MINERALS.emerald);
   root.style.setProperty('--tex', t.url);
   root.style.setProperty('--tex-size', t.size);
   root.style.setProperty('--tex-repeat', t.size === 'cover' ? 'no-repeat' : 'repeat');

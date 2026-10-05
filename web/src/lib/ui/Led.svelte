@@ -11,8 +11,8 @@
 <style>
   .led { display: inline-block; width: var(--s); height: var(--s); border-radius: 50%; flex: none; vertical-align: middle; background: currentColor;
     box-shadow: 0 0 4px currentColor, 0 0 11px color-mix(in srgb, currentColor 55%, transparent); }
-  .ok { color: var(--fg); }
-  .standby { color: var(--accent); }
+  .ok { color: var(--ok); }
+  .standby { color: var(--info); }
   .attention { color: var(--attn); }
   .warn { color: var(--warn); }
   .error { color: var(--err); }

@@ -124,7 +124,7 @@
   .it:last-of-type { border-bottom: 0; }
   .it:active { background: var(--bg-2); }
   .ic { flex: none; color: var(--fg-mute); padding-top: 1px; display: flex; }
-  .attn .ic { color: var(--attn); } .ic.ok { color: var(--accent); }
+  .attn .ic { color: var(--attn); } .ic.ok { color: var(--ok); }
   .tx { flex: 1; min-width: 0; }
   .t { color: var(--fg-hi); line-height: 1.35; overflow-wrap: anywhere; }
   .s { color: var(--fg-dim); font-size: var(--fs-sm); line-height: 1.4; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

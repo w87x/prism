@@ -307,6 +307,11 @@ body::after {
   --accent-hi: #96eff6;
   --accent-dim: #2a8c96;
   --accent-bg: #061a1c;
+
+  /* neutral greys carry no meaning of their own, so the indicators use the classic traffic-light set:
+     green ok, blue standby/info, yellow warn, orange attention, red error */
+  --ok: #4ade80;
+  --info: #4d9fff;
 }
 :root[data-theme='obsidian'] body {
   background:

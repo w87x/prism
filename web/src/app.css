@@ -9,6 +9,9 @@
   --rgb-attn: 255 153 0;
   --rgb-warn: 255 255 0;
   --rgb-err: 255 111 102;
+  /* status colours: OK and info follow the theme's text and accent unless a theme gives them their own (Obsidian: green / blue) */
+  --ok: var(--fg);
+  --info: var(--accent);
   --bg: #030806;
   --bg-1: #070e0b;
   --bg-2: #0b1713;
