@@ -47,7 +47,7 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				if len(banks) == 0 {
 					banks = defaults(ctx, env.Agent)
 				}
-				facts, err := s.Find(ctx, FindReq{Query: a.Query, Banks: banks, Agent: env.Agent, K: a.Limit, History: a.History, Deep: a.Deep})
+				facts, err := s.Find(ctx, FindReq{Query: a.Query, Banks: banks, Agent: env.Agent, K: a.Limit, History: a.History, Deep: a.Deep, Scope: useScope(env.TaskID, env.SessionID)})
 				if err != nil {
 					return "", err
 				}
@@ -173,13 +173,15 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				tools.Str("text", "the fact, one self-contained sentence"),
 				tools.Str("bank", "target bank spec (default profile)"),
 				tools.StrList("tags", "keywords"),
-				tools.Str("source_url", "for a fact learned from the web: the page URL it came from (must be a page you actually read). The same fact found on independent sites is trusted more")),
+				tools.Str("source_url", "for a fact learned from the web: the page URL it came from (must be a page you actually read). The same fact found on independent sites is trusted more"),
+				tools.Int("ttl_days", "only for a fact that goes stale (a price, availability, current status): days until it should be forgotten. Omit for lasting facts")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
 					Text string   `json:"text"`
 					Bank string   `json:"bank"`
 					Tags []string `json:"tags"`
 					URL  string   `json:"source_url"`
+					TTL  int      `json:"ttl_days"`
 				}](raw)
 				if err != nil {
 					return "", err
@@ -201,7 +203,7 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 					src += " (tainted)"
 					a.Tags = append(a.Tags, "unverified")
 				}
-				r, err := s.Store(ctx, StoreReq{Bank: a.Bank, Agent: env.Agent, Text: a.Text, Tags: a.Tags, Source: src, Confidence: conf, Origin: origin, TaskID: env.TaskID})
+				r, err := s.Store(ctx, StoreReq{Bank: a.Bank, Agent: env.Agent, Text: a.Text, Tags: a.Tags, Source: src, Confidence: conf, Origin: origin, TaskID: env.TaskID, TTLDays: clampTTL(a.TTL)})
 				if err != nil {
 					return "", err
 				}

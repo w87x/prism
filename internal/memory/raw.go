@@ -77,7 +77,8 @@ Reuse an existing project/domain bank (listed below, if any) whenever a fact cle
 Rules: one self-contained sentence per fact, third person ("User prefers tea over coffee"), include dates for time-sensitive facts. Skip small talk, transient states and trivia already obvious. Never extract today's date or the current time as a fact by itself (e.g. "Today is March 3rd") — it is available live from the clock tool and would be wrong the very next day; only mention a date when it matters for what's being remembered (a deadline, an event, when something changed). Prefer few high-value facts; return an empty list when nothing qualifies. When unsure between "user" and another bank, prefer the other bank — the user bank is pulled into every agent's context on every task, so keeping it to facts about the user keeps it useful.
 
 For each fact, also give value_ratio: how likely this is to still matter in an unrelated future task. A standing attribute — identity, equipment/hardware, a preference, a relationship, a recurring habit — is high (0.7-1.0): "User has a Synology NAS" or "User prefers tea over coffee" will keep being relevant. A one-off event or transient state is low (0.1-0.3): "Downloaded files X and Y" or "The download failed with a 407 error" only matters right now and is very unlikely to help a later, unrelated task. This is independent of confidence (how sure you are it's true) — a one-off event can be 100% certain and still low value_ratio.
-Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0,"value_ratio":0.0-1.0}]}`
+Facts that are only true for a while — a price, stock or availability, a version "currently" in use, a status of something in progress — also get ttl_days: roughly how many days until they are likely stale (a price: 7-30, a status: 3-14). Leave ttl_days out (or 0) for anything lasting.
+Answer JSON only: {"facts":[{"text":"...","bank":"user","tags":["..."],"confidence":0.0-1.0,"value_ratio":0.0-1.0,"ttl_days":0}]}`
 
 // maxRawAttempts/maxPendingAttempts cap how many times a batch (or a single extracted fact) is retried
 // before it is given up on rather than blocking the queue forever behind a permanently failing item.
@@ -391,6 +392,7 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			Tags       []string `json:"tags"`
 			Confidence float64  `json:"confidence"`
 			ValueRatio float64  `json:"value_ratio"`
+			TTLDays    int      `json:"ttl_days"`
 		} `json:"facts"`
 	}
 	if err := s.llm.CompleteJSON(ctx, "role:fast", extractPrompt, sb.String(), &parsed); err != nil {
@@ -415,7 +417,7 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			bank = "domain:General"
 		}
 		conf, tags, src := rawFactPolicy(tainted, f.Confidence, f.Tags, "raw")
-		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID}); err != nil {
+		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID, TTLDays: clampTTL(f.TTLDays)}); err != nil {
 			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, f.ValueRatio, tainted, err)
 			pending++
 			continue

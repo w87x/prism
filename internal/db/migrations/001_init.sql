@@ -177,7 +177,17 @@ CREATE TABLE memory_facts (
   valid_to      timestamptz,
   last_used     timestamptz,
   created_at    timestamptz NOT NULL DEFAULT now(),
+  expires_at    timestamptz,                  -- volatile facts (prices, availability, "currently…") retire themselves at this moment
   tsv           tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
+);
+CREATE INDEX memory_facts_expiry_idx ON memory_facts(expires_at) WHERE expires_at IS NOT NULL AND valid_to IS NULL;
+-- One row per (fact, scope): retrieval alone must not reinforce a fact over and over (a popularity loop), so a
+-- fact is reinforced at most once per scope (a task, or a chat-day) — see Service.reinforce.
+CREATE TABLE memory_use_receipts (
+  fact_id bigint NOT NULL REFERENCES memory_facts ON DELETE CASCADE,
+  scope   text NOT NULL,
+  at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (fact_id, scope)
 );
 CREATE INDEX memory_facts_bank_idx ON memory_facts(bank_id) WHERE valid_to IS NULL;
 CREATE INDEX memory_facts_tsv_idx ON memory_facts USING gin(tsv);

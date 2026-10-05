@@ -477,6 +477,9 @@ type StoreReq struct {
 	// per fact; a fact the user typed in directly is taken at their word as valuable regardless of what's
 	// passed here (see the Source=="user" override in Store).
 	ValueRatio float64
+	// TTLDays makes a volatile fact (a price, an availability, a "currently…" state) retire itself after that
+	// many days (0 = never expires).
+	TTLDays int
 }
 
 type StoreResult struct {
@@ -640,6 +643,11 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 	}
 	for _, old := range supersede {
 		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), superseded_by=$2 WHERE id=$1 AND valid_to IS NULL`, old, id); err != nil {
+			return nil, err
+		}
+	}
+	if r.TTLDays > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET expires_at=now()+make_interval(days=>$2) WHERE id=$1`, id, r.TTLDays); err != nil {
 			return nil, err
 		}
 	}
@@ -875,6 +883,9 @@ type FindReq struct {
 	MinRel  float64
 	NoLinks bool // do not follow links to related facts
 	Deep    bool // rerank the best candidates with the fast model (slower, more precise)
+	// Scope names the task (or chat-day) this retrieval serves: a fact is reinforced at most once per scope, so
+	// being retrieved again and again does not by itself raise its rank. Empty = reinforce on every call.
+	Scope string
 }
 
 // effRank applies time decay to a fact's rank: unused facts fade slowly (half-life 120 days). A pinned fact
@@ -906,6 +917,7 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 	if r.MinRel == 0 {
 		r.MinRel = 0.28
 	}
+	s.sweepExpired(ctx)
 	var ids []int64
 	for _, spec := range r.Banks {
 		b, err := s.BankBySpec(ctx, spec, r.Agent, false)
@@ -985,7 +997,11 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 		sc = s.rerank(ctx, r.Query, cands, sc, r.K)
 	}
 	if len(sc) > r.K {
-		sc = sc[:r.K]
+		if r.Deep { // the model already chose the order; just cut
+			sc = sc[:r.K]
+		} else { // drop near-duplicates so the K slots carry different information
+			sc = mmrSelect(cands, sc, r.K)
+		}
 	}
 	if len(sc) == 0 {
 		return nil, nil
@@ -998,8 +1014,7 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 	}
 	var linked []Fact
 	if !r.History {
-		_, _ = s.db.Exec(ctx, `UPDATE memory_facts SET hits=hits+1, last_used=now(), rank=LEAST(rank+0.05,5) WHERE id=ANY($1)`, pick)
-		s.strengthen(ctx, pick)
+		s.strengthen(ctx, s.reinforceUse(ctx, pick, r.Scope))
 		if !r.NoLinks {
 			linked = s.expand(ctx, scores, ids, min(maxExpansion, max(1, r.K/2)))
 		}

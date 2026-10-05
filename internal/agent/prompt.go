@@ -156,7 +156,7 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	}
 	rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	facts, err := e.Memory.Find(rctx, memory.FindReq{Query: spec.Input, Banks: banks, Agent: agent, K: 6, MinRel: 0.4, NoLinks: true})
+	facts, err := e.Memory.Find(rctx, memory.FindReq{Query: spec.Input, Banks: banks, Agent: agent, K: 6, MinRel: 0.4, NoLinks: true, Scope: recallScope(spec)})
 	if err != nil || len(facts) == 0 {
 		return ""
 	}
@@ -199,4 +199,17 @@ func (e *Engine) teamSection(ctx context.Context, p *Profile) string {
 4. Consolidate: merge, de-duplicate and reconcile conflicts between the results into one coherent answer for whoever asked you, noting anything you could not verify. You are accountable for the final result, not the specialists.
 `)
 	return sb.String()
+}
+
+// recallScope makes the auto-recall reinforce a fact at most once per task (or per chat-day for a conversation
+// with no task), not on every turn it happens to be retrieved.
+func recallScope(spec RunSpec) string {
+	var task, sess int64
+	if spec.Task != nil {
+		task = spec.Task.ID
+	}
+	if spec.Session != nil {
+		sess = spec.Session.ID
+	}
+	return memory.UseScope(task, sess)
 }
