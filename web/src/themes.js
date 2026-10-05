@@ -7,6 +7,8 @@ export const THEMES = [
   { id: 'amber', name: 'Amber', blurb: 'honey resin with a warm glow', swatch: ['#0d0702', '#ffb347', '#a8661f', '#5eb8ff'] },
   { id: 'amethyst', name: 'Amethyst', blurb: 'lilac crystal, magenta depth', swatch: ['#0b0414', '#d3a6ff', '#7c3dd6', '#5ee0c8'] },
   { id: 'opal', name: 'Opal', blurb: 'pale stone, slowly moving flashes of colour', swatch: ['#060a11', '#bfe9ee', '#4a7d97', '#ff9ee0'] },
+  { id: 'aquamarine', name: 'Aquamarine', blurb: 'clear sea-water, light drifting through it', swatch: ['#021416', '#7fe8f2', '#1c6b70', '#7aa8ff'] },
+  { id: 'moonstone', name: 'Moonstone', blurb: 'milky blue-white with a slow floating sheen', swatch: ['#090c14', '#d6def5', '#5a6b96', '#8fa8ff'] },
   { id: 'obsidian', name: 'Obsidian', blurb: 'volcanic glass: neutral greys, cool cyan', swatch: ['#060606', '#d4d4d8', '#5b5e66', '#44d9e6'] },
 ];
 // names used by earlier versions

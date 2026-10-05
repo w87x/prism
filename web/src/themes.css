@@ -295,7 +295,107 @@
   background-attachment: fixed;
 }
 
+/* ── Aquamarine ─ clear sea-water: cool cyan text on deep teal, periwinkle accent, slow caustic light ── */
+:root[data-theme='aquamarine'] {
+  --rgb-fg: 127 232 242;
+  --rgb-accent: 122 168 255;
+
+  --bg: #021416;
+  --bg-1: #041d20;
+  --bg-2: #072a2e;
+  --bg-3: #0b3e43;
+  --bg-4: #105359;
+  --line: #0f3a3d;
+  --line-2: #1c6b70;
+  --line-3: #2a9ba0;
+
+  --fg: #7fe8f2;
+  --fg-hi: #dffcff;
+  --fg-dim: #58c3cf;
+  --fg-mute: #3f98a3;
+  --fg-faint: #276b75;
+
+  --ico: #7fb6d6;
+  --ico-hi: #b8dcee;
+
+  --accent: #7aa8ff;
+  --accent-hi: #b3ceff;
+  --accent-dim: #4a73c2;
+  --accent-bg: #091a38;
+}
+:root[data-theme='aquamarine'] body {
+  background:
+    radial-gradient(ellipse 80% 55% at 25% -10%, rgb(60 220 235 / 0.20), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgb(40 120 220 / 0.14), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+}
+/* light through water: wide soft patches drifting across the page */
+:root[data-theme='aquamarine'] body::before {
+  content: '';
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 22% 14% at 20% 30%, rgb(120 255 245 / 0.08), transparent 70%),
+    radial-gradient(ellipse 26% 16% at 68% 22%, rgb(120 235 255 / 0.07), transparent 70%),
+    radial-gradient(ellipse 20% 13% at 45% 70%, rgb(150 255 235 / 0.07), transparent 70%),
+    radial-gradient(ellipse 24% 15% at 85% 78%, rgb(110 200 255 / 0.07), transparent 70%);
+  animation: aqua-drift 70s ease-in-out infinite alternate;
+}
+@keyframes aqua-drift { from { transform: translate(-3%, -2%) scale(1); } to { transform: translate(3%, 2.5%) scale(1.08); } }
+
+/* ── Moonstone ─ milky blue-white on blue-slate; the stone's floating sheen sweeps across slowly ── */
+:root[data-theme='moonstone'] {
+  --rgb-fg: 214 222 245;
+  --rgb-accent: 143 168 255;
+
+  --bg: #090c14;
+  --bg-1: #0e121c;
+  --bg-2: #151a27;
+  --bg-3: #1e2536;
+  --bg-4: #29324a;
+  --line: #232b40;
+  --line-2: #3b4766;
+  --line-3: #5a6b96;
+
+  --fg: #d6def5;
+  --fg-hi: #f7f9ff;
+  --fg-dim: #a6b3d6;
+  --fg-mute: #7e8bb0;
+  --fg-faint: #55608a;
+
+  --ico: #9fb2e0;
+  --ico-hi: #cbd7f2;
+
+  --accent: #8fa8ff;
+  --accent-hi: #c0cfff;
+  --accent-dim: #5a72c8;
+  --accent-bg: #0c1330;
+}
+:root[data-theme='moonstone'] body {
+  background:
+    radial-gradient(ellipse 85% 55% at 50% -14%, rgb(200 215 255 / 0.13), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 104% 106%, rgb(140 160 255 / 0.10), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+}
+:root[data-theme='moonstone'] body::before {
+  content: '';
+  position: fixed;
+  top: 0; bottom: 0; left: -60%;
+  width: 220%;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgb(185 205 255 / 0.055) 47%, rgb(225 235 255 / 0.08) 50%, rgb(185 205 255 / 0.055) 53%, transparent 62%);
+  animation: moon-sheen 48s ease-in-out infinite alternate;
+}
+@keyframes moon-sheen { from { transform: translateX(-12%); } to { transform: translateX(22%); } }
+
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme='tanzanite'] body::before,
-  :root[data-theme='opal'] body::before { animation: none; }
+  :root[data-theme='opal'] body::before,
+  :root[data-theme='aquamarine'] body::before,
+  :root[data-theme='moonstone'] body::before { animation: none; }
 }
