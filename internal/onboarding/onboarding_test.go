@@ -360,3 +360,31 @@ func TestAutoCountAndNoLimitsLeaveThePlanAlone(t *testing.T) {
 		t.Fatalf("auto count wording missing: %s", planSystem[:200])
 	}
 }
+
+// Team size 0 and Max agents 0 is full auto: the model decides how many agents, only a safety ceiling remains.
+func TestFullAutoLetsTheModelDecideTheTeamSize(t *testing.T) {
+	c := Constraints{}
+	if !c.free() || !strings.Contains(c.countRule(), "you decide how many") || strings.Contains(c.countRule(), "AT MOST") {
+		t.Fatalf("full auto wording: %q", c.countRule())
+	}
+	var plan []Draft
+	for i := 0; i < 12; i++ {
+		plan = append(plan, Draft{Name: fmt.Sprintf("A%d", i), Group: fmt.Sprintf("G%d", i)})
+	}
+	if v := c.violations(plan, nil); len(v) != 0 {
+		t.Fatalf("a big plan is fine in full auto: %v", v)
+	}
+	if out, notes := c.enforce(plan); len(out) != 12 || len(notes) != 0 {
+		t.Fatalf("nothing is trimmed in full auto: %d %v", len(out), notes)
+	}
+	var runaway []Draft
+	for i := 0; i < 45; i++ {
+		runaway = append(runaway, Draft{Name: fmt.Sprintf("R%d", i)})
+	}
+	if out, _ := c.enforce(runaway); len(out) != hardAgentCeiling {
+		t.Fatalf("the safety ceiling still applies: %d", len(out))
+	}
+	if (Constraints{MaxAgents: 5}).free() || (Constraints{Count: 3}).free() {
+		t.Fatal("any explicit size or cap means not free")
+	}
+}

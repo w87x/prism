@@ -141,11 +141,11 @@
 
   // ── step 3: agents ──
   // The limits the generated team must respect. They go into the planner's prompt and are also enforced afterwards,
-  // so a small model that ignores "at most 5 tools" is still held to it. 0 team size = as many as the needs call for.
+  // so a small model that ignores "at most 5 tools" is still held to it. Team size 0 = as many as the needs call for; with Max agents 0 too it is full auto and the model decides.
   const LIMITS_KEY = 'prism.onboardingLimits';
   const saved = (() => { try { return JSON.parse(localStorage.getItem(LIMITS_KEY)) || {}; } catch { return {}; } })();
   let count = $state(saved.count ?? 0);
-  let maxAgents = $state(saved.max_agents ?? 8);
+  let maxAgents = $state(saved.max_agents ?? 0);
   let maxTools = $state(saved.max_tools ?? 8);
   let style = $state(saved.style ?? 'job');
   let allowDelegate = $state(saved.allow_delegate ?? false);
@@ -340,7 +340,7 @@
         {#if regen}<Field label="Hints"><Textarea bind:value={hints} rows={3} mono={false} /></Field>{/if}
         <div class="row wrap genrow">
           <Field label="Team size" hint="0 = auto"><NumberInput bind:value={count} min={0} max={100} /></Field>
-          {#if count === 0}<Field label="Max agents" hint="cap when size is auto"><NumberInput bind:value={maxAgents} min={1} max={30} /></Field>{/if}
+          {#if count === 0}<Field label="Max agents" hint="0 = no cap: full auto"><NumberInput bind:value={maxAgents} min={0} max={30} /></Field>{/if}
           <Field label="Max tools per agent" hint="0 = no limit"><NumberInput bind:value={maxTools} min={0} max={40} /></Field>
           <Field label="Team style" hint={style === 'domain' ? 'one agent per area of your life or work, owning it end to end' : 'one agent per kind of work'}><Segmented bind:value={style} options={[{ value: 'job', label: 'By job' }, { value: 'domain', label: 'By domain' }]} /></Field>
           <Checkbox bind:checked={allowDelegate} label="allow agents to delegate" />

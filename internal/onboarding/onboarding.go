@@ -192,12 +192,16 @@ Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],
 // a small model reads "at most 5 tools" as a suggestion, so a plan that breaks a limit is sent back once with the exact
 // violations, and whatever still breaks is trimmed deterministically.
 type Constraints struct {
-	Count         int    `json:"count"`          // exactly this many agents; 0 = as many as the needs call for, up to MaxAgents
-	MaxAgents     int    `json:"max_agents"`     // cap for the automatic count (default 8)
+	Count         int    `json:"count"`          // exactly this many agents; 0 = as many as the needs call for
+	MaxAgents     int    `json:"max_agents"`     // cap for the automatic count; 0 = no cap (full auto: the model decides)
 	MaxTools      int    `json:"max_tools"`      // per agent, a hard limit; 0 = none
 	Style         string `json:"style"`          // "job" (an agent per kind of work) or "domain" (an agent per area, owning it end to end)
 	AllowDelegate bool   `json:"allow_delegate"` // may a generated agent delegate? (Atlas and its team leads do that; specialists should not)
 }
+
+// hardAgentCeiling is a safety net only: with no limit set the model decides how big the team is, but a runaway plan
+// is still cut here.
+const hardAgentCeiling = 30
 
 func (c Constraints) agentCap() int {
 	if c.Count > 0 {
@@ -206,14 +210,20 @@ func (c Constraints) agentCap() int {
 	if c.MaxAgents > 0 {
 		return c.MaxAgents
 	}
-	return 8
+	return hardAgentCeiling
 }
+
+// free reports full auto: no size, no cap — the model decides how many agents the needs call for.
+func (c Constraints) free() bool { return c.Count == 0 && c.MaxAgents == 0 }
 
 func (c Constraints) domain() bool { return c.Style == "domain" }
 
 func (c Constraints) countRule() string {
 	if c.Count > 0 {
 		return fmt.Sprintf("Plan exactly %d agents.", c.Count)
+	}
+	if c.free() {
+		return "Plan as many agents as the user's needs call for — you decide how many. When two needs overlap, give them to one agent rather than adding another; never pad the team."
 	}
 	return fmt.Sprintf("Plan as many agents as the user's needs call for — AT MOST %d. When two needs overlap, give them to one agent rather than adding another.", c.agentCap())
 }
@@ -249,7 +259,7 @@ func (c Constraints) violations(agents []Draft, valid map[string]bool) []string 
 	var v []string
 	if c.Count > 0 && len(agents) != c.Count {
 		v = append(v, fmt.Sprintf("the plan has %d agents; it must have exactly %d", len(agents), c.Count))
-	} else if c.Count == 0 && len(agents) > c.agentCap() {
+	} else if c.Count == 0 && !c.free() && len(agents) > c.agentCap() {
 		v = append(v, fmt.Sprintf("the plan has %d agents; at most %d are allowed — merge overlapping ones", len(agents), c.agentCap()))
 	}
 	groups := map[string][]string{}
