@@ -112,6 +112,29 @@ func (s *Server) registerMemory() {
 		}
 		return true, a.Memory.UnshareFact(ctx, "user", r.ID, r.Bank)
 	})
+	// predicate rules: which relations hold one value at a time ("lives in") and which accumulate ("owns")
+	rpc(s, "memory.predicates", func(ctx context.Context, _ none) ([]memory.Predicate, error) {
+		return a.Memory.Predicates(ctx)
+	})
+	rpc(s, "memory.predicate_set", func(ctx context.Context, r memory.Predicate) (bool, error) {
+		return true, a.Memory.SetPredicate(ctx, r)
+	})
+	rpc(s, "memory.predicate_delete", func(ctx context.Context, r struct {
+		Predicate string `json:"predicate"`
+	}) (bool, error) {
+		return true, a.Memory.DeletePredicate(ctx, r.Predicate)
+	})
+	// required evidence: which of the things a task needs does memory support, dispute, hold only stale, or lack
+	rpc(s, "memory.coverage", func(ctx context.Context, r struct {
+		Needs []memory.Need `json:"needs"`
+		Banks []string      `json:"banks"`
+	}) (*memory.CoverageReport, error) {
+		banks := r.Banks
+		if len(banks) == 0 {
+			banks = []string{"user"}
+		}
+		return a.Memory.CoverageOf(ctx, banks, "", r.Needs)
+	})
 	rpc(s, "memory.fact_move", func(ctx context.Context, r struct {
 		ID     int64 `json:"id"`
 		BankID int64 `json:"bank_id"`

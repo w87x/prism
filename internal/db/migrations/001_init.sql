@@ -202,6 +202,22 @@ CREATE TABLE memory_fact_banks (
   PRIMARY KEY (fact_id, bank_id)
 );
 CREATE INDEX memory_fact_banks_bank_idx ON memory_fact_banks(bank_id);
+-- Predicate rules: a single-valued predicate ("lives in") holds one value at a time, so a new value for the same
+-- subject replaces the old one; a many-valued one ("owns") accumulates. Unknown predicates are many-valued (the safe
+-- default: nothing is replaced by guesswork). `predicate` is the canonical wording, aliases are other phrasings of it.
+CREATE TABLE memory_predicates (
+  predicate   text PRIMARY KEY,
+  cardinality text NOT NULL DEFAULT 'many' CHECK (cardinality IN ('one','many')),
+  aliases     text[] NOT NULL DEFAULT '{}',
+  description text NOT NULL DEFAULT ''
+);
+INSERT INTO memory_predicates(predicate,cardinality,aliases,description) VALUES
+  ('lives in','one','{resides in,is based in,is located in,located in}','where someone lives'),
+  ('works at','one','{is employed by,is employed at,employed at,works for}','current employer'),
+  ('has job title','one','{job title,works as,is a}','current role'),
+  ('was born on','one','{birthday,date of birth,born on}','date of birth'),
+  ('has timezone','one','{timezone,time zone,is in timezone}','time zone'),
+  ('is called','one','{is named,has the name,name}','a name');
 -- What backs (or refutes) a fact: one row per piece of evidence. Independence is counted by source_group (the
 -- registrable domain, or whatever origin the evidence ultimately comes from), never by the number of rows — ten
 -- pages repeating one press release are one group.

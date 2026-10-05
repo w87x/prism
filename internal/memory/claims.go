@@ -202,6 +202,9 @@ func (s *Service) Promote(ctx context.Context, actor string, id int64, note stri
 		return fmt.Errorf("fact #%d is not a pending proposal", id)
 	}
 	s.audit(ctx, actor, "promote", id, note)
+	if sup, con, err := s.applyCardinality(ctx, s.db, id); err == nil { // a promoted fact is now current: single-valued rules apply
+		s.settleCardinality(ctx, s.db, id, sup, con)
+	}
 	s.changed()
 	return nil
 }

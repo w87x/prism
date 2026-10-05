@@ -63,6 +63,33 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_check", Category: "memory", Base: true, Risk: tools.RiskRead,
+			Description: "Check what memory can SUPPORT for a task: give the specific things you need (a price, a spec, a date) and get, per item, whether memory supports it, disputes it, only has a stale or unverified version, or has nothing in the searched banks — plus the list of gaps. " +
+				"Use it before relying on memory for facts a task depends on, instead of guessing from a few memory_find hits. A gap means 'not found here', not 'false': go and fetch or verify those items.",
+			Params: tools.Obj("needs", tools.ObjList("needs", "the things you need", "item",
+				tools.Str("item", "what you need, as a short question or phrase, e.g. 'GMKtec EVO-X2 price'"),
+				tools.Int("max_age_days", "optional: evidence learned longer ago than this counts as stale (e.g. 14 for a price)")),
+				tools.StrList("banks", "bank specs to search (default: your usual banks)")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					Needs []Need   `json:"needs"`
+					Banks []string `json:"banks"`
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				banks := a.Banks
+				if len(banks) == 0 {
+					banks = defaults(ctx, env.Agent)
+				}
+				rep, err := s.CoverageOf(ctx, banks, env.Agent, a.Needs)
+				if err != nil {
+					return "", err
+				}
+				return rep.Render(), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_models", Category: "memory", Base: true, Risk: tools.RiskRead,
 			Description: "Read the user's mental models: standing questions about their world (projects, preferences, setups…) with a maintained answer each. Look here FIRST for broad questions, before memory_find digs through raw facts. Pass part of a name or question to filter.",
 			Params:      tools.Obj("", tools.Str("filter", "optional text to match against model names and questions")),

@@ -92,9 +92,7 @@ func (s *Service) Digest(ctx context.Context, since time.Time) (*Digest, error) 
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM memory_links l JOIN memory_facts a ON a.id=l.a JOIN memory_facts b ON b.id=l.b
 		WHERE l.kind=$1 AND a.valid_to IS NULL AND b.valid_to IS NULL`, LinkContradicts).Scan(&d.Contradictions)
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM memory_facts WHERE kind='fact' AND valid_to IS NULL AND status<>'proposed' AND confidence<0.5`).Scan(&d.Unverified)
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM memory_facts f WHERE f.kind='conclusion' AND f.valid_to IS NULL AND EXISTS(
-		SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
-		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL)`).Scan(&d.Stale)
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM memory_facts f WHERE f.kind='conclusion' AND f.valid_to IS NULL AND `+staleExpr("f")).Scan(&d.Stale)
 	if d.Questions, err = q(`SELECT f.text, 'question', ` + label + ` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
 		WHERE f.kind='conclusion' AND f.source='analysis' AND f.valid_to IS NULL AND f.tags && ARRAY['question'] ORDER BY f.id DESC LIMIT 4`); err != nil {
 		return nil, err

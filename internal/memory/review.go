@@ -71,11 +71,9 @@ func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 		return nil, err
 	}
 
-	// same staleness test as the Stale column in factCols: a conclusion whose evidence has since been retired.
+	// same staleness test as the Stale column in factCols: a conclusion with a retired premise anywhere beneath it.
 	srows, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.kind='conclusion' AND f.valid_to IS NULL
-		AND EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
-			WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL)
+		WHERE f.kind='conclusion' AND f.valid_to IS NULL AND `+staleExpr("f")+`
 		ORDER BY f.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

@@ -221,14 +221,13 @@ func (s *Service) DeleteBank(ctx context.Context, id int64) error {
 
 // ── facts ───────────────────────────────────────────────────────────────────
 
-const factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END,f.text,f.tags,f.rank,f.hits,f.confidence,f.source,
+var factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END,f.text,f.tags,f.rank,f.hits,f.confidence,f.source,
 	f.supersedes,f.superseded_by,f.valid_from,f.valid_to,f.last_used,f.created_at,f.embedding IS NOT NULL,
 	(SELECT count(*) FROM memory_links lk WHERE lk.a=f.id OR lk.b=f.id),
 	f.kind,
 	CASE WHEN f.kind='conclusion' THEN (SELECT count(*) FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact') ELSE 0 END,
-	CASE WHEN f.kind='conclusion' THEN EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
-		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL) ELSE false END,
+	` + staleConclusionExpr("f") + `,
 	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,f.expires_at,f.subject,f.predicate,f.object,f.qualifiers,
 	ARRAY(SELECT mb.kind||CASE WHEN mb.kind='user' THEN '' ELSE ':'||mb.name END FROM memory_fact_banks fb JOIN memory_banks mb ON mb.id=fb.bank_id WHERE fb.fact_id=f.id ORDER BY mb.id),
 	EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=f.id THEN ck.b ELSE ck.a END
@@ -652,6 +651,7 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 	}
 	defer tx.Rollback(ctx)
 	var id int64
+	var ruleSup, ruleCon []int64 // facts replaced / disputed by a single-valued predicate rule
 	var sup *int64
 	if len(supersede) > 0 {
 		sup = &supersede[0]
@@ -690,6 +690,10 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET subject=$2,predicate=$3,object=$4,qualifiers=$5 WHERE id=$1`, id, sub, pred, obj, q); err != nil {
 			return nil, err
 		}
+		ruleSup, ruleCon, err = s.applyCardinality(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if r.TTLDays > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET expires_at=now()+make_interval(days=>$2) WHERE id=$1`, id, r.TTLDays); err != nil {
@@ -699,8 +703,9 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.settleCardinality(ctx, s.db, id, ruleSup, ruleCon)
 	retired := map[int64]bool{}
-	for _, old := range supersede {
+	for _, old := range append(append([]int64{}, supersede...), ruleSup...) {
 		retired[old] = true
 	}
 	var close []neighbour
@@ -723,7 +728,7 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 	s.autoLink(ctx, id, bank.ID, r.Text, vec, close)
 	f, err := s.GetFact(ctx, id)
 	s.changed()
-	return &StoreResult{Fact: f, Superseded: supersede}, err
+	return &StoreResult{Fact: f, Superseded: append(append([]int64{}, supersede...), ruleSup...)}, err
 }
 
 type cand struct {
@@ -741,6 +746,8 @@ type cand struct {
 	value    float64
 	// contested: a live fact contradicts this one; userConfirmed: the user vouched for it
 	contested, userConfirmed bool
+	// stale: a conclusion with a retired premise somewhere beneath it
+	stale bool
 }
 
 // vecSims asks pgvector for the nearest facts to qv: id → cosine similarity.
@@ -811,7 +818,7 @@ func (s *Service) candidatesByIDs(ctx context.Context, ids []int64) ([]cand, err
 }
 
 // candExtra: whether the user vouched for the fact, and whether a live fact contradicts it.
-const candExtra = `confirmation='user_confirmed',EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=memory_facts.id THEN ck.b ELSE ck.a END WHERE (ck.a=memory_facts.id OR ck.b=memory_facts.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')`
+var candExtra = `confirmation='user_confirmed',EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=memory_facts.id THEN ck.b ELSE ck.a END WHERE (ck.a=memory_facts.id OR ck.b=memory_facts.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed'),` + staleConclusionExpr("memory_facts")
 
 func scanCands(rows pgx.Rows) ([]cand, error) {
 	var out []cand
@@ -819,7 +826,7 @@ func scanCands(rows pgx.Rows) ([]cand, error) {
 		var c cand
 		var emb []byte
 		var rk, cf, vr float32
-		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned, &vr, &c.userConfirmed, &c.contested); err != nil {
+		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned, &vr, &c.userConfirmed, &c.contested, &c.stale); err != nil {
 			return nil, err
 		}
 		c.vec, c.rank, c.conf, c.value = decodeVec(emb), float64(rk), float64(cf), float64(vr)
@@ -947,6 +954,8 @@ type FindReq struct {
 	// Scope names the task (or chat-day) this retrieval serves: a fact is reinforced at most once per scope, so
 	// being retrieved again and again does not by itself raise its rank. Empty = reinforce on every call.
 	Scope string
+	// NoReinforce: a read-only look (coverage checks); nothing is reinforced and no links are strengthened.
+	NoReinforce bool
 }
 
 // effRank applies time decay to a fact's rank: unused facts fade slowly (half-life 120 days). A pinned fact
@@ -1053,6 +1062,9 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 		if c.contested {
 			w *= contestedWeight
 		}
+		if c.stale {
+			w *= staleWeight
+		}
 		w *= 0.9 + 0.1*c.value // durable facts (a standing attribute) edge out equally-relevant transient ones
 		sc = append(sc, scoredIdx{i, (0.55*rel[i] + 0.45*fused[i]) * w})
 	}
@@ -1077,7 +1089,7 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 		scores[pick[i]] = x.score
 	}
 	var linked []Fact
-	if !r.History {
+	if !r.History && !r.NoReinforce {
 		s.strengthen(ctx, s.reinforceUse(ctx, pick, r.Scope))
 		if !r.NoLinks {
 			linked = s.expand(ctx, scores, ids, min(maxExpansion, max(1, r.K/2)))
