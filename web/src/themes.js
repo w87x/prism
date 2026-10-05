@@ -32,3 +32,20 @@ export function applyTheme(id, save = true) {
   window.dispatchEvent(new CustomEvent('prism-theme', { detail: id }));
   return id;
 }
+
+// Texture: "mineral" (each theme's own pattern, the default), the plain "grid", or "none". Remembered per device.
+export const TEXTURES = [{ id: 'mineral', name: 'Mineral' }, { id: 'grid', name: 'Grid' }, { id: 'none', name: 'None' }];
+const TKEY = 'prism.texture';
+
+export function currentTexture() {
+  try { const t = JSON.parse(localStorage.getItem(TKEY)); if (TEXTURES.some((x) => x.id === t)) return t; } catch {}
+  return 'mineral';
+}
+
+export function applyTexture(id, save = true) {
+  if (!TEXTURES.some((x) => x.id === id)) id = 'mineral';
+  const root = document.documentElement;
+  if (id === 'mineral') delete root.dataset.texture; else root.dataset.texture = id;
+  if (save) { try { localStorage.setItem(TKEY, JSON.stringify(id)); } catch {} }
+  return id;
+}

@@ -79,8 +79,6 @@ html { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highli
 body {
   /* soft gradients plus a fine ½ cm grid (19 px) */
   background:
-    linear-gradient(rgb(var(--rgb-fg) / 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
-    linear-gradient(90deg, rgb(var(--rgb-fg) / 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
     radial-gradient(ellipse 90% 60% at 50% -12%, rgb(var(--rgb-fg) / 0.11), transparent 60%),
     radial-gradient(ellipse 60% 60% at 105% 105%, rgb(var(--rgb-accent) / 0.09), transparent 62%),
     var(--bg);
