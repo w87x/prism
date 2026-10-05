@@ -53,6 +53,26 @@ func (s *Server) registerTrackers() {
 		return true, tk().Delete(ctx, r.Name)
 	})
 
+	// alerts: deterministic conditions on typed columns, checked on every write
+	rpc(s, "trackers.conditions_set", func(ctx context.Context, r struct {
+		Name       string              `json:"name"`
+		Conditions []tracker.Condition `json:"conditions"`
+	}) ([]tracker.Condition, error) {
+		t, err := tk().Get(ctx, r.Name)
+		if err != nil {
+			return nil, err
+		}
+		return tk().SetConditions(ctx, t.ID, r.Conditions)
+	})
+	rpc(s, "trackers.runs", func(ctx context.Context, r struct {
+		Name string `json:"name"`
+	}) ([]tracker.Receipt, error) {
+		t, err := tk().Get(ctx, r.Name)
+		if err != nil {
+			return nil, err
+		}
+		return tk().Runs(ctx, t.ID, 30)
+	})
 	rpc(s, "trackers.row_delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (bool, error) {

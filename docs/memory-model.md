@@ -48,7 +48,32 @@ proposed → active ⇄ contested → superseded | retracted | expired
 * A fact has one **home bank** and can be shown in others (`memory_fact_banks`, `ShareFact`) without copying:
   one claim, one evidence set, many shelves.
 
+## Coverage, rules and inference (added later)
+
+* **Required evidence**: `memory_check` / `memory.coverage` take the specific things a task needs and answer per
+  item: supported, disputed, stale (optionally with a max age), weak (unverified) or not found in the searched
+  banks — plus the gap list. Read-only: checking reinforces nothing. "Not found" describes the searched scope only.
+* **Predicate cardinality** (`memory_predicates`): a single-valued predicate ("lives in", "works at") replaces the
+  old value for the same subject; a user-confirmed or trusted fact is disputed instead of replaced by a rule or by a
+  weak report. Aliases map phrasings to one rule; unknown predicates accumulate.
+* **Transitive staleness**: a conclusion is stale when any premise beneath it, at any depth, was retired.
+  Derived on read (recursive query), flagged and down-weighted in recall, listed in Review and the digest.
+* **Knowledge pages** (from memo's article cache): a page is stale as soon as a fact it was written from is
+  retired, corrected or lapses (`kb_read` warns and queues a rebuild; the sweep rebuilds promptly; a rebuild
+  re-reads its sources before committing).
+* **Trackers** (from memo's trackers): typed columns (checked, coerced), `tracker_snapshot` — one atomic,
+  idempotent run per refresh where a complete snapshot marks vanished rows *missing* (never deleted) and a partial
+  one leaves absent rows alone — row events with a kind, and alerts: deterministic three-valued conditions on typed
+  columns (`tracker_alert`) that fire only on a real transition and never treat an unobserved value as false.
+
+## Agents and tools
+
+Agents have fixed toolsets: nothing is loaded at run time. `tool_search` only looks up who holds a tool; a call to a
+tool outside the run's toolset is refused. A missing tool means `ask_colleague` a holder, or `report_blocked`
+(what is missing, what was done, artifact references). Material moves between agents by reference
+(`artifact_save`, `scratchpad_share`, `refs`), never pasted.
+
 ## Not implemented (from memo)
 
-Required-evidence requests with coverage/gap reporting, predicate cardinality schemas, transitive inference
-invalidation, dependency-backed knowledge-article caching, tracker/knowledge modules (PRISM has its own).
+Outcome feedback on retrieved evidence (helped / misled / missing), qualifier-aware validity intervals on facts,
+section-level (rather than page-level) invalidation of knowledge pages, tracker proposals into shared memory.

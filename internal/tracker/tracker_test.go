@@ -113,8 +113,9 @@ func TestChangesAreRecordedAndOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 2 {
-		t.Fatalf("expected 2 recorded price changes, got %d: %+v", len(changes), changes)
+	// the row's arrival is an event too ("what's new" must include it), then the two price changes
+	if len(changes) != 3 || changes[2].Kind != "added" {
+		t.Fatalf("expected the arrival plus 2 recorded price changes, got %d: %+v", len(changes), changes)
 	}
 	if changes[0].NewValue != "1000" || changes[1].NewValue != "1100" {
 		t.Fatalf("expected newest-first order, got %+v", changes)
@@ -183,7 +184,7 @@ func TestRetiringAnAlreadyGoneRowIsANoOp(t *testing.T) {
 	}
 	n := 0
 	for _, c := range changes {
-		if c.Field == "status" {
+		if c.Kind == "retired" {
 			n++
 		}
 	}

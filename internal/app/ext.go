@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/browser"
 	"prism/internal/consult"
 	"prism/internal/docsearch"
@@ -73,7 +74,25 @@ func (a *App) buildExtensions(ctx context.Context) error {
 	a.Engine.Skills = x.Skills
 
 	// structured trackers
-	x.Trackers = &tracker.Service{DB: a.DB.Pool, OnChange: func() { a.Emit("trackers.update", nil) }}
+	x.Trackers = &tracker.Service{DB: a.DB.Pool, OnChange: func() { a.Emit("trackers.update", nil) },
+		// an alert that became true is a message to the user — no model in the loop
+		OnAlert: func(ctx context.Context, al tracker.Alert) {
+			if !al.Met {
+				return
+			}
+			name := al.Row.Key
+			for _, k := range []string{"Name", "Title", "name", "title"} {
+				if v, ok := al.Row.Data[k].(string); ok && v != "" {
+					name = v
+					break
+				}
+			}
+			text := fmt.Sprintf("Tracker “%s”: %s — %s (now %v)", al.Tracker.Name, name, al.Condition.Describe(), al.Row.Data[al.Condition.Field])
+			if al.Row.SourceURL != "" {
+				text += "\n" + al.Row.SourceURL
+			}
+			a.Engine.Notify(ctx, agent.Notice{Agent: "Trackers", Text: text, Level: "attention"})
+		}}
 	tracker.RegisterTools(a.Tools, x.Trackers)
 
 	// browser + web

@@ -10,6 +10,8 @@
   import Badge from '../lib/ui/Badge.svelte';
   import Empty from '../lib/ui/Empty.svelte';
   import Icon from '../lib/ui/Icon.svelte';
+  import Select from '../lib/ui/Select.svelte';
+  import Checkbox from '../lib/ui/Checkbox.svelte';
 
   let trackers = $state([]);
   let selected = $state(null); // { tracker, rows, changes } — shown in-page instead of a modal (tables get big)
@@ -36,11 +38,30 @@
   $effect(() => { if (S.selectedTrackerName) { const name = S.selectedTrackerName; S.selectedTrackerName = null; untrack(() => open({ name })); } });
 
   async function create() {
-    const cols = form.columns.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).map((name) => ({ name }));
+    // "Price:number" declares a type (string, number, boolean, time, strings); a bare name stays free-form
+    const cols = form.columns.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).map((x) => { const [name, type] = x.split(':').map((y) => y.trim()); return type ? { name, type: type.toLowerCase() } : { name }; });
     if (!form.name.trim() || !cols.length) { toast('Name and at least one column are required'); return; }
     const t = await call('trackers.create', { name: form.name.trim(), description: form.description.trim(), columns: cols });
     if (t) { createOpen = false; form = { name: '', description: '', columns: '' }; toast(`Tracker "${t.name}" created`); load(); }
   }
+
+  // alerts: a deterministic test on a typed column, checked on every write
+  const OPS = [['lte', '≤'], ['lt', '<'], ['gte', '≥'], ['gt', '>'], ['eq', '='], ['ne', '≠'], ['contains', 'contains'], ['exists', 'is known']];
+  let alert = $state({ name: '', field: '', op: 'lte', value: '', notify: true });
+  const opSym = (op) => (OPS.find((o) => o[0] === op) || [op, op])[1];
+  async function saveAlerts(list) {
+    const r = await call('trackers.conditions_set', { name: selected.tracker.name, conditions: list });
+    if (r) { selected = (await call('trackers.get', { name: selected.tracker.name }, { quiet: true })) || selected; return true; }
+    return false;
+  }
+  async function addAlert() {
+    const a = alert;
+    const col = selected.tracker.columns.find((c) => c.name === a.field);
+    const value = a.op === 'exists' ? undefined : col?.type === 'number' ? Number(a.value) : a.value;
+    const keep = (selected.tracker.conditions || []).filter((c) => c.name.toLowerCase() !== a.name.trim().toLowerCase());
+    if (await saveAlerts([...keep, { name: a.name.trim(), field: a.field, op: a.op, value, notify: a.notify }])) { alert = { name: '', field: a.field, op: a.op, value: '', notify: true }; toast('Alert saved'); }
+  }
+  const removeAlert = (name) => saveAlerts((selected.tracker.conditions || []).filter((c) => c.name !== name));
 
   async function deleteTracker(t) {
     if (await confirmBox({ title: 'Delete tracker', text: `Delete "${t.name}" and all its rows and history?`, ok: 'Delete', danger: true })) {
@@ -109,15 +130,15 @@
             <table class="t">
               <thead>
                 <tr>
-                  {#each t.columns as c}<th>{c.name}</th>{/each}
+                  {#each t.columns as c}<th title={[c.type, c.unit, c.required && 'required', c.description].filter(Boolean).join(' · ')}>{c.name}{#if c.type}<span class="mute sm ty">{c.type}</span>{/if}</th>{/each}
                   <th title="whether this row is still active or was retired">Tracking</th><th>Source</th><th style="width:90px">Updated</th><th style="width:32px"></th>
                 </tr>
               </thead>
               <tbody>
                 {#each selected.rows as r (r.id)}
-                  <tr class:gone={r.status === 'gone'}>
+                  <tr class:gone={r.status !== 'active'}>
                     {#each t.columns as c}{@const v = cellText(r, c.name)}<td class="ellipsis" style="max-width:320px" title={v}>{#if isURL(v)}<a href={v} target="_blank" rel="noopener">{v}</a>{:else}{v}{/if}</td>{/each}
-                    <td>{#if r.status === 'gone'}<Badge tone="mute">gone</Badge>{:else}<Badge tone="ok">active</Badge>{/if}</td>
+                    <td>{#if r.status === 'gone'}<Badge tone="mute" title="retired on purpose">gone</Badge>{:else if r.status === 'missing'}<Badge tone="warn" title="not seen in the latest complete refresh since {r.missing_since?.slice(0, 10)} — that does not mean it ceased to exist; it comes back if it is seen again">missing</Badge>{:else}<Badge tone="ok">active</Badge>{/if}</td>
                     <td class="ellipsis" style="max-width:220px" title={r.source_url}>{#if r.source_url}<a href={r.source_url} target="_blank" rel="noopener">{r.source_url}</a>{/if}</td>
                     <td class="mute sm">{ago(r.updated_at)}</td>
                     <td><Button size="sm" variant="ghost" onclick={() => deleteRow(r)}><Icon name="trash" size={11} /></Button></td>
@@ -127,13 +148,26 @@
             </table>
           </div>
         {/if}
+        <Field label="Alerts" hint="deterministic tests on typed columns, checked on every write — you are told when one becomes true; a row whose value was not observed is unknown, never false">
+          {#each t.conditions || [] as c (c.name)}
+            <div class="chg"><span class="hi">{c.name}</span> <span class="dim">{c.field} {opSym(c.op)} {c.value ?? ''}</span> {#if c.notify}<Badge tone="accent">notifies</Badge>{/if} <button type="button" class="x" title="remove" onclick={() => removeAlert(c.name)}>×</button></div>
+          {:else}<div class="mute sm">none</div>{/each}
+          <div class="alertform">
+            <Input bind:value={alert.name} placeholder="name, e.g. cheap" size="sm" />
+            <Select bind:value={alert.field} options={t.columns.map((c) => ({ value: c.name, label: c.name + (c.type ? ' (' + c.type + ')' : '') }))} placeholder="column" />
+            <Select bind:value={alert.op} options={OPS.map(([v, l]) => ({ value: v, label: l }))} />
+            {#if alert.op !== 'exists'}<Input bind:value={alert.value} placeholder="value" size="sm" />{/if}
+            <Checkbox bind:checked={alert.notify} label="notify" />
+            <Button size="sm" variant="primary" disabled={!alert.name.trim() || !alert.field || (alert.op !== 'exists' && alert.value === '')} onclick={addAlert}>Add alert</Button>
+          </div>
+        </Field>
         <Field label="Recent changes">
           {#if !selected.changes.length}
             <div class="mute sm">none yet</div>
           {:else}
             <div class="changes">
               {#each selected.changes as c (c.id)}
-                <div class="chg"><span class="hi">{c.row_key}</span> <span class="dim">{c.field}</span>: <span class="mute">{c.old_value || '(none)'}</span> → <span>{c.new_value}</span> <span class="mute sm">{ago(c.created_at)}</span></div>
+                <div class="chg">{#if c.kind && c.kind !== 'changed'}<Badge tone={c.kind === 'condition_met' ? 'ok' : c.kind === 'missing' || c.kind === 'retired' ? 'warn' : 'accent'}>{c.kind.replace('_', ' ')}</Badge> {/if}<span class="hi">{c.row_key}</span> <span class="dim">{c.field}</span>: <span class="mute">{c.old_value || '(none)'}</span> → <span>{c.new_value}</span> <span class="mute sm">{ago(c.created_at)}</span></div>
               {/each}
             </div>
           {/if}
@@ -146,7 +180,7 @@
 <Modal bind:open={createOpen} title="New Tracker" width={480}>
   <Field label="Name"><Input bind:value={form.name} placeholder="Apartments" /></Field>
   <Field label="Description" hint="what this tracks and why (optional)"><Textarea bind:value={form.description} rows={2} /></Field>
-  <Field label="Columns" hint="one per line or comma-separated, e.g. Price, Bedrooms, Location, Status"><Textarea bind:value={form.columns} rows={3} /></Field>
+  <Field label="Columns" hint="one per line or comma-separated. Add :type to a column to have it checked and alertable, e.g. Name, Price:number, Released:time, InStock:boolean (types: string, number, boolean, time, strings)"><Textarea bind:value={form.columns} rows={3} /></Field>
   {#snippet footer()}
     <Button variant="ghost" onclick={() => (createOpen = false)}>Cancel</Button>
     <Button variant="primary" onclick={create}>Create</Button>
@@ -176,4 +210,8 @@
   .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .changes { display: flex; flex-direction: column; gap: 4px; max-height: 24vh; overflow: auto; font-size: var(--fs-sm); flex: none; }
   .chg { border-bottom: 1px solid var(--line-2); padding-bottom: 3px; }
+  .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font: inherit; }
+  .ty { margin-left: 5px; }
+  .alertform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  .alertform > :global(*) { flex: 0 1 auto; width: auto; min-width: 120px; }
 </style>
