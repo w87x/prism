@@ -169,21 +169,134 @@ func capitalize(s string) string {
 
 const planPrompt = `You design the initial team of specialist AI agents for a personal assistant called PRISM. The user gave you hints about themselves and their needs.
 
-Plan %d agents. For each give:
-- "name": a short, memorable, unique first-name-like name (NOT descriptive like "SearchBot"). Must not be any of: %s.
+{{COUNT}}
+{{STYLE}}
+For each agent give:
+- "name": a short, memorable, unique first-name-like name (NOT descriptive like "SearchBot"). Must not be any of: {{EXISTING}}.
 - "group": a broad category (Web, Coding, Data Analysis, Writing, Research, Home, Finance, Learning, Media, Health, ...).
 - "description": one line — what it is good for (shown in the agent catalog).
 - "traits": 4-8 lowercase search keywords.
-- "tools": the minimal set of tool names from the list below that the agent really needs (3-9).
-- "can_delegate": true only for agents that coordinate broader work.
+- "tools": {{TOOLS_RULE}} Agents can NOT load more tools later, so list everything the job needs, most important first.
+- "can_delegate": {{DELEGATE_RULE}}
 - "max_iterations": how many tool calls one task may use. Default is 24; give 35-60 to agents that will do long, multi-step work (coding, research, data processing, building things), and 10-16 to quick lookup agents. A budget that is too small makes long jobs end half-finished.
 
 Cover the user's stated needs first (for coding needs, the built-in Coder and Reviewer agents already exist); avoid overlapping roles; do not create agents for things the built-in staff already do (memory curation, agent hiring, tool selection).
 
 Available tools (name — purpose):
-%s
+{{TOOLS}}
 
 Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],"tools":[],"can_delegate":false,"max_iterations":24}]}`
+
+// Constraints are the limits a team must respect. They are written into the planner's prompt AND checked in code:
+// a small model reads "at most 5 tools" as a suggestion, so a plan that breaks a limit is sent back once with the exact
+// violations, and whatever still breaks is trimmed deterministically.
+type Constraints struct {
+	Count         int    `json:"count"`          // exactly this many agents; 0 = as many as the needs call for, up to MaxAgents
+	MaxAgents     int    `json:"max_agents"`     // cap for the automatic count (default 8)
+	MaxTools      int    `json:"max_tools"`      // per agent, a hard limit; 0 = none
+	Style         string `json:"style"`          // "job" (an agent per kind of work) or "domain" (an agent per area, owning it end to end)
+	AllowDelegate bool   `json:"allow_delegate"` // may a generated agent delegate? (Atlas and its team leads do that; specialists should not)
+}
+
+func (c Constraints) agentCap() int {
+	if c.Count > 0 {
+		return c.Count
+	}
+	if c.MaxAgents > 0 {
+		return c.MaxAgents
+	}
+	return 8
+}
+
+func (c Constraints) domain() bool { return c.Style == "domain" }
+
+func (c Constraints) countRule() string {
+	if c.Count > 0 {
+		return fmt.Sprintf("Plan exactly %d agents.", c.Count)
+	}
+	return fmt.Sprintf("Plan as many agents as the user's needs call for — AT MOST %d. When two needs overlap, give them to one agent rather than adding another.", c.agentCap())
+}
+
+func (c Constraints) styleRule() string {
+	if c.domain() {
+		return "Make the agents DOMAIN-centric: one agent per domain of the user's life or work (for example Home, Web research, Finance, Media), owning that domain end to end with every tool the domain needs — not one agent per tool, and not several narrow agents for one domain. Two agents must never share a group; the group names the domain."
+	}
+	return "Make the agents ROLE-centric: one agent per kind of work, with clearly different jobs."
+}
+
+func (c Constraints) toolsRule() string {
+	if c.MaxTools > 0 {
+		return fmt.Sprintf("the tool names (from the list below) it needs — AT MOST %d per agent, a hard limit; if a job seems to need more, narrow the job.", c.MaxTools)
+	}
+	return "the minimal set of tool names from the list below that the agent really needs (3-9)."
+}
+
+func (c Constraints) delegateRule() string {
+	if c.AllowDelegate {
+		return "true only for agents that coordinate broader work."
+	}
+	return "false for every agent (specialists do their own work; delegation is Atlas's job)."
+}
+
+func (c Constraints) render(existing, tools string) string {
+	return strings.NewReplacer("{{COUNT}}", c.countRule(), "{{STYLE}}", c.styleRule(), "{{EXISTING}}", existing,
+		"{{TOOLS_RULE}}", c.toolsRule(), "{{DELEGATE_RULE}}", c.delegateRule(), "{{TOOLS}}", tools).Replace(planPrompt)
+}
+
+// violations lists, in words a model can act on, what a plan breaks.
+func (c Constraints) violations(agents []Draft, valid map[string]bool) []string {
+	var v []string
+	if c.Count > 0 && len(agents) != c.Count {
+		v = append(v, fmt.Sprintf("the plan has %d agents; it must have exactly %d", len(agents), c.Count))
+	} else if c.Count == 0 && len(agents) > c.agentCap() {
+		v = append(v, fmt.Sprintf("the plan has %d agents; at most %d are allowed — merge overlapping ones", len(agents), c.agentCap()))
+	}
+	groups := map[string][]string{}
+	for _, d := range agents {
+		n := 0
+		for _, t := range d.Tools {
+			if valid[t] {
+				n++
+			}
+		}
+		if c.MaxTools > 0 && n > c.MaxTools {
+			v = append(v, fmt.Sprintf("%s has %d tools; at most %d are allowed — drop the least necessary", d.Name, n, c.MaxTools))
+		}
+		if !c.AllowDelegate && d.CanDelegate {
+			v = append(v, d.Name+" has can_delegate true; it must be false")
+		}
+		groups[strings.ToLower(strings.TrimSpace(d.Group))] = append(groups[strings.ToLower(strings.TrimSpace(d.Group))], d.Name)
+	}
+	if c.domain() {
+		for g, names := range groups {
+			if len(names) > 1 {
+				v = append(v, fmt.Sprintf("%s share the domain %q; a domain gets ONE agent — merge them", strings.Join(names, " and "), g))
+			}
+		}
+	}
+	sort.Strings(v)
+	return v
+}
+
+// enforce applies, without the model, the limits that can be applied mechanically. It returns notes on what it did.
+func (c Constraints) enforce(items []Draft) ([]Draft, []string) {
+	var notes []string
+	items = append([]Draft(nil), items...) // never edit the caller's plan in place
+	if len(items) > c.agentCap() {
+		notes = append(notes, fmt.Sprintf("kept the first %d of %d agents", c.agentCap(), len(items)))
+		items = items[:c.agentCap()]
+	}
+	for i := range items {
+		if c.MaxTools > 0 && len(items[i].Tools) > c.MaxTools {
+			notes = append(notes, fmt.Sprintf("%s: trimmed %d tools to %d", items[i].Name, len(items[i].Tools), c.MaxTools))
+			items[i].Tools = items[i].Tools[:c.MaxTools]
+		}
+		if !c.AllowDelegate {
+			items[i].CanDelegate = false
+		}
+	}
+	return items, notes
+}
 
 const soulPrompt = `Write the system prompt ("soul") for an AI agent inside a personal assistant. 120-250 words, plain text, no markdown headings, no code fences: its role, a numbered working method, the output format, and hard rules. Tailor it to what the user needs. Do not list tools. Output ONLY the prompt text, starting with "You are <Name>, ...".`
 
@@ -201,12 +314,9 @@ var SoulParallelism = 4
 // Propose plans a team with the chat model, then writes each agent's soul in its own
 // call so slow local models make visible progress instead of one huge request. On
 // failure it falls back to templates. progress may be nil.
-func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing []string, hints string, count int, model string, progress func(Progress)) (drafts []Draft, usedModel bool, err error) {
+func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing []string, hints string, cons Constraints, model string, progress func(Progress)) (drafts []Draft, usedModel bool, err error) {
 	if progress == nil {
 		progress = func(Progress) {}
-	}
-	if count <= 0 {
-		count = 5
 	}
 	have := map[string]bool{}
 	for _, n := range existing {
@@ -263,44 +373,71 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		userHints = "The user gave no hints: propose a broadly useful starting team."
 	}
 
-	progress(Progress{Stage: "planning", Note: "Planning the team…", Total: count})
-	pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	out, err := r.Complete(pctx, model, fmt.Sprintf(planPrompt, count, strings.Join(existing, ", "), strings.Join(tl, "\n")), userHints, true)
-	cancel()
-	if err != nil {
-		return fallback(fmt.Sprintf("planning failed (%v)", err))
-	}
-	var plan struct {
-		Agents []Draft `json:"agents"`
-	}
-	if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
-		return fallback("the model returned no usable plan")
-	}
-	seen := map[string]bool{}
-	var items []Draft
-	for _, d := range plan.Agents {
-		d.Name = strings.TrimSpace(d.Name)
-		if d.Name == "" || seen[strings.ToLower(d.Name)] {
-			continue
+	progress(Progress{Stage: "planning", Note: "Planning the team…", Total: cons.agentCap()})
+	system := cons.render(strings.Join(existing, ", "), strings.Join(tl, "\n"))
+	askPlan := func(user string) ([]Draft, error) {
+		pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		out, err := r.Complete(pctx, model, system, user, true)
+		cancel()
+		if err != nil {
+			return nil, err
 		}
-		seen[strings.ToLower(d.Name)] = true
-		var ts []string
-		for _, t := range d.Tools {
-			if valid[t] {
-				ts = append(ts, t)
+		var plan struct {
+			Agents []Draft `json:"agents"`
+		}
+		if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
+			return nil, errors.New("the model returned no usable plan")
+		}
+		return plan.Agents, nil
+	}
+	// clean drops unknown tools (and unknown-tool-only noise) and duplicate names; it keeps the model's order
+	clean := func(in []Draft) []Draft {
+		seen := map[string]bool{}
+		var out []Draft
+		for _, d := range in {
+			d.Name = strings.TrimSpace(d.Name)
+			if d.Name == "" || seen[strings.ToLower(d.Name)] {
+				continue
+			}
+			seen[strings.ToLower(d.Name)] = true
+			var ts []string
+			for _, t := range d.Tools {
+				if valid[t] {
+					ts = append(ts, t)
+				}
+			}
+			d.Tools = ts
+			if d.Group == "" {
+				d.Group = "General"
+			}
+			out = append(out, d)
+		}
+		return out
+	}
+	raw, perr := askPlan(userHints)
+	if perr != nil {
+		return fallback(fmt.Sprintf("planning failed (%v)", perr))
+	}
+	items := clean(raw)
+	// The check-and-repair loop: a plan that breaks a limit goes back to the model once, with the exact violations;
+	// what still breaks afterwards is enforced mechanically (tools trimmed, delegation off, extra agents dropped).
+	if v := cons.violations(items, valid); len(v) > 0 {
+		progress(Progress{Stage: "planning", Note: "Checking the plan against your limits (" + fmt.Sprint(len(v)) + " to fix)…", Total: cons.agentCap()})
+		prev, _ := json.Marshal(map[string]any{"agents": items})
+		fixed, ferr := askPlan(userHints + "\n\nYour previous plan:\n" + string(prev) + "\n\nIt breaks these limits:\n- " + strings.Join(v, "\n- ") + "\n\nReturn the corrected FULL plan, in the same JSON shape, that respects every limit.")
+		if ferr == nil {
+			if again := clean(fixed); len(again) > 0 {
+				items = again
 			}
 		}
-		d.Tools = ts
-		if d.Group == "" {
-			d.Group = "General"
-		}
-		items = append(items, d)
-		if len(items) >= count {
-			break
-		}
 	}
+	var notes []string
+	items, notes = cons.enforce(items)
 	if len(items) == 0 {
 		return fallback("the model returned no usable plan")
+	}
+	if len(notes) > 0 {
+		progress(Progress{Stage: "planning", Note: "Applied your limits: " + strings.Join(notes, "; "), Total: len(items)})
 	}
 	// The souls are independent of each other, so they are written in parallel (a hosted model, or a server that
 	// batches requests, finishes the team several times sooner; a single local model simply queues them). Progress

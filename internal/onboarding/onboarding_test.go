@@ -3,6 +3,7 @@ package onboarding
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"prism/internal/agent"
 	"strings"
 	"sync/atomic"
@@ -32,7 +33,7 @@ func TestProposeOffersMCPToolsToThePlanner(t *testing.T) {
 		}
 		return testutil.Reply{Content: `{"agents":[]}`}
 	}
-	_, _, _ = Propose(context.Background(), r, reg, nil, "I track GitHub issues", 3, "", nil)
+	_, _, _ = Propose(context.Background(), r, reg, nil, "I track GitHub issues", Constraints{Count: 3}, "", nil)
 	if !strings.Contains(plannerPrompt, "MCP tools") || !strings.Contains(plannerPrompt, "mcp__github__create_issue — [MCP github] Create an issue in a repository") {
 		t.Fatalf("the planner was not offered the MCP tool: %q", plannerPrompt)
 	}
@@ -126,7 +127,7 @@ func TestProposeWritesSoulsInParallelButReportsInOrder(t *testing.T) {
 	var overlap atomic.Bool
 	var drafts []string
 	start := time.Now()
-	out, used, err := Propose(context.Background(), r, reg, nil, "hints", 4, "", func(p Progress) {
+	out, used, err := Propose(context.Background(), r, reg, nil, "hints", Constraints{Count: 4, AllowDelegate: true}, "", func(p Progress) {
 		if busy.Add(1) > 1 {
 			overlap.Store(true)
 		}
@@ -179,7 +180,7 @@ func TestGeneratedDraftsGetAnIconHintThatIsNotSaved(t *testing.T) {
 			{"name":"Scout","group":"Web","description":"searches the web, checks prices and news","traits":["web","search","prices"]},
 			{"name":"Ledger","group":"Finance","description":"parses spreadsheets and csv files, computes statistics","traits":["data","csv","statistics"]}]}`}
 	}
-	out, used, err := Propose(context.Background(), r, reg, nil, "hints", 2, "", nil)
+	out, used, err := Propose(context.Background(), r, reg, nil, "hints", Constraints{Count: 2}, "", nil)
 	if err != nil || !used {
 		t.Fatalf("propose: %v %v", used, err)
 	}
@@ -206,5 +207,156 @@ func TestGeneratedDraftsGetAnIconHintThatIsNotSaved(t *testing.T) {
 	}
 	if p.Icon != "" {
 		t.Fatalf("a created agent must start without an icon so the model can pick one, got %q", p.Icon)
+	}
+}
+
+func regWithTools(n int) *tools.Registry {
+	reg := tools.NewRegistry(nil)
+	for i := 1; i <= n; i++ {
+		reg.Register(&tools.Tool{Name: fmt.Sprintf("tool_%d", i), Description: "does thing " + fmt.Sprint(i), Category: "x", Risk: tools.RiskRead, Params: tools.Obj(""),
+			Run: func(context.Context, *tools.Env, json.RawMessage) (string, error) { return "", nil }})
+	}
+	return reg
+}
+
+func TestConstraintsViolationsAndEnforcement(t *testing.T) {
+	valid := map[string]bool{"a": true, "b": true, "c": true, "d": true}
+	plan := []Draft{
+		{Name: "One", Group: "Home", Tools: []string{"a", "b", "c", "d"}, CanDelegate: true},
+		{Name: "Two", Group: "home", Tools: []string{"a"}},
+		{Name: "Three", Group: "Web", Tools: []string{"nonsense", "a"}},
+	}
+	c := Constraints{MaxTools: 2, MaxAgents: 2, Style: "domain"}
+	v := strings.Join(c.violations(plan, valid), "\n")
+	for _, want := range []string{"3 agents; at most 2", "One has 4 tools; at most 2", "One has can_delegate true", "share the domain"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("violations lack %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Three has") {
+		t.Errorf("unknown tool names must not count against the limit: %s", v)
+	}
+	out, notes := c.enforce(plan)
+	if len(out) != 2 || len(out[0].Tools) != 2 || out[0].Tools[0] != "a" || out[0].CanDelegate || len(notes) < 2 {
+		t.Fatalf("enforce: %+v %v", out, notes)
+	}
+	if got := strings.Join((Constraints{Count: 4}).violations(plan, valid), "\n"); !strings.Contains(got, "exactly 4") {
+		t.Fatalf("an exact count is a limit too: %v", got)
+	}
+	if v := (Constraints{}).violations(plan[:1], valid); len(v) != 1 || !strings.Contains(v[0], "can_delegate") {
+		t.Fatalf("with no limits only delegation (off by default) is flagged: %v", v)
+	}
+}
+
+// The limits are written into the planner's prompt, a plan that breaks them goes back once with the exact
+// violations, and the corrected plan is what the user sees.
+func TestProposeSendsABrokenPlanBackOnceWithTheViolations(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := regWithTools(10)
+	var planSystem string
+	var planCalls int
+	var repairUser string
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		user, _ := ms[len(ms)-1].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Someone, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		planCalls++
+		planSystem = sys
+		if strings.Contains(user, "breaks these limits") {
+			repairUser = user
+			return testutil.Reply{Content: `{"agents":[{"name":"Alpha","group":"Home","description":"home","tools":["tool_1","tool_2","tool_3","tool_4"]}]}`}
+		}
+		return testutil.Reply{Content: `{"agents":[{"name":"Alpha","group":"Home","description":"home","tools":["tool_1","tool_2","tool_3","tool_4","tool_5","tool_6","tool_7","tool_8"]}]}`}
+	}
+	out, used, err := Propose(context.Background(), r, reg, nil, "I run a smart home", Constraints{MaxTools: 4, MaxAgents: 3, Style: "domain"}, "", nil)
+	if err != nil || !used {
+		t.Fatalf("propose: %v %v", used, err)
+	}
+	for _, want := range []string{"AT MOST 4 per agent", "AT MOST 3", "DOMAIN-centric", "false for every agent"} {
+		if !strings.Contains(planSystem, want) {
+			t.Errorf("the planner prompt lacks %q", want)
+		}
+	}
+	if planCalls != 2 || !strings.Contains(repairUser, "Alpha has 8 tools; at most 4") {
+		t.Fatalf("one repair round with the violation expected: calls=%d repair=%q", planCalls, repairUser)
+	}
+	if len(out) != 1 || len(out[0].Tools) != 4 {
+		t.Fatalf("the corrected plan is what the user sees: %+v", out)
+	}
+}
+
+// A model that ignores the limits (and the repair request) still cannot get past them: the app trims.
+func TestProposeEnforcesLimitsTheModelIgnores(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := regWithTools(10)
+	var planCalls int
+	var notes []string
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Someone, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		planCalls++
+		var as []string
+		for _, n := range []string{"A", "B", "C", "D"} {
+			as = append(as, fmt.Sprintf(`{"name":"Agent%s","group":"G%s","description":"d","can_delegate":true,"tools":["tool_1","tool_2","tool_3","tool_4","tool_5","tool_6"]}`, n, n))
+		}
+		return testutil.Reply{Content: `{"agents":[` + strings.Join(as, ",") + `]}`}
+	}
+	out, _, err := Propose(context.Background(), r, reg, nil, "x", Constraints{MaxTools: 3, MaxAgents: 2}, "", func(p Progress) {
+		if strings.HasPrefix(p.Note, "Applied your limits") {
+			notes = append(notes, p.Note)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planCalls != 2 {
+		t.Fatalf("exactly one repair round, got %d plan calls", planCalls)
+	}
+	if len(out) != 2 {
+		t.Fatalf("capped at 2 agents: %d", len(out))
+	}
+	for _, a := range out {
+		if len(a.Tools) != 3 || a.CanDelegate || a.Tools[0] != "tool_1" {
+			t.Fatalf("each agent trimmed to 3 tools in the model's order, no delegation: %+v", a)
+		}
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "trimmed 6 tools to 3") {
+		t.Fatalf("the user is told what was applied: %v", notes)
+	}
+}
+
+func TestAutoCountAndNoLimitsLeaveThePlanAlone(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := regWithTools(10)
+	var planCalls int
+	var planSystem string
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Someone, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		planCalls++
+		planSystem = sys
+		return testutil.Reply{Content: `{"agents":[{"name":"A","group":"G1","description":"d","tools":["tool_1","tool_2","tool_3","tool_4","tool_5","tool_6","tool_7"]},{"name":"B","group":"G2","description":"d","tools":["tool_8"]}]}`}
+	}
+	out, _, err := Propose(context.Background(), r, reg, nil, "x", Constraints{}, "", nil)
+	if err != nil || planCalls != 1 || len(out) != 2 || len(out[0].Tools) != 7 {
+		t.Fatalf("a plan within the (default) limits is used as is, with no repair: calls=%d out=%+v err=%v", planCalls, out, err)
+	}
+	if !strings.Contains(planSystem, "as many agents as the user's needs call for") {
+		t.Fatalf("auto count wording missing: %s", planSystem[:200])
 	}
 }

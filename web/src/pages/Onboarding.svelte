@@ -16,6 +16,7 @@
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
   import Icon from '../lib/ui/Icon.svelte';
+  import Segmented from '../lib/ui/Segmented.svelte';
 
   const steps = ['Database', 'Models', 'About you', 'Agents', 'Finish'];
   const setup = $derived(!!S.status?.setup);
@@ -139,7 +140,15 @@
   }
 
   // ── step 3: agents ──
-  let count = $state(5);
+  // The limits the generated team must respect. They go into the planner's prompt and are also enforced afterwards,
+  // so a small model that ignores "at most 5 tools" is still held to it. 0 team size = as many as the needs call for.
+  const LIMITS_KEY = 'prism.onboardingLimits';
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(LIMITS_KEY)) || {}; } catch { return {}; } })();
+  let count = $state(saved.count ?? 0);
+  let maxAgents = $state(saved.max_agents ?? 8);
+  let maxTools = $state(saved.max_tools ?? 8);
+  let style = $state(saved.style ?? 'job');
+  let allowDelegate = $state(saved.allow_delegate ?? false);
   let genModel = $state('');
   let drafts = $state([]);
   let pick = $state({});
@@ -182,7 +191,9 @@
   }));
   async function generate() {
     gBusy = true; note = ''; drafts = []; pick = {}; job = 0; stageNote = 'Starting…';
-    const r = await call('onboarding.propose', { hints, count, model: genModel });
+    const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate };
+    try { localStorage.setItem(LIMITS_KEY, JSON.stringify(limits)); } catch {}
+    const r = await call('onboarding.propose', { hints, ...limits, model: genModel });
     if (!r) { gBusy = false; return; }
     if (!job) job = r.job;
   }
@@ -311,7 +322,12 @@
         {/if}
         {#if regen}<Field label="Hints"><Textarea bind:value={hints} rows={3} mono={false} /></Field>{/if}
         <div class="row wrap genrow">
-          <Field label="How many"><NumberInput bind:value={count} min={1} max={100} /></Field>
+          <Field label="Team size" hint="0 = auto"><NumberInput bind:value={count} min={0} max={100} /></Field>
+          {#if count === 0}<Field label="Up to"><NumberInput bind:value={maxAgents} min={1} max={30} /></Field>{/if}
+          <Field label="Max tools per agent" hint="0 = no limit"><NumberInput bind:value={maxTools} min={0} max={40} /></Field>
+          <Field label="Team style" hint={style === 'domain' ? 'one agent per area of your life or work, owning it end to end' : 'one agent per kind of work'}><Segmented bind:value={style} options={[{ value: 'job', label: 'By job' }, { value: 'domain', label: 'By domain' }]} /></Field>
+          <Checkbox bind:checked={allowDelegate} label="allow agents to delegate" />
+          <div class="sm mute" style="flex-basis:100%">Limits are written into the planner's prompt and enforced afterwards: a plan that breaks one is sent back once with the exact violations, and whatever still breaks is trimmed. Agents cannot load tools later, so keep the limit generous enough for the job.</div>
           <div class="gm"><Field label="Model (fast = finishes sooner)"><Select bind:value={genModel} options={[{ value: '', label: 'chat model (default)' }, { value: 'role:fast', label: 'fast model' }, ...modelOptions('chat')]} /></Field></div>
           <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>
           <Button onclick={templates}>Use built-in templates</Button>

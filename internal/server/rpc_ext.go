@@ -296,7 +296,7 @@ func suggestAgentForMCP(ctx context.Context, a *app.App, serverID int64, serverN
 	}
 	hint := fmt.Sprintf("The user just connected a new MCP server called %q, exposing exactly these tools: %s. Design exactly ONE agent whose primary toolset is those MCP tools; add at most 2-3 complementary built-in tools only if the job clearly needs them (e.g. artifact_save, file_read). Do not propose anything unrelated to this server.",
 		serverName, strings.Join(st.Tools, ", "))
-	drafts, used, err := onboarding.Propose(ctx, a.LLM, a.Tools, names, hint, 1, "", nil)
+	drafts, used, err := onboarding.Propose(ctx, a.LLM, a.Tools, names, hint, onboarding.Constraints{Count: 1, MaxTools: 12}, "", nil)
 	if err != nil || !used || len(drafts) == 0 || drafts[0].Exists {
 		return
 	}
@@ -797,7 +797,7 @@ func (s *Server) registerOnboarding() {
 	// "onboarding.progress" events, because local models can take minutes.
 	rpc(s, "onboarding.propose", func(ctx context.Context, r struct {
 		Hints string `json:"hints"`
-		Count int    `json:"count"`
+		onboarding.Constraints
 		Model string `json:"model"`
 	}) (map[string]any, error) {
 		ps, _ := a.Profiles.List(ctx)
@@ -808,7 +808,7 @@ func (s *Server) registerOnboarding() {
 		job := time.Now().UnixNano()
 		go func() {
 			bg := context.Background()
-			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Count, r.Model, func(p onboarding.Progress) {
+			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Constraints, r.Model, func(p onboarding.Progress) {
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
 			})
 			ev := map[string]any{"job": job, "stage": "finished", "drafts": drafts, "generated": used}
