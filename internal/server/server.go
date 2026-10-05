@@ -13,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"prism/internal/app"
@@ -23,6 +24,11 @@ type Server struct {
 	App *app.App
 	Hub *hub.Hub
 	UI  fs.FS
+
+	// the onboarding team generation that is running, or finished and not yet applied (see onboarding.job): it
+	// keeps its state here so the page can be closed — and reopened later — while a slow local model writes the team
+	obMu  sync.Mutex
+	obJob *obJob
 }
 
 func New(a *app.App, h *hub.Hub, ui fs.FS) *Server {

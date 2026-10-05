@@ -178,14 +178,15 @@ For each agent give:
 - "traits": 4-8 lowercase search keywords.
 - "tools": {{TOOLS_RULE}} Agents can NOT load more tools later, so list everything the job needs, most important first.
 - "can_delegate": {{DELEGATE_RULE}}
-- "max_iterations": how many tool calls one task may use. Default is 24; give 35-60 to agents that will do long, multi-step work (coding, research, data processing, building things), and 10-16 to quick lookup agents. A budget that is too small makes long jobs end half-finished.
 
 Cover the user's stated needs first (for coding needs, the built-in Coder and Reviewer agents already exist); avoid overlapping roles; do not create agents for things the built-in staff already do (memory curation, agent hiring, tool selection).
 
 Available tools (name — purpose):
 {{TOOLS}}
 
-Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],"tools":[],"can_delegate":false,"max_iterations":24}]}`
+Do not give an iteration budget: it cannot be known in advance, and the system extends an agent's budget while it is making visible progress and cuts it off when it loops.
+
+Answer JSON only: {"agents":[{"name":"","group":"","description":"","traits":[],"tools":[],"can_delegate":false}]}`
 
 // Constraints are the limits a team must respect. They are written into the planner's prompt AND checked in code:
 // a small model reads "at most 5 tools" as a suggestion, so a plan that breaks a limit is sent back once with the exact

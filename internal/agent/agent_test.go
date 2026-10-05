@@ -1848,7 +1848,7 @@ func recoveryHarness(t *testing.T, decision string) (*harness, tasks.Task) {
 		msgs, _ := json.Marshal(req["messages"])
 		switch {
 		case strings.Contains(string(msgs), "ran out of its iteration budget"):
-			return testutil.Reply{Content: `{"decision":"` + decision + `","lesson":"it kept polling the clock","achieved":"nothing useful yet","prompt":"REWRITTEN: answer in one step"}`}
+			return testutil.Reply{Content: `{"decision":"` + decision + `","lesson":"it kept polling the clock","achieved":"nothing useful yet","pitfall":"When asked to find out something with no concrete source, do not keep polling the clock; instead answer from what you know or report what is missing.","prompt":"REWRITTEN: answer in one step"}`}
 		case strings.Contains(lastUserText(req), "REWRITTEN"):
 			return testutil.Reply{Content: "finished quickly"}
 		}

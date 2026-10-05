@@ -191,6 +191,11 @@ type Guardrails struct {
 	// agent reports the problem instead of burning its budget on variations.
 	ToolFailWarn  int `json:"tool_fail_warn"`
 	ToolFailBlock int `json:"tool_fail_block"`
+	// MaxExtensions: how many times a run that reached its iteration budget while still making visible progress (its
+	// recent tool calls all new, no tool failing repeatedly, no repeated output) is given more room, 50% of its
+	// budget each time. Nobody can guess the right budget up front; a loop is cut off by the loop guard instead.
+	// 0 turns it off.
+	MaxExtensions int `json:"max_extensions"`
 	// StallOff / StallMin: notify when a running task (and everything it delegated) shows no sign of life — no model
 	// call, tool call or tokens — for StallMin minutes.
 	StallOff bool `json:"stall_off"`
@@ -203,7 +208,7 @@ type Guardrails struct {
 }
 
 func DefaultGuardrails() Guardrails {
-	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60, ToolFailWarn: 3, ToolFailBlock: 6, StallMin: 20}
+	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60, ToolFailWarn: 3, ToolFailBlock: 6, MaxExtensions: 2, StallMin: 20}
 }
 
 func DefaultContext() Context { return Context{CompactAt: 0.8, Target: 0.2} }

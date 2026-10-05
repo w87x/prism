@@ -806,24 +806,40 @@ func (s *Server) registerOnboarding() {
 			names = append(names, p.Name)
 		}
 		job := time.Now().UnixNano()
+		st := s.startOnboardingJob(job)
 		go func() {
 			bg := context.Background()
 			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Constraints, r.Model, func(p onboarding.Progress) {
+				st.progress(p)
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
 			})
-			ev := map[string]any{"job": job, "stage": "finished", "drafts": drafts, "generated": used}
+			note := ""
 			if err != nil {
-				ev["note"] = err.Error()
+				note = err.Error()
+			}
+			st.finish(drafts, used, note)
+			ev := map[string]any{"job": job, "stage": "finished", "drafts": drafts, "generated": used}
+			if note != "" {
+				ev["note"] = note
 			}
 			a.Emit("onboarding.progress", ev)
+			// the window may have been closed while the model worked: say it is ready
+			a.Engine.Notify(bg, agent.Notice{Agent: "Onboarding", Level: "info",
+				Text: fmt.Sprintf("Your team draft is ready: %d agents. Open Settings → Run onboarding again to review and create them.", len(drafts))})
 		}()
 		return map[string]any{"job": job}, nil
 	})
+	// the running or finished-but-unapplied generation, so a reopened window can pick it up (null when none)
+	rpc(s, "onboarding.job", func(ctx context.Context, _ none) (*obJob, error) { return s.onboardingJob(), nil })
 	rpc(s, "onboarding.apply", func(ctx context.Context, r struct {
 		Drafts  []onboarding.Draft `json:"drafts"`
 		Replace bool               `json:"replace"`
 	}) (int, error) {
-		return onboarding.Apply(ctx, a.Profiles, r.Drafts, r.Replace)
+		n, err := onboarding.Apply(ctx, a.Profiles, r.Drafts, r.Replace)
+		if err == nil {
+			s.clearOnboardingJob() // the drafts became agents
+		}
+		return n, err
 	})
 	rpc(s, "onboarding.finish", func(ctx context.Context, r struct {
 		Hints string `json:"hints"`

@@ -396,7 +396,7 @@ var profileProps = []tools.Prop{
 	tools.Bool("can_delegate", "may delegate subtasks (max depth 2)"),
 	tools.StrList("team", "names of existing specialists this agent leads: it then delegates only to them, splitting work, waiting for results and consolidating them (implies can_delegate)"),
 	tools.Bool("enabled", "enabled"),
-	tools.Int("max_iterations", "tool-call budget per task (default 24, max 80): raise it (35-60) for agents that do long multi-step work such as coding, research or data processing; keep it low for quick lookups"),
+	tools.Int("max_iterations", "starting tool-call budget per task (default 24, max 80) — leave it out: the budget extends automatically while the agent makes progress and is cut off if it loops"),
 }
 
 func (e *Engine) unknownTools(names []string) []string {

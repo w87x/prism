@@ -238,6 +238,8 @@ type RunResult struct {
 	Text       string
 	NeedsInput string
 	Aborted    string
+	// Extensions: how many times the iteration budget was extended because the run was making progress.
+	Extensions int
 	Iterations int
 	TokensIn   int
 	TokensOut  int
@@ -410,6 +412,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		}
 	}
 	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort, failWarnAt: grCfg.ToolFailWarn, failBlockAt: grCfg.ToolFailBlock}
+	baseIter, extensions := maxIter, 0
 	calib := 1.0
 	compactedThisRun := 0
 	ctxCfg := settings.Load(ctx, e.Settings, settings.KeyContext, settings.DefaultContext())
@@ -430,10 +433,20 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 			// taint stays: the untrusted content is still in the context window, whatever the user says next
 		}
 		if iter >= maxIter {
-			res.Aborted = "iteration budget exhausted"
-			break
+			// Nobody can guess the right budget up front, so a run that is still making visible progress is given
+			// more room (up to MaxExtensions times, 50% of its budget each); one that is looping is not.
+			if extensions < grCfg.MaxExtensions && guard.progressing() {
+				extra := max(8, baseIter/2)
+				maxIter += extra
+				extensions++
+				res.Extensions = extensions
+				_ = add(Msg{Message: llm.Message{Role: "user", Content: fmt.Sprintf("[system] Your budget was extended by %d tool calls because your recent calls were all new and productive. Use them to finish; if the end is not in sight, stop and report exactly what remains.", extra)}, Provenance: "system"})
+			} else {
+				res.Aborted = "iteration budget exhausted"
+				break
+			}
 		}
-		if iter == maxIter-2 && maxIter > 4 {
+		if iter == maxIter-2 && maxIter > 4 && !(extensions < grCfg.MaxExtensions && guard.progressing()) { // a run about to be extended is not told to wrap up
 			_ = add(Msg{Message: llm.Message{Role: "user", Content: "[system] Two steps remain in your iteration budget. Wrap up now: give your best final answer with what you have."}, Provenance: "system"})
 		}
 
@@ -809,6 +822,35 @@ type loopGuard struct {
 	failWarnAt  int // a tool failed this many times since its last success: tell the model to stop retrying (default 3)
 	failBlockAt int // …and refuse it for the rest of the run at this many (default 6)
 	fails       map[string]int
+}
+
+// progressing reports whether the run looks productive right now: it has made several calls, every one of the
+// recent ones is new (nothing repeated, no A-B-A-B or longer cycle), no tool is failing over and over, and the model
+// has not been caught repeating itself. A run that reaches its budget in this state is extended instead of cut off.
+func (g *loopGuard) progressing() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.abort || g.textRepeats > 0 || len(g.recent) < 6 {
+		return false
+	}
+	warn := g.failWarnAt
+	if warn <= 0 {
+		warn = 3
+	}
+	for _, n := range g.fails {
+		if n >= warn {
+			return false
+		}
+	}
+	last := g.recent[max(0, len(g.recent)-8):]
+	seen := map[string]bool{}
+	for _, s := range last {
+		if seen[s] {
+			return false
+		}
+		seen[s] = true
+	}
+	return true
 }
 
 // blocked says why a tool may not be called any more in this run ("" = fine).

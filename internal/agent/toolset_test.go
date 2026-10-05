@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"prism/internal/memory"
+	"prism/internal/settings"
 	"regexp"
 	"strings"
 	"testing"
@@ -258,5 +261,72 @@ func TestWorkersGetOnlyTheSmallSharedSetAndTheirOwnTools(t *testing.T) {
 		if !h.e.initialTools(ctx, atlas, RunSpec{})[want] {
 			t.Errorf("Atlas's soul tells it to use %s, so it must have it", want)
 		}
+	}
+}
+
+// Nobody can guess an agent's iteration budget. A run that reaches it while every recent call is NEW is extended
+// (twice, by half the budget); one that cycles through the same calls is not, and the setting can turn it off.
+func TestBudgetIsExtendedOnlyWhileTheRunMakesProgress(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Explorer", Soul: "You are Explorer.", Tools: []string{"clock"}, Enabled: true, MaxIterations: 6}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// every call is new (and succeeds: a failing tool is not progress either)
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{Tools: []llm.ToolCall{tc(fmt.Sprint("c", call), "memory_find", map[string]any{"query": fmt.Sprintf("topic number %d", call)})}}
+	}
+	sess, _ := h.e.Sessions.Create(ctx, "Explorer", "task", "", 0)
+	res, err := h.e.Run(ctx, RunSpec{Profile: p, Session: sess, Input: "explore", Interactive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Extensions != 2 || res.Iterations != 22 || res.Aborted != "iteration budget exhausted" { // 6 + 8 + 8
+		t.Fatalf("a productive run is extended twice, then stops: %+v", res)
+	}
+
+	// the same calls over and over (a cycle of 3) is not progress: no extension
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{Tools: []llm.ToolCall{tc(fmt.Sprint("c", call), "memory_find", map[string]any{"query": fmt.Sprintf("topic number %d", call%3)})}}
+	}
+	sess2, _ := h.e.Sessions.Create(ctx, "Explorer", "task", "", 0)
+	res2, _ := h.e.Run(ctx, RunSpec{Profile: p, Session: sess2, Input: "explore", Interactive: true})
+	if res2.Extensions != 0 || res2.Iterations != 6 {
+		t.Fatalf("a cycling run must not be extended: %+v", res2)
+	}
+
+	// switched off in the settings
+	gr := settings.DefaultGuardrails()
+	gr.MaxExtensions = 0
+	if err := h.e.Settings.Set(ctx, settings.KeyGuardrails, gr); err != nil {
+		t.Fatal(err)
+	}
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{Tools: []llm.ToolCall{tc(fmt.Sprint("c", call), "memory_find", map[string]any{"query": fmt.Sprintf("topic number %d", call)})}}
+	}
+	sess3, _ := h.e.Sessions.Create(ctx, "Explorer", "task", "", 0)
+	res3, _ := h.e.Run(ctx, RunSpec{Profile: p, Session: sess3, Input: "explore", Interactive: true})
+	if res3.Extensions != 0 || res3.Iterations != 6 {
+		t.Fatalf("with extensions off the budget is a hard stop: %+v", res3)
+	}
+}
+
+// A stall leaves a lesson in the agent's own memory, and the recall that starts the next similar task shows it.
+func TestAStallLeavesAPitfallLessonThatIsRecalledForSimilarTasks(t *testing.T) {
+	h, task := recoveryHarness(t, "retry")
+	ctx := context.Background()
+	created, err := h.e.Tasks.Create(ctx, task, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.e.RunTask(ctx, created, TaskOpts{})
+	fs, err := h.e.Memory.Find(ctx, memory.FindReq{Query: "find out something polling the clock", Banks: []string{"profile:Grinder2"}, K: 5, Agent: "Grinder2", NoReinforce: true})
+	if err != nil || len(fs) == 0 || !strings.HasPrefix(fs[0].Text, "Pitfall: When asked to find out something") {
+		t.Fatalf("the stall must leave a pitfall lesson in the agent's bank: %+v %v", fs, err)
+	}
+	got := h.e.recall(ctx, RunSpec{Input: "find out something"}, "Grinder2")
+	if !strings.Contains(got, "Pitfall") || !strings.Contains(got, "polling the clock") {
+		t.Fatalf("the lesson must be recalled when a similar task starts: %q", got)
 	}
 }

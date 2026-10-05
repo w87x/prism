@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"prism/internal/llm"
+	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tasks"
 )
@@ -21,12 +22,14 @@ const recoverPrompt = `An AI agent ran out of its iteration budget (or was stopp
 Decide whether ONE more attempt with a better instruction can plausibly finish it ("retry"), or whether it cannot ("fail": it lacks a tool or access, the job is impossible or far too large for one agent, or the same blocker will recur).
 For "retry", write "prompt": a complete replacement instruction for a fresh agent that (1) restates the goal, (2) states concisely everything already achieved and found, so nothing is redone, (3) names what failed or looped and what to do instead, (4) asks for a focused plan of at most 8 tool calls and a final answer that reports plainly what could not be done rather than continuing forever.
 Always give "lesson" (one or two sentences: why it stalled) and "achieved" (what was accomplished, one short paragraph).
-Answer JSON only: {"decision":"retry|fail","lesson":"...","achieved":"...","prompt":"..."}`
+Always give "pitfall": ONE imperative sentence (at most 40 words) the same agent can follow the next time it meets a similar task, in the form "When <kind of task>, do not <what it looped on>; instead <what to do, or stop and report what is missing>". It is stored as a lesson and shown to the agent when a similar task starts, so it must be general enough to match a similar task and specific enough to act on.
+Answer JSON only: {"decision":"retry|fail","lesson":"...","achieved":"...","pitfall":"...","prompt":"..."}`
 
 type recovery struct {
 	Decision string `json:"decision"`
 	Lesson   string `json:"lesson"`
 	Achieved string `json:"achieved"`
+	Pitfall  string `json:"pitfall"`
 	Prompt   string `json:"prompt"`
 	Retried  bool   `json:"-"`
 }
@@ -50,7 +53,8 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 			fmt.Fprintf(&sb, "%s: %s\n", m.Role, brief(line, 400))
 		}
 	}
-	plan := recovery{Decision: "retry", Lesson: "It used its whole budget (" + res.Aborted + ") before finishing.", Achieved: brief(res.Text, 600)}
+	plan := recovery{Decision: "retry", Lesson: "It used its whole budget (" + res.Aborted + ") before finishing.", Achieved: brief(res.Text, 600),
+		Pitfall: fmt.Sprintf("A task like “%s” stalled (%s): if you find yourself repeating calls without new information, stop and report what is blocking you instead.", brief(t.Title, 80), res.Aborted)}
 	fallback := fmt.Sprintf("%s\n\n(An earlier attempt stopped early: %s. What it had reached:\n%s\nContinue from there without redoing it, take the shortest path, and if something blocks you, say exactly what instead of retrying it again and again.)", t.Input, res.Aborted, brief(res.Text, 1500))
 	if e.LLM == nil || e.LLM.RoleRef(ctx, "fast") == "" {
 		plan.Prompt = fallback
@@ -67,6 +71,9 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 	if strings.TrimSpace(p.Achieved) != "" {
 		plan.Achieved = strings.TrimSpace(p.Achieved)
 	}
+	if pf := strings.TrimSpace(p.Pitfall); len(pf) > 20 {
+		plan.Pitfall = pf
+	}
 	if strings.EqualFold(strings.TrimSpace(p.Decision), "fail") {
 		plan.Decision = "fail"
 		return plan
@@ -82,6 +89,7 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 // session with the rewritten instruction. It returns the result to record and the analysis.
 func (e *Engine) recoverRun(ctx context.Context, t tasks.Task, p *Profile, sess *Session, res *RunResult, spec RunSpec) (*RunResult, recovery) {
 	plan := e.planRecovery(ctx, t, sess, res)
+	e.rememberPitfall(ctx, t, p, plan)
 	note := "[system] Automatic recovery: " + plan.Lesson
 	if plan.Decision == "fail" {
 		note += " Not retried."
@@ -130,4 +138,21 @@ func (e *Engine) learnFromStall(ctx context.Context, t tasks.Task, p *Profile, r
 		return
 	}
 	_, _ = e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "recovery", ToAgent: worker, Title: title, Input: input})
+}
+
+// rememberPitfall keeps what a stall taught as a lesson in the agent's own memory bank. The auto-recall that runs at
+// the start of every task retrieves lessons that match the new task, so the agent meets "when a task looks like this,
+// do not loop on that; do this instead" BEFORE it repeats the mistake — without anyone editing its soul. Maintenance
+// agents are skipped (no maintainers learning from maintainers), and Store's own duplicate handling folds a repeat
+// of the same pitfall into the existing fact instead of piling up copies.
+func (e *Engine) rememberPitfall(ctx context.Context, t tasks.Task, p *Profile, plan recovery) {
+	if e.Memory == nil || p.System || strings.TrimSpace(plan.Pitfall) == "" {
+		return
+	}
+	text := "Pitfall: " + strings.TrimSpace(plan.Pitfall)
+	if r := []rune(text); len(r) > 400 {
+		text = string(r[:400]) + "…"
+	}
+	_, _ = e.Memory.Store(ctx, memory.StoreReq{Bank: "profile", Agent: p.Name, Text: text, Tags: []string{"pitfall", "stall"},
+		Source: "recovery", Confidence: 0.85, ValueRatio: 0.9, TaskID: t.ID})
 }

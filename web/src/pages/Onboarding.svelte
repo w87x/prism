@@ -189,6 +189,23 @@
       drafts.forEach((d, i) => { if (!d.exists) pick[i] = true; });
     }
   }));
+  // The generation runs in the server, so this window can be closed while a slow local model writes the team. A
+  // reopened window picks the job up: still running (progress continues), or finished and waiting to be reviewed.
+  let resumed = false;
+  $effect(() => {
+    if (resumed) return;
+    resumed = true;
+    call('onboarding.job', {}, { quiet: true }).then((j) => {
+      if (!j) return;
+      step = 3;
+      drafts = j.drafts || [];
+      pick = {};
+      drafts.forEach((d, i) => { if (!d.exists) pick[i] = true; });
+      if (j.finished) { note = j.error || (j.generated ? '' : 'Built-in templates.'); }
+      else { gBusy = true; job = j.job; stageNote = j.note || 'Working…'; }
+    });
+  });
+  function inBackground() { toast('Generating in the background — you will be notified when the team draft is ready'); close(); }
   async function generate() {
     gBusy = true; note = ''; drafts = []; pick = {}; job = 0; stageNote = 'Starting…';
     const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate };
@@ -323,7 +340,7 @@
         {#if regen}<Field label="Hints"><Textarea bind:value={hints} rows={3} mono={false} /></Field>{/if}
         <div class="row wrap genrow">
           <Field label="Team size" hint="0 = auto"><NumberInput bind:value={count} min={0} max={100} /></Field>
-          {#if count === 0}<Field label="Up to"><NumberInput bind:value={maxAgents} min={1} max={30} /></Field>{/if}
+          {#if count === 0}<Field label="Max agents" hint="cap when size is auto"><NumberInput bind:value={maxAgents} min={1} max={30} /></Field>{/if}
           <Field label="Max tools per agent" hint="0 = no limit"><NumberInput bind:value={maxTools} min={0} max={40} /></Field>
           <Field label="Team style" hint={style === 'domain' ? 'one agent per area of your life or work, owning it end to end' : 'one agent per kind of work'}><Segmented bind:value={style} options={[{ value: 'job', label: 'By job' }, { value: 'domain', label: 'By domain' }]} /></Field>
           <Checkbox bind:checked={allowDelegate} label="allow agents to delegate" />
@@ -333,7 +350,7 @@
           <Button onclick={templates}>Use built-in templates</Button>
         </div>
         {#if regen}<Checkbox bind:checked={replace} label="overwrite existing — replace my current specialist agents with the selected ones (well-known agents stay)" />{/if}
-        {#if gBusy}<div class="acc sm"><Led state="ok" pulse size={8} /> {stageNote} <span class="mute">— local models can take a few minutes; drafts appear as they are written</span></div>{/if}
+        {#if gBusy}<div class="acc sm row wrap"><Led state="ok" pulse size={8} /> {stageNote} <span class="mute">— local models can take a few minutes; drafts appear as they are written</span><Button size="sm" variant="ghost" title="close this window; generation keeps running and you get a notification when the draft is ready" onclick={inBackground}>Run in background</Button></div>{/if}
         {#if note}<div class="attn sm">{note}</div>{/if}
         {#if drafts.length}
           <div class="drafts scroll">
