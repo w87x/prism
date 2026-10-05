@@ -18,7 +18,7 @@
   import Empty from '../lib/ui/Empty.svelte';
 
   const teamOpts = $derived(S.agents.filter((a) => a.role === 'worker' && a.name !== d?.name).map((a) => ({ value: a.name, label: a.name, hint: a.group })));
-  const blank = () => ({ id: 0, name: '', icon: '', group: 'General', description: '', soul: '', traits: [], tools: [], skills: [], banks: [], model: '', role: 'worker', system: false, can_delegate: false, team: [], auto_tools: true, max_iterations: 24, enabled: true, soul_version: 1 });
+  const blank = () => ({ id: 0, name: '', icon: '', group: 'General', description: '', soul: '', traits: [], tools: [], skills: [], banks: [], model: '', role: 'worker', system: false, can_delegate: false, team: [], max_iterations: 24, enabled: true, soul_version: 1 });
 
   let d = $state(null);
   let orig = '';
@@ -125,7 +125,6 @@
       <div class="sw">
         <Switch bind:checked={d.enabled} label="enabled" disabled={d.role === 'entry'} />
         <Switch bind:checked={d.can_delegate} label="can delegate" disabled={d.role === 'entry'} />
-        <Switch bind:checked={d.auto_tools} label="auto-select tools" disabled={d.role === 'entry'} title="Sherpa adds the few tools each task needs" />
       </div>
       {#if d.role !== 'entry'}<Field label="Team" hint="specialists {d.name || 'this agent'} leads: it delegates only to them, waits for their results and consolidates them (implies can-delegate)"><MultiSelect bind:value={d.team} options={teamOpts} placeholder="no team" /></Field>{/if}
       <Field label="Traits" hint="searchable keywords (agent_find)"><Tags bind:value={d.traits} placeholder="add trait…" /></Field>

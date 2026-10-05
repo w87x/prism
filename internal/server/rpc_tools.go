@@ -23,12 +23,19 @@ func (s *Server) registerTools() {
 		Armed       bool            `json:"armed"`
 		Params      json.RawMessage `json:"params"`
 		Only        []string        `json:"only,omitempty"`
+		// HeldBy: the agents whose toolset lists it (base tools: everyone). Empty = nobody can use it.
+		HeldBy []string `json:"held_by"`
 	}
 	rpc(s, "tools.list", func(ctx context.Context, _ none) ([]toolInfo, error) {
 		var out []toolInfo
+		holders := a.Engine.ToolHolders(ctx)
 		for _, t := range a.Tools.All() {
 			st := a.Tools.State(t.Name)
-			out = append(out, toolInfo{t.Name, t.Description, t.Category, t.Risk.String(), t.Base, t.Deferred, t.Untrusted, t.Source, st.Enabled, st.Armed, t.Params, t.Only})
+			held := holders[t.Name]
+			if held == nil {
+				held = []string{}
+			}
+			out = append(out, toolInfo{t.Name, t.Description, t.Category, t.Risk.String(), t.Base, t.Deferred, t.Untrusted, t.Source, st.Enabled, st.Armed, t.Params, t.Only, held})
 		}
 		return out, nil
 	})

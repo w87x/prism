@@ -57,7 +57,6 @@
   async function delMail(a) { if (await confirmBox({ title: 'Remove mail account', text: `Remove “${a.tag}”? Mail on the server is not touched.`, ok: 'Remove', danger: true })) { await call('mail.delete', { id: a.id }); loadMail(); } }
   // typing a server name in the IMAP box fills sensible defaults for the rest
   function guessSmtp() { if (mailForm && !mailForm.smtp_host && mailForm.imap_host) mailForm.smtp_host = mailForm.imap_host.replace(/^imap\./, 'smtp.'); }
-  let tools = $state({ enabled: true, use_llm: false, max: 4 });
   let ret = $state({ logs_days: 14, tasks_days: 30, task_statuses: ['done', 'failed', 'cancelled'] });
   const retStatuses = ['done', 'failed', 'cancelled', 'partial'];
   const toggleRetStatus = (s, on) => { const cur = new Set(ret.task_statuses || []); on ? cur.add(s) : cur.delete(s); ret.task_statuses = [...cur]; };
@@ -84,7 +83,6 @@
       });
       loadSetting('runtime', rt).then((v) => (rt = v));
       loadSetting('elevenlabs', el).then((v) => (el = v));
-      loadSetting('tool_selector', tools).then((v) => (tools = v));
       loadSetting('retention', ret).then((v) => (ret = v));
       loadSetting('guardrails', gr).then((v) => (gr = v));
       loadSetting('notifications', nf).then((v) => (nf = v));
@@ -579,13 +577,6 @@
           <div class="two"><Field label="Finished tasks"><NumberInput bind:value={ret.tasks_days} min={0} max={3650} step={5} unit="days" /></Field><Field label="Logs"><NumberInput bind:value={ret.logs_days} min={0} max={3650} step={1} unit="days" /></Field></div>
           <Field label="Remove tasks that ended as" hint="none ticked = every finished task. “partial” runs are resumable, so they are kept unless ticked."><div class="row wrap gap-12">{#each retStatuses as st}<Checkbox checked={(ret.task_statuses || []).includes(st)} label={st} onchange={(v) => toggleRetStatus(st, v)} />{/each}</div></Field>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('retention', ret, 'Saved')}>Save</Button><Button loading={cleaning} onclick={cleanNow}>Clean now</Button></div>
-        </Panel>
-        <Panel title="Tool selector (Sherpa)" id="set.tool-selector-sherpa-" collapsible resizable>
-          <div class="sm mute">Agents start with a small toolset; Sherpa adds the few extra tools each task needs from the whole repository instead of loading every schema.</div>
-          <Switch bind:checked={tools.enabled} label="select tools per task" />
-          <Switch bind:checked={tools.use_llm} label="let Sherpa's model refine the candidates (slower, more precise)" />
-          <Field label="Max extra tools"><NumberInput bind:value={tools.max} min={1} max={10} /></Field>
-          <div class="row"><Button variant="primary" onclick={() => saveSetting('tool_selector', tools, 'Saved')}>Save</Button></div>
         </Panel>
       </div>
     {:else if tab === 'notify'}

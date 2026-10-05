@@ -88,8 +88,6 @@ type Env struct {
 	Emit      func(kind string, data any)
 	// Ask blocks until the user answers (top-level agents) or returns ErrNeedsInput (sub-agents).
 	Ask func(ctx context.Context, q Question) (string, error)
-	// Activate adds tools to the running session (used by tool_search).
-	Activate func(names ...string)
 	// Taint marks this call's output as untrusted (e.g. a delegate result that
 	// came from a tainted sub-agent).
 	Taint func()

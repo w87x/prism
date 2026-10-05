@@ -15,7 +15,7 @@ import (
 // RegisterTools installs the structured-tracker toolset: create a table, populate/update its rows with
 // evidence, and report what changed. Not restricted to a particular agent — any agent (including one Forge
 // hires for the purpose, e.g. "apartment hunter") can build and maintain a tracker; it is discovered like
-// any other non-base tool (tool_search / AutoTools).
+// any other non-base tool: it has to be listed in an agent's toolset.
 func RegisterTools(reg *tools.Registry, s *Service) {
 	reg.Register(
 		&tools.Tool{

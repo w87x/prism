@@ -38,7 +38,6 @@ type Profile struct {
 	Role          string    `json:"role"`
 	System        bool      `json:"system"`
 	CanDelegate   bool      `json:"can_delegate"`
-	AutoTools     bool      `json:"auto_tools"`
 	MaxIterations int       `json:"max_iterations"`
 	Enabled       bool      `json:"enabled"`
 	SoulVersion   int       `json:"soul_version"`
@@ -94,12 +93,12 @@ type ProfileStore struct {
 
 func NewProfileStore(db *pgxpool.Pool) *ProfileStore { return &ProfileStore{db: db} }
 
-const pcols = `id,name,grp,description,soul,traits,tools,skills,banks,model,role,system,can_delegate,auto_tools,max_iterations,enabled,soul_version,created_at,updated_at,icon,probation,team`
+const pcols = `id,name,grp,description,soul,traits,tools,skills,banks,model,role,system,can_delegate,max_iterations,enabled,soul_version,created_at,updated_at,icon,probation,team`
 
 func scanProfile(r pgx.Row) (Profile, error) {
 	var p Profile
 	err := r.Scan(&p.ID, &p.Name, &p.Group, &p.Description, &p.Soul, &p.Traits, &p.Tools, &p.Skills, &p.Banks, &p.Model, &p.Role,
-		&p.System, &p.CanDelegate, &p.AutoTools, &p.MaxIterations, &p.Enabled, &p.SoulVersion, &p.CreatedAt, &p.UpdatedAt, &p.Icon, &p.Probation, &p.Team)
+		&p.System, &p.CanDelegate, &p.MaxIterations, &p.Enabled, &p.SoulVersion, &p.CreatedAt, &p.UpdatedAt, &p.Icon, &p.Probation, &p.Team)
 	return p, err
 }
 
@@ -188,9 +187,9 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 	var id int64
 	creating := p.ID == 0
 	if p.ID == 0 {
-		err = tx.QueryRow(ctx, `INSERT INTO agent_profiles(name,grp,description,soul,traits,tools,skills,banks,model,role,system,can_delegate,auto_tools,max_iterations,enabled,icon,team)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
-			p.Name, p.Group, p.Description, p.Soul, p.Traits, p.Tools, p.Skills, p.Banks, p.Model, p.Role, p.System, p.CanDelegate, p.AutoTools, p.MaxIterations, p.Enabled, normIcon(p.Icon), p.Team).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO agent_profiles(name,grp,description,soul,traits,tools,skills,banks,model,role,system,can_delegate,max_iterations,enabled,icon,team)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+			p.Name, p.Group, p.Description, p.Soul, p.Traits, p.Tools, p.Skills, p.Banks, p.Model, p.Role, p.System, p.CanDelegate, p.MaxIterations, p.Enabled, normIcon(p.Icon), p.Team).Scan(&id)
 		if err != nil {
 			return nil, err
 		}
@@ -218,8 +217,8 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_profiles SET name=$2,grp=$3,description=$4,soul=$5,traits=$6,tools=$7,skills=$8,banks=$9,model=$10,
-			can_delegate=$11,auto_tools=$12,max_iterations=$13,enabled=$14,soul_version=$15,icon=$16,team=$17,updated_at=now() WHERE id=$1`,
-			id, p.Name, p.Group, p.Description, p.Soul, p.Traits, p.Tools, p.Skills, p.Banks, p.Model, p.CanDelegate, p.AutoTools, p.MaxIterations, p.Enabled, ver, normIcon(p.Icon), p.Team); err != nil {
+			can_delegate=$11,max_iterations=$12,enabled=$13,soul_version=$14,icon=$15,team=$16,updated_at=now() WHERE id=$1`,
+			id, p.Name, p.Group, p.Description, p.Soul, p.Traits, p.Tools, p.Skills, p.Banks, p.Model, p.CanDelegate, p.MaxIterations, p.Enabled, ver, normIcon(p.Icon), p.Team); err != nil {
 			return nil, err
 		}
 	}

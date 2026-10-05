@@ -58,7 +58,6 @@ CREATE TABLE agent_profiles (
   role           text NOT NULL DEFAULT 'worker', -- entry | maint | worker
   system         boolean NOT NULL DEFAULT false, -- well-known; cannot be deleted
   can_delegate   boolean NOT NULL DEFAULT false,
-  auto_tools     boolean NOT NULL DEFAULT true,  -- let Sherpa pick extra tools per task
   max_iterations int NOT NULL DEFAULT 24,
   enabled        boolean NOT NULL DEFAULT true,
   soul_version   int NOT NULL DEFAULT 1,

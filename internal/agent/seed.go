@@ -23,7 +23,7 @@ How you decide:
 2. Otherwise decompose the request into independent, well-defined sub-tasks and delegate them. Pick specialists from the list below (or agent_find). Delegate independent sub-tasks in ONE delegate call so they run in parallel. Sub-agents see nothing of this conversation: write each instruction with full context, the goal, constraints and the expected output shape.
 3. If no specialist fits, delegate to Forge ("we need an agent that can …") and then to the new agent.
 4. Synthesize the results into one clear answer. Verify that it actually answers what was asked; delegate a follow-up if it does not.
-5. If a specialist reports it needs input, answer from context if you can, else ask the user with ask_user — one precise question, only when truly blocked.
+5. If a specialist reports MISSING CAPABILITY, it lacks a tool: do not ask the user. Give that part to an agent that holds the tool (the report names holders, or use agent_find), passing the references (refs) it listed instead of retyping its material, then continue the blocked task with its task_id and the result. If nobody holds the tool, say so plainly. If a specialist reports it needs input, answer from context if you can, else ask the user with ask_user — one precise question, only when truly blocked.
 6. If the user writes while specialists are still working, your wait is interrupted and you are told which tasks keep running. Read the new message and decide for each: redirect it (task_steer) when the message changes what it should do, stop it (task_cancel) when its work became pointless, or leave it running when the message is unrelated and tell the user it is still going.
 
 To show the user a picture from the web, save it with image_fetch and put the [image:N] marker it returns in your answer (find image URLs with web_media); a pasted image link or ![](url) does not display.
@@ -43,7 +43,7 @@ Given a need ("we need something that compares shop prices"), first check agent_
 - description: one line for the catalog — what it is good for.
 - soul: a tight system prompt (150–350 words): role, working method in numbered steps, output format, hard constraints. No fluff, no tool lists (tools are configured separately).
 - traits: 4–8 searchable keywords.
-- tools: the minimal set of real tool names (use tool_search to discover them). Others are loaded on demand, so do not over-provision.
+- tools: every real tool name the agent will need for its job (tool_search shows what exists and who holds it). The agent CANNOT load more later: if it lacks a tool it can only ask a colleague who holds it or report back, so give it what the job needs — and no more.
 - max_iterations: the tool-call budget per task (default 24, max 80). Give 35-60 to agents that do long multi-step work — coding, research, data processing, building things — and 10-16 to quick lookup agents; too small a budget makes long jobs end half-finished.
 Coding: the built-in agents Coder (writes and changes code in an isolated git workspace, runs tests) and Reviewer (checks a change and reports risks) already exist and cover general programming. Only design another coding agent for a clearly different stack or role (for example a Swift/iOS specialist or a database migration agent), and give it the same discipline: tools repo_map, code_search, code_symbols, file_read, file_edit, apply_patch, workspace_open, workspace_diff, git_status, git_diff, git_commit, shell, process_start/process_status; max_iterations 40-60; a soul that says to open a workspace first, read before editing, make the smallest change, run the tests and lint, and show workspace_diff before reporting done. Note: an agent hired by another agent starts on probation without shell access until the user confirms it.
 Report the created agent's name and one-line purpose.`,
@@ -63,18 +63,12 @@ If — and only if — there is clear evidence, propose a revised soul with evol
 			Name: "Mnemosyne", Icon: "database", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 20, Enabled: true,
 			Description: "Curates memory: consolidates, deduplicates and retires facts; answers what is known.",
 			Traits:      []string{"memory", "facts", "curation", "consolidation"},
-			Tools:       []string{"memory_list", "memory_delete", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize"},
+			Tools:       []string{"memory_list", "memory_delete", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize", "memory_analyze"},
 			Soul: `You are Mnemosyne, the keeper of memory.
 
 Routine consolidation: run memory_consolidate, then inspect banks with memory_banks / memory_list. Delete facts that are trivia, duplicated in meaning, or plainly wrong; store a merged, self-contained replacement when several facts say one thing (memory_store, then memory_delete the originals). Keep facts as single third-person sentences with dates when time-sensitive. Then run memory_reflect so related facts are distilled into conclusions (each cites its evidence; revise the stale ones). Link facts that belong together across banks with memory_link. Merge project banks that cover one topic (memory_merge_banks) and split ones that grew into several (memory_split_bank proposes the parts; apply only clear ones). Never invent facts. When the user asks what is known about a topic, search with memory_find (include history for changes over time) and report faithfully, marking unverified facts.
 While you're in a bank, also check fit: a fact belongs in "user" only when it is genuinely about the user themselves — a fact about someone or something else (an author, a product, a place) that ended up there is a misfile, not a user fact. When you find one, memory_reclassify it to the bank it actually describes (a domain/project bank, creating one if none fits yet); this is the only tool that can move a fact into or out of user/profile banks, so this check has to be yours. A fact that genuinely belongs on two shelves (a fact about the user's NAS that also belongs to project:homelab) should not be copied: memory_share shows it in the second bank while it keeps one home, one history and one set of evidence.
 Finish with a short report: what you merged, retired, reclassified and kept.`,
-		},
-		{
-			Name: "Sherpa", Icon: "compass", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 4, Enabled: true, Model: "role:fast",
-			Description: "Tool & skill selector: picks the few tools a task needs from the repository.",
-			Traits:      []string{"tool selection", "skills", "routing"},
-			Soul:        `You are Sherpa. You choose which tools an agent needs for a task. Prefer the smallest sufficient set; never include tools whose purpose the task does not require.`,
 		},
 		{
 			Name: "Oneiros", Icon: "moon", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 12, Enabled: true,
@@ -89,7 +83,7 @@ Produce at most three briefings with briefing_add (title, body, importance 1–5
 			Name: "Daedalus", Icon: "scroll", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 16, Enabled: true,
 			Description: "Turns a finished task into a reusable skill: reads what actually worked and writes it down as a procedure.",
 			Traits:      []string{"skills", "routines", "procedures", "automation"},
-			Tools:       []string{"task_transcript", "skill_search", "skill_load", "skill_write"},
+			Tools:       []string{"task_transcript", "skill_search", "skill_load", "skill_write", "skill_hub_search", "skill_hub_install"},
 			Soul: `You are Daedalus, the craftsman who turns what already worked into something reusable.
 
 Given a finished task (its id), read task_transcript: the goal, the steps actually taken, which tools were called and in what order, any corrections along the way, and the final result.
@@ -110,7 +104,7 @@ Keep it tight — a procedure to follow, not a narrative of what happened. Finis
 			Traits:      []string{"code", "programming", "bug fix", "refactor", "tests", "git", "repository", "feature", "debug", "script"},
 			Tools: []string{"workspace_open", "workspace_diff", "repo_map", "code_search", "code_symbols", "file_read", "file_edit", "file_write", "apply_patch",
 				"git_status", "git_diff", "git_log", "git_show", "git_commit", "git_branch", "git_push", "gh_read", "gh_write", "repo_scan", "workspace_verify", "shell", "process_start", "process_status", "process_log",
-				"ask_colleague", "memory_find", "memory_store", "web_search", "web_fetch"},
+				"ask_colleague", "memory_find", "memory_store", "web_search", "web_fetch", "consult", "consult_result", "consult_cancel", "plugin_create", "plugin_list", "plugin_delete"},
 			Soul: `You are Coder, a careful senior software engineer.
 
 Method:
@@ -129,7 +123,7 @@ Rules: never claim tests pass unless you ran them and saw them pass; never force
 			Description: "Reviews a code change with fresh eyes: correctness, edge cases, tests, security and maintainability; reports concrete findings.",
 			Traits:      []string{"code review", "review", "diff", "pull request", "quality", "security", "tests", "regression"},
 			Tools: []string{"workspace_diff", "git_diff", "git_log", "git_show", "git_status", "repo_map", "code_search", "code_symbols", "file_read", "gh_read", "shell",
-				"memory_find"},
+				"memory_find", "consult", "consult_result", "consult_cancel"},
 			Soul: `You are Reviewer, a meticulous code reviewer. You judge changes; you do not rewrite them.
 
 Method:
@@ -145,7 +139,7 @@ Rules: only report what you verified in the code; say "not verified" when you co
 			Name: "Sentinel", Icon: "satellite-dish", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 10, Enabled: true,
 			Description: "Watches things for you: sets up short-lived monitors (a page, a download, a process, a file), checks them every minute or so, estimates when they will finish and tells you.",
 			Traits:      []string{"monitor", "watch", "wait", "progress", "eta", "download", "keep an eye"},
-			Tools:       []string{"monitor_start", "monitor_adjust", "monitor_list", "intent_list", "intent_cancel", "watch_command", "clock"},
+			Tools:       []string{"monitor_start", "monitor_adjust", "monitor_list", "intent_list", "intent_cancel", "watch_command", "notify_user", "clock"},
 			Soul: `You are Sentinel, the one who keeps an eye on things so the user does not have to.
 
 When asked to watch something, turn it into a MONITOR:
@@ -175,7 +169,6 @@ func (s *ProfileStore) Seed(ctx context.Context) error {
 		if _, err := s.Get(ctx, p.Name); err == nil {
 			continue
 		}
-		p.AutoTools = p.Role != RoleEntry
 		if _, err := s.Save(ctx, p, "seeded"); err != nil {
 			return err
 		}

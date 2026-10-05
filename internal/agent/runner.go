@@ -53,6 +53,9 @@ type Deps struct {
 	Emit         func(typ string, data any)
 	// Export saves text as an artifact and returns a confirmation (used by /export).
 	Export func(ctx context.Context, name, content string) (string, error)
+	// SaveHandoff stores material as a TEMPORARY artifact (it deletes itself after ttl) and returns its id — what
+	// agents pass to each other by reference (scratchpad_share).
+	SaveHandoff func(ctx context.Context, name string, content []byte, by string, ttl time.Duration, tainted bool, session int64) (int64, error)
 	// SaveImage stores an uploaded picture (as an artifact) and returns its id; LoadImage reads it back.
 	SaveImage func(ctx context.Context, name, mime string, data []byte) (int64, error)
 	LoadImage func(ctx context.Context, id int64) (mime string, data []byte, err error)
@@ -119,9 +122,10 @@ type activeRun struct {
 	// live counters shown in the UI
 	tokensIn, tokensOut atomic.Int64
 	ctxTokens, window   atomic.Int64
-	task                atomic.Value // string: brief current task
-	lastActive          atomic.Int64 // unix ms of the last sign of life: a model call, a tool call, tokens
-	approved            sync.Map     // tool name → true: user chose "allow for this task"
+	task                atomic.Value    // string: brief current task
+	tools               map[string]bool // the toolset of this run: nothing outside it may be called
+	lastActive          atomic.Int64    // unix ms of the last sign of life: a model call, a tool call, tokens
+	approved            sync.Map        // tool name → true: user chose "allow for this task"
 	imgMu               sync.Mutex
 	pendingImages       []int64 // pictures sent while the run was working, delivered with the next steering message
 }
@@ -207,7 +211,6 @@ type RunSpec struct {
 	Interactive bool
 	Steer       chan string
 	SteerFrom   string // set for a delegated task: the delegating agent whose messages arrive on Steer (not the user)
-	ExtraTools  []string
 	Depth       int
 	Preamble    string
 	ParentRun   int64
@@ -352,28 +355,15 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		}
 	}
 
+	// An agent has exactly the tools its profile lists (plus the base set): nothing is loaded at run time, by the
+	// agent or by the system. Missing a tool means asking a colleague who has it, or reporting to the requester.
 	active := e.initialTools(ctx, p, spec)
-	activate := func(names ...string) {
-		for _, n := range names {
-			if spec.Leaf && (n == "delegate" || n == "ask_colleague") {
-				continue // tool_search must not hand a leaf run a way to pass the request on
-			}
-			if t, ok := e.Tools.Get(n); ok && !(spec.Restricted && t.Risk == tools.RiskExec) && t.AllowedFor(p.Name) {
-				active[n] = true
-			}
-		}
-	}
-	// Sherpa: pick extra tools for this task from the repository (progressive disclosure).
-	if p.AutoTools && p.Role != RoleEntry && spec.Input != "" {
-		picked := e.selectTools(ctx, spec.Input, active, p.Name)
-		activate(picked...)
-	}
+	ar.tools = active
 
 	env := &tools.Env{
 		Agent: p.Name, Profile: p, Restricted: spec.Restricted, SessionID: sess.ID, Depth: spec.Depth, Channel: spec.Channel, Topic: spec.Topic,
-		Emit:     func(kind string, data any) { e.Emit(kind, data) },
-		Activate: activate,
-		Sources:  &tools.Sources{},
+		Emit:    func(kind string, data any) { e.Emit(kind, data) },
+		Sources: &tools.Sources{},
 	}
 	res.Sources = env.Sources
 	if spec.Task != nil {
@@ -735,9 +725,6 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 	for _, n := range p.Tools {
 		active[n] = true
 	}
-	for _, n := range spec.ExtraTools {
-		active[n] = true
-	}
 	if p.CanDelegate && spec.Depth < MaxDepth && !spec.Restricted {
 		active["delegate"], active["agent_find"] = true, true
 	}
@@ -1017,11 +1004,20 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	tool, ok := e.Tools.Get(tc.Name)
 	if !ok {
 		emit("end", false)
-		return toolResult{text: fmt.Sprintf("Error: unknown tool %q. Use tool_search to find available tools.", tc.Name)}
+		return toolResult{text: fmt.Sprintf("Error: unknown tool %q. You cannot load tools: use only the ones you were given, or ask a colleague (tool_search shows who holds what) or report_blocked.", tc.Name)}
 	}
 	if !tool.AllowedFor(env.Agent) { // defence in depth: however the tool got activated
 		emit("denied", false)
 		return toolResult{text: fmt.Sprintf("Error: %s is reserved for %s. Delegate the request to %s (delegate) instead of doing it yourself.", tc.Name, strings.Join(tool.Only, "/"), strings.Join(tool.Only, "/"))}
+	}
+	if ar.tools != nil && !ar.tools[tc.Name] { // a registered tool that is not in this agent's toolset: never run it
+		emit("denied", false)
+		who := e.toolHolders(ctx)[tc.Name]
+		hint := "nobody holds it: use report_blocked"
+		if len(who) > 0 {
+			hint = "ask_colleague " + strings.Join(who, " or ") + " with a complete request, or report_blocked"
+		}
+		return toolResult{text: fmt.Sprintf("Error: %s is not in your toolset and tools cannot be loaded at run time — %s.", tc.Name, hint)}
 	}
 	if env.Restricted && tool.Risk == tools.RiskExec { // defence in depth: however the tool got activated
 		emit("denied", false)

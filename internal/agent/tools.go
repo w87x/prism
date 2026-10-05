@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,8 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolToolSearch(),
 		e.toolScratchRead(),
 		e.toolScratchWrite(),
+		e.toolScratchShare(),
+		e.toolReportBlocked(),
 		e.toolEvolvePropose(),
 		e.toolAskColleague(),
 		e.toolAgentPerformance(),
@@ -48,14 +51,16 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("agent", "agent name (see the specialists list or agent_find); leave out and the best-matching specialist is chosen"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
+			tools.IntList("refs", "artifact ids with material the agent needs (artifact_save / scratchpad_share first) — hand over bulky material by reference, not pasted"),
 			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Tasks []struct {
-					Agent       string `json:"agent"`
-					Instruction string `json:"instruction"`
-					Title       string `json:"title"`
-					TaskID      int64  `json:"task_id"`
+					Agent       string  `json:"agent"`
+					Instruction string  `json:"instruction"`
+					Title       string  `json:"title"`
+					TaskID      int64   `json:"task_id"`
+					Refs        []int64 `json:"refs"`
 				} `json:"tasks"`
 			}](raw)
 			if err != nil {
@@ -77,6 +82,12 @@ func (e *Engine) toolDelegate() *tools.Tool {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
+					refs, rerr := e.artifactRefs(ctx, it.Refs)
+					if rerr != nil {
+						out[i] = "## delegation — error\n" + rerr.Error()
+						return
+					}
+					it.Instruction += refs
 					agentName := strings.TrimSpace(it.Agent)
 					if agentName == "" && it.TaskID == 0 {
 						var perr error
@@ -115,15 +126,24 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			"Use this instead of improvising with shell commands such as curl. The colleague answers once and cannot pass the request on. Write a complete, self-contained request. " +
 			"Name the agent if you know who (see agent_find), or leave it out and the best-matching specialist is asked.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),
-			tools.Str("agent", "the specialist to ask (optional)")),
+			tools.Str("agent", "the specialist to ask (optional)"),
+			tools.IntList("refs", "artifact ids with the material the request is about (artifact_save / scratchpad_share first) — pass bulky material by reference, not pasted")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
-			a, err := tools.Decode[struct{ Request, Agent string }](raw)
+			a, err := tools.Decode[struct {
+				Request, Agent string
+				Refs           []int64
+			}](raw)
 			if err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(a.Request) == "" {
 				return "", errors.New("say what you need")
 			}
+			refs, err := e.artifactRefs(ctx, a.Refs)
+			if err != nil {
+				return "", err
+			}
+			a.Request += refs
 			name := strings.TrimSpace(a.Agent)
 			if name == "" {
 				var err error
@@ -370,7 +390,7 @@ var profileProps = []tools.Prop{
 	tools.Str("description", "one line: what it is good for (shown in the catalog)"),
 	tools.Str("soul", "the agent's system prompt (soul.md): role, method, output format, constraints"),
 	tools.StrList("traits", "searchable keywords"),
-	tools.StrList("tools", "toolset (tool names; keep minimal — others load on demand). MCP tools (mcp__<server>__<tool>) are allowed: find them with tool_search"),
+	tools.StrList("tools", "toolset: EVERY tool the agent will need for its job (tool names). It cannot load more later — if it lacks a tool it can only ask a colleague or report back. MCP tools (mcp__<server>__<tool>) are allowed: look them up with tool_search"),
 	tools.StrList("skills", "skill names"),
 	tools.Str("model", "model or model-list name (empty = default)"),
 	tools.Bool("can_delegate", "may delegate subtasks (max depth 2)"),
@@ -410,7 +430,7 @@ func (e *Engine) toolAgentCreate() *tools.Tool {
 				return "", fmt.Errorf("the hiring limit is reached (%d new agents in the last 7 days; the user sets it in Autonomy). Do the work with existing agents, or tell the user what specialist is missing", lim)
 			}
 			p := Profile{Name: a.Name, Icon: a.Icon, Group: a.Group, Description: a.Description, Soul: a.Soul, Traits: a.Traits, Tools: a.Tools, Skills: a.Skills,
-				Model: a.Model, Role: RoleWorker, AutoTools: true, Enabled: true}
+				Model: a.Model, Role: RoleWorker, Enabled: true}
 			if a.CanDelegate != nil {
 				p.CanDelegate = *a.CanDelegate
 			}
@@ -600,8 +620,9 @@ func (e *Engine) toolNotify() *tools.Tool {
 func (e *Engine) toolToolSearch() *tools.Tool {
 	return &tools.Tool{
 		Name: "tool_search", Category: "agents", Base: true, Risk: tools.RiskRead,
-		Description: "Find and load tools by capability (e.g. 'download file', 'obsidian note', 'telegram'). Matching tools become callable immediately; their parameters are returned.",
-		Params:      tools.Obj("query", tools.Str("query", "capability keywords"), tools.Int("limit", "max tools to load (default 5)")),
+		Description: "Look up which tool does something and WHO HAS IT (e.g. 'download file', 'obsidian note', 'telegram'). This only looks things up: you cannot load or enable tools — you have exactly the tools you were given. " +
+			"If the tool you need belongs to a colleague, ask_colleague them (by exact name); if nobody holds it, report to whoever asked you.",
+		Params: tools.Obj("query", tools.Str("query", "capability keywords"), tools.Int("limit", "max tools to show (default 5)")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Query string
@@ -615,25 +636,73 @@ func (e *Engine) toolToolSearch() *tools.Tool {
 			}
 			var found []*tools.Tool
 			for _, t := range e.Tools.Search(a.Query, a.Limit*3) { // tools reserved for other agents are not offered
-				if t.AllowedFor(env.Agent) && len(found) < a.Limit {
+				if len(found) < a.Limit && e.Tools.State(t.Name).Enabled && t.AllowedFor(env.Agent) {
 					found = append(found, t)
 				}
 			}
 			if len(found) == 0 {
 				return "No matching tools.", nil
 			}
+			holders := e.toolHolders(ctx)
 			var sb strings.Builder
-			var names []string
 			for _, t := range found {
-				sb.WriteString(tools.Describe(t) + "\n")
-				names = append(names, t.Name)
+				sb.WriteString(tools.Describe(t))
+				switch who := holders[t.Name]; {
+				case t.Base && !t.Deferred:
+					sb.WriteString("\n  held by: everyone")
+				case slices.Contains(who, env.Agent):
+					sb.WriteString("\n  held by: you")
+				case len(who) > 0:
+					sb.WriteString("\n  held by: " + strings.Join(who, ", ") + " — you do not have it: ask_colleague one of them, or report to your requester")
+				default:
+					sb.WriteString("\n  held by: nobody — it is not assigned to any agent; report that it is missing")
+				}
+				sb.WriteString("\n")
 			}
-			if env.Activate != nil {
-				env.Activate(names...)
-			}
-			return "Loaded: " + strings.Join(names, ", ") + "\n" + sb.String(), nil
+			return sb.String(), nil
 		},
 	}
+}
+
+// ToolHolders is toolHolders for callers outside the package (the Tools page).
+func (e *Engine) ToolHolders(ctx context.Context) map[string][]string { return e.toolHolders(ctx) }
+
+// UnheldTools lists enabled, non-base tools that no enabled agent can use: with fixed toolsets such a tool is
+// unreachable, which is almost always a profile that forgot to list it.
+func (e *Engine) UnheldTools(ctx context.Context) []string {
+	holders := e.toolHolders(ctx)
+	var out []string
+	for _, t := range e.Tools.All() {
+		if t.Base || !e.Tools.State(t.Name).Enabled || len(holders[t.Name]) > 0 {
+			continue
+		}
+		out = append(out, t.Name)
+	}
+	return out
+}
+
+// toolHolders maps each tool to the enabled agents whose toolset lists it.
+func (e *Engine) toolHolders(ctx context.Context) map[string][]string {
+	out := map[string][]string{}
+	if e.Profiles == nil {
+		return out
+	}
+	ps, err := e.Profiles.List(ctx)
+	if err != nil {
+		return out
+	}
+	for _, p := range ps {
+		if !p.Enabled {
+			continue
+		}
+		for _, n := range p.Tools {
+			if t, ok := e.Tools.Get(n); ok && !t.AllowedFor(p.Name) {
+				continue // listed on the profile but reserved for other agents: it is not really theirs
+			}
+			out[n] = append(out[n], p.Name)
+		}
+	}
+	return out
 }
 
 const scratchCap = 4000

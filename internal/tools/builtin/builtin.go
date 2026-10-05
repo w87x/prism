@@ -542,7 +542,7 @@ func registerArtifacts(reg *tools.Registry, d Deps) {
 			},
 		},
 		&tools.Tool{
-			Name: "artifact_list", Category: "files", Risk: tools.RiskRead,
+			Name: "artifact_list", Category: "files", Base: true, Risk: tools.RiskRead,
 			Description: "List recent artifacts.",
 			Params:      tools.Obj(""),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {

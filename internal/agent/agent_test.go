@@ -84,7 +84,7 @@ func TestAtlasDelegatesAndSynthesizes(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Scout", Group: "Web", Description: "web research and price checks", Soul: "You are Scout, a web researcher.",
-		Traits: []string{"web", "prices"}, Tools: []string{"clock"}, Enabled: true, AutoTools: false}, ""); err != nil {
+		Traits: []string{"web", "prices"}, Tools: []string{"clock"}, Enabled: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
@@ -945,7 +945,7 @@ func TestMemoryMaintenanceIsMnemosynes(t *testing.T) {
 			switch {
 			case role == "user":
 				return testutil.Reply{Tools: []llm.ToolCall{tc("s1", "tool_search", map[string]any{"query": "merge split memory banks consolidate delete link reflect"})}}
-			case strings.Contains(content, "Loaded") || strings.Contains(content, "No matching"):
+			case strings.Contains(content, "held by") || strings.Contains(content, "No matching"):
 				searchOut = content
 				return testutil.Reply{Tools: []llm.ToolCall{tc("d1", "memory_delete", map[string]any{"id": 1})}}
 			default:
@@ -965,7 +965,7 @@ func TestMemoryMaintenanceIsMnemosynes(t *testing.T) {
 			t.Errorf("%s was offered to an ordinary agent", n)
 		}
 		if strings.Contains(searchOut, "- "+n+" ") {
-			t.Errorf("tool_search loaded %s for an ordinary agent", n)
+			t.Errorf("tool_search offered %s to an ordinary agent", n)
 		}
 	}
 	if !zedTools["memory_list"] || !zedTools["memory_find"] {

@@ -16,7 +16,7 @@ func TestCodingProfilesUseRealTools(t *testing.T) {
 	d := testutil.DB(t)
 	reg := tools.NewRegistry(d.Pool)
 	builtin.Register(reg, builtin.Deps{DB: d.Pool, Settings: settings.New(d.Pool), DataDir: t.TempDir()})
-	for _, n := range []string{"ask_colleague", "memory_find", "memory_store", "web_search", "web_fetch"} { // registered by other packages
+	for _, n := range []string{"ask_colleague", "memory_find", "memory_store", "web_search", "web_fetch", "consult", "consult_result", "consult_cancel", "plugin_create", "plugin_list", "plugin_delete"} { // registered by other packages
 		reg.Register(&tools.Tool{Name: n})
 	}
 	found := 0

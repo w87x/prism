@@ -302,7 +302,7 @@
 
       {:else if step === 3}
         <h2>Agents</h2>
-        <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Sherpa, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
+        <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
         {#if mcpConnected.length}
           <div class="mcpbox sm">
             <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Generate with the model" sees all of it directly; "Use built-in templates" folds each server's tools into whichever template fits, or drafts a new one when nothing does:

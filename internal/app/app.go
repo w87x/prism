@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -173,6 +174,14 @@ func (a *App) build(ctx context.Context) error {
 		}
 		return art.ID, nil
 	}
+	a.Engine.SaveHandoff = func(ctx context.Context, name string, content []byte, by string, ttl time.Duration, tainted bool, session int64) (int64, error) {
+		art, err := builtin.SaveArtifactOpts(ctx, builtin.Deps{DB: a.DB.Pool, DataDir: a.Cfg.DataDir, Emit: a.Emit}, name, "text/markdown", content, by,
+			builtin.ArtifactOpts{TTL: ttl, Tainted: tainted, SessionID: session})
+		if err != nil {
+			return 0, err
+		}
+		return art.ID, nil
+	}
 	a.Engine.LoadImage = func(ctx context.Context, id int64) (string, []byte, error) {
 		var mime, path string
 		if err := a.DB.QueryRow(ctx, `SELECT mime,path FROM artifacts WHERE id=$1`, id).Scan(&mime, &path); err != nil {
@@ -202,6 +211,10 @@ func (a *App) build(ctx context.Context) error {
 	}
 	if err := a.Profiles.Seed(ctx); err != nil {
 		return err
+	}
+	if u := a.Engine.UnheldTools(ctx); len(u) > 0 { // agents have fixed toolsets: say which tools nobody can use yet
+		sort.Strings(u)
+		a.Logf("info", "tools", "%d enabled tools are not in any agent's toolset (agents cannot load tools at run time): %s", len(u), strings.Join(u, ", "))
 	}
 	master := settings.Load(ctx, a.Settings, "tools_master", struct {
 		Armed       bool `json:"armed"`

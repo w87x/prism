@@ -58,7 +58,7 @@ func RegisterTools(reg *tools.Registry, m *Manager) {
 				if err := m.SetStatus(ctx, p.ID, StatusApproved); err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("Plugin approved. Use tool_search for %q to load plugin_%s, then call it.", p.Name, p.Name), nil
+				return fmt.Sprintf("Plugin approved. It is now registered as plugin_%s; give it to an agent in that agent's toolset to use it.", p.Name), nil
 			},
 		},
 		&tools.Tool{
