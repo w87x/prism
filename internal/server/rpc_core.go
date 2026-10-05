@@ -156,7 +156,9 @@ func (s *Server) registerCore() {
 		return true, nil
 	})
 	rpc(s, "runs.snapshot", func(ctx context.Context, _ none) (map[string]any, error) {
-		return map[string]any{"runs": a.Engine.ActiveRuns(), "asks": a.Engine.PendingAsks(), "busy": a.Engine.ChatBusy("web")}, nil
+		// "live" is the shared thinking buffer: the tail of every in-flight run (including ones outside the engine, like a
+		// knowledge-page writer), so a window opened mid-run starts mid-thought
+		return map[string]any{"runs": a.Engine.ActiveRuns(), "asks": a.Engine.PendingAsks(), "busy": a.Engine.ChatBusy("web"), "live": a.Live()}, nil
 	})
 	// the user's web chats
 	rpc(s, "chats.list", func(ctx context.Context, r struct {

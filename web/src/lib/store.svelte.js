@@ -121,8 +121,27 @@ export async function call(method, params = {}, opts = {}) {
 export function listen(event, fn) { return on(event, fn); }
 
 // ── runs / thinking ─────────────────────────────────────────────────────────
-const BUF = 1800;
+const BUF = 4000;
 function short(s, n = 70) { s = String(s || '').replace(/\s+/g, ' '); return s.length > n ? s.slice(0, n) + '…' : s; }
+
+// the lines a tool event adds to a run's thinking text — shared by live events and by the replay of a joined run's tail
+function toolLines(r, e) {
+  if (e.phase === 'start') r.buf = (r.buf + `\n▸ ${e.tool} ${short(e.args)}\n`).slice(-BUF);
+  if (e.phase === 'denied') r.buf = (r.buf + `\n✗ ${e.tool} denied\n`).slice(-BUF);
+  else if (e.phase === 'end' && e.ok === false) r.buf = (r.buf + `✗ ${e.tool} failed${e.error ? ': ' + e.error : ''}\n`).slice(-BUF);
+}
+
+// Rebuild what a run streamed before this window existed from the server's shared tail (runs.snapshot → live), so a
+// window opened mid-run starts mid-thought. Live events then carry on from here.
+function replayTail(r, events) {
+  for (const e of events || []) {
+    if (e.type === 'run.delta') {
+      if (e.kind === 'break') r.buf += '\n';
+      else { r.buf = (r.buf + e.text).slice(-BUF); r.phase = e.kind === 'thinking' ? 'thinking' : 'acting'; }
+    } else if (e.type === 'run.tool') { toolLines(r, e); if (e.phase === 'start') r.phase = 'acting'; else if (e.phase === 'end') r.phase = 'thinking'; }
+    else if (e.type === 'run.compacted') r.buf += '\n⟲ context compacted\n';
+  }
+}
 
 export function activeRuns() {
   return Object.values(S.runs).sort((a, b) => a.id - b.id);
@@ -201,16 +220,14 @@ function wire() {
   on('run.tool', (e) => {
     const r = S.runs[e.run];
     if (!r) return;
+    toolLines(r, e);
     if (e.phase === 'start') {
       r.calls++;
       r.phase = 'acting';
       markLive(r);
-      r.buf = (r.buf + `\n▸ ${e.tool} ${short(e.args)}\n`).slice(-BUF);
       pushActivity({ kind: 'tool', agent: e.agent, depth: r.depth, run: e.run, runKind: r.kind, chat: r.chat, tool: e.tool, text: short(e.args, 120) });
     }
     else if (e.phase === 'end') r.phase = 'thinking';
-    if (e.phase === 'denied') r.buf = (r.buf + `\n✗ ${e.tool} denied\n`).slice(-BUF);
-    else if (e.phase === 'end' && e.ok === false) r.buf = (r.buf + `✗ ${e.tool} failed${e.error ? ': ' + e.error : ''}\n`).slice(-BUF);
   });
   on('run.usage', (e) => {
     const r = S.runs[e.run];
@@ -309,6 +326,11 @@ export async function refreshAll() {
   if (snap) {
     S.runs = {};
     for (const r of snap.runs || []) S.runs[r.run] = { ...newRun(r), task_text: r.task_text, tokens_in: r.tokens_in, tokens_out: r.tokens_out, context: r.context, window: r.window, started: r.started, calls: r.calls || 0, breakdown: r.breakdown, _baseCtx: r.context };
+    // runs outside the engine (a knowledge-page writer, the onboarding hirer) are only known to the shared buffer
+    for (const [id, l] of Object.entries(snap.live || {})) {
+      if (!S.runs[id] && l.start) S.runs[id] = { ...newRun(l.start), tokens_in: l.usage?.tokens_in || 0, tokens_out: l.usage?.tokens_out || 0, context: l.usage?.context || 0, window: l.usage?.window || 0, _baseCtx: l.usage?.context || 0 };
+      if (S.runs[id]) replayTail(S.runs[id], l.events);
+    }
     S.asks = snap.asks || [];
     S.chatBusy = {};
     for (const r of snap.runs || []) if (r.is_chat && (r.depth || 0) === 0 && r.kind !== 'quick') S.chatBusy[r.chat_topic || ''] = true;

@@ -40,6 +40,8 @@ type App struct {
 	Cfg *config.Config
 	Hub *hub.Hub
 
+	live liveFeed // tails of in-flight runs, for windows that join mid-run (see livefeed.go)
+
 	mu     sync.RWMutex
 	ready  bool
 	cancel context.CancelFunc
@@ -87,6 +89,7 @@ func (a *App) Ready() bool {
 // Emit broadcasts an event to all UI clients.
 func (a *App) Emit(typ string, data any) {
 	a.Hub.Broadcast(typ, data)
+	a.live.observe(typ, data)
 	a.observe(typ, data)
 }
 

@@ -1,3 +1,5 @@
+import { paintTexture } from './textures.js';
+
 // Colour themes. The tokens live in app.css (default "emerald") and themes.css; this picks one, remembers it
 // on this device, and applies it before the app mounts so there is no flash of the default colours.
 export const THEMES = [
@@ -29,6 +31,7 @@ export function applyTheme(id, save = true) {
   const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
   if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
   if (save) { try { localStorage.setItem(KEY, JSON.stringify(id)); } catch {} }
+  paintTexture(id);
   window.dispatchEvent(new CustomEvent('prism-theme', { detail: id }));
   return id;
 }
@@ -47,5 +50,6 @@ export function applyTexture(id, save = true) {
   const root = document.documentElement;
   if (id === 'mineral') delete root.dataset.texture; else root.dataset.texture = id;
   if (save) { try { localStorage.setItem(TKEY, JSON.stringify(id)); } catch {} }
+  paintTexture(currentTheme(), id);
   return id;
 }
