@@ -110,3 +110,73 @@ func TestDropInventedLinks(t *testing.T) {
 		t.Fatalf("a supported link was touched: %q (%d)", clean, n)
 	}
 }
+
+// A page rests on specific facts. When one is retired — or lapses — the page is stale: it is flagged (never
+// served as current), rebuilt promptly, and a rebuild re-reads its sources so it does not land stale.
+func TestPageGoesStaleWhenASourceFactIsRetired(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, st := testutil.Setup(t, d, fake)
+	mem := memory.New(d.Pool, r, st)
+	mem.VectorOn = d.VectorOn
+	s := &Service{DB: d.Pool, Memory: mem, LLM: r, Settings: st}
+	ctx := context.Background()
+	var ids []int64
+	for _, f := range []string{"The GMKtec EVO-X2 has 128GB of memory", "The GMKtec EVO-X2 costs $1,999 right now"} {
+		res, err := mem.Store(ctx, memory.StoreReq{Bank: "domain:Hardware", Text: f, Source: "user"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, res.Fact.ID)
+	}
+	var writes int
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		user, _ := ms[len(ms)-1].(map[string]any)["content"].(string)
+		writes++
+		return testutil.Reply{Content: "## GMKtec\n" + user}
+	}
+	pid, _ := s.SavePage(ctx, Page{Title: "GMKtec EVO-X2", Query: "GMKtec EVO-X2", Auto: true})
+	if err := s.Generate(ctx, pid); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.GetPage(ctx, pid)
+	if p.Stale || len(p.Dropped) != 0 {
+		t.Fatalf("a freshly built page is not stale: %+v", p)
+	}
+	if err := mem.Retract(ctx, "user", ids[1], "the price changed"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = s.GetPage(ctx, pid)
+	if !p.Stale || len(p.Dropped) != 1 || p.Dropped[0] != ids[1] {
+		t.Fatalf("retiring a source must make the page stale and name it: %+v", p)
+	}
+	tree, _ := s.Tree(ctx)
+	for _, pg := range tree["pages"].([]Page) {
+		if pg.ID == pid && !pg.Stale {
+			t.Fatalf("the tree must report the stale page too")
+		}
+	}
+	// the facts the writer sees carry how far to trust them
+	if got := factLines([]memory.Fact{{ID: 1, Text: "x", Bank: "b", Confidence: 0.3}}); !strings.Contains(got, "unverified") {
+		t.Fatalf("writer lines must carry the trust notes: %q", got)
+	}
+	// rebuilt from what is true now, the page is fresh again
+	if err := s.Generate(ctx, pid); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = s.GetPage(ctx, pid); p.Stale {
+		t.Fatalf("a rebuilt page must be fresh: %+v", p)
+	}
+	// a volatile source that lapses makes a page stale too
+	res, _ := mem.Store(ctx, memory.StoreReq{Bank: "domain:Hardware", Text: "The GMKtec EVO-X2 ships within 3 days", Source: "user", TTLDays: 3})
+	_, _ = d.Pool.Exec(ctx, `UPDATE kb_pages SET sources=sources||$2 WHERE id=$1`, pid, []int64{res.Fact.ID})
+	if p, _ = s.GetPage(ctx, pid); p.Stale || p.ValidUntil == nil {
+		t.Fatalf("an unexpired volatile source gives the page a validity deadline, not staleness: %+v", p)
+	}
+	_, _ = d.Pool.Exec(ctx, `UPDATE memory_facts SET expires_at=now()-interval '1 hour' WHERE id=$1`, res.Fact.ID)
+	_ = mem.ExpireDue(ctx)
+	if p, _ = s.GetPage(ctx, pid); !p.Stale {
+		t.Fatalf("a lapsed volatile source must make the page stale: %+v", p)
+	}
+}

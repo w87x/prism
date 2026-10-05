@@ -166,3 +166,63 @@ func mmrSelect(cands []cand, sc []scoredIdx, k int) []scoredIdx {
 	}
 	return out
 }
+
+// ── source health: is what a derived document was written from still true? ──────────────────────────────────
+
+// SourceHealth says, for the facts a derived view (a knowledge page, a model) was built from, which have since
+// been retired or have lapsed, which conclusions are stale, and until when the rest can be trusted. A view is
+// stale as soon as ANY source is, so it never silently outlives its evidence.
+type SourceHealth struct {
+	Missing    []int64    `json:"missing,omitempty"`   // deleted outright
+	Retired    []int64    `json:"retired,omitempty"`   // corrected, retracted, expired or archived
+	Stale      []int64    `json:"stale,omitempty"`     // conclusions with a retired premise somewhere beneath
+	Contested  []int64    `json:"contested,omitempty"` // a live fact contradicts them
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// Broken reports whether the view must not be served as current.
+func (h SourceHealth) Broken() bool { return len(h.Missing)+len(h.Retired)+len(h.Stale) > 0 }
+
+func (s *Service) SourceHealth(ctx context.Context, ids []int64) SourceHealth {
+	var h SourceHealth
+	if len(ids) == 0 {
+		return h
+	}
+	rows, err := s.db.Query(ctx, `SELECT f.id, f.valid_to IS NOT NULL, f.expires_at, `+staleConclusionExpr("f")+`,
+			EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=f.id THEN ck.b ELSE ck.a END
+				WHERE (ck.a=f.id OR ck.b=f.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')
+		FROM memory_facts f WHERE f.id=ANY($1)`, ids)
+	if err != nil {
+		return h
+	}
+	defer rows.Close()
+	have := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		var retired, stale, contested bool
+		var exp *time.Time
+		if rows.Scan(&id, &retired, &exp, &stale, &contested) != nil {
+			continue
+		}
+		have[id] = true
+		switch {
+		case retired:
+			h.Retired = append(h.Retired, id)
+		case stale:
+			h.Stale = append(h.Stale, id)
+		}
+		if contested && !retired {
+			h.Contested = append(h.Contested, id)
+		}
+		if exp != nil && !retired && (h.ValidUntil == nil || exp.Before(*h.ValidUntil)) {
+			e := *exp
+			h.ValidUntil = &e
+		}
+	}
+	for _, id := range ids {
+		if !have[id] {
+			h.Missing = append(h.Missing, id)
+		}
+	}
+	return h
+}

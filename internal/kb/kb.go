@@ -48,7 +48,13 @@ type Page struct {
 	Error       string     `json:"error"`
 	Sources     []int64    `json:"sources"`
 	GeneratedAt *time.Time `json:"generated_at,omitempty"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	// Stale: a fact the page was written from has since been retired, corrected or has lapsed (derived on read,
+	// never stored). A stale page is never served as current; Dropped names the retired sources and ValidUntil is
+	// when the earliest volatile source lapses.
+	Stale      bool       `json:"stale"`
+	Dropped    []int64    `json:"dropped,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // Config is stored under settings key "kb".
@@ -192,7 +198,11 @@ func (s *Service) Tree(ctx context.Context) (map[string]any, error) {
 		}
 		pages = append(pages, p)
 	}
-	return map[string]any{"folders": folders, "pages": pages}, prow.Err()
+	prow.Close()
+	for i := range pages {
+		s.judge(ctx, &pages[i])
+	}
+	return map[string]any{"folders": folders, "pages": pages}, nil
 }
 
 func (s *Service) GetPage(ctx context.Context, id int64) (Page, error) {
@@ -201,7 +211,19 @@ func (s *Service) GetPage(ctx context.Context, id int64) (Page, error) {
 		return p, err
 	}
 	_ = s.DB.QueryRow(ctx, `SELECT body FROM kb_pages WHERE id=$1`, id).Scan(&p.Body)
+	s.judge(ctx, &p)
 	return p, nil
+}
+
+// judge fills in the derived freshness of a page from the health of the facts it was built from.
+func (s *Service) judge(ctx context.Context, p *Page) {
+	if p.Status != "ready" || len(p.Sources) == 0 {
+		return
+	}
+	h := s.Memory.SourceHealth(ctx, p.Sources)
+	p.Dropped = append(append(append([]int64{}, h.Retired...), h.Missing...), h.Stale...)
+	p.ValidUntil = h.ValidUntil
+	p.Stale = h.Broken() || (h.ValidUntil != nil && !h.ValidUntil.After(time.Now()))
 }
 
 func (s *Service) FindPage(ctx context.Context, title string) (Page, error) {
@@ -296,6 +318,7 @@ func (s *Service) allBanks(ctx context.Context) []string {
 const composePrompt = `You write a page of a personal knowledge base in Markdown, using ONLY the numbered memory facts provided.
 - Start with a one-paragraph summary, then organised sections with ## headings; use tables or lists where they help.
 - Cite the supporting facts inline like [#12]. Never state anything the facts do not support.
+- Each fact may carry a bracketed note about how far to trust it. Say plainly when you rely on a fact marked disputed, unverified or "may go stale", and never present a "needs review" conclusion as settled.
 - If facts conflict, prefer the newest and mention the change. Add a short "Open questions" section listing what is missing.
 - Write in the language the facts are in. No preamble, output the page only.
 - Never invent details. URLs, numbers, dates and names may appear only if they are written in a fact. If the query asks for something the facts do not contain (for example links), write "not in memory" for it and list it under "Open questions". Never use placeholder addresses such as example.com.`
@@ -324,7 +347,7 @@ func dropInventedLinks(body, facts string) (string, int) {
 func factLines(fs []memory.Fact) string {
 	var sb strings.Builder
 	for _, f := range fs {
-		fmt.Fprintf(&sb, "#%d (%s, %s) %s\n", f.ID, f.Bank, f.CreatedAt.Format("2006-01-02"), f.Text)
+		fmt.Fprintf(&sb, "#%d (%s, %s) %s%s\n", f.ID, f.Bank, f.CreatedAt.Format("2006-01-02"), f.Text, memory.FactFlags(f))
 	}
 	return sb.String()
 }
@@ -372,27 +395,41 @@ func (s *Service) Generate(ctx context.Context, id int64) error {
 		}
 	}
 	var body string
-	switch {
-	case len(facts) == 0:
-		body = "_Memory holds nothing about this yet._\n\nTurn on **enrich** so an agent researches it, or talk to Atlas about it and regenerate later."
-	case !s.LLM.HasChat(ctx):
-		return fail(errors.New("no chat model configured"))
-	default:
-		cctx, cancel := context.WithTimeout(ctx, jobTimeout)
-		out, err := s.stream(cctx, "KB: "+p.Title, id, composePrompt, "Page title: "+p.Title+"\nQuery: "+p.Query+"\n\nMemory facts:\n"+factLines(facts), false)
-		cancel()
-		if err != nil {
-			return fail(err)
+	var src []int64
+	for attempt := 0; ; attempt++ {
+		body = ""
+		switch {
+		case len(facts) == 0:
+			body = "_Memory holds nothing about this yet._\n\nTurn on **enrich** so an agent researches it, or talk to Atlas about it and regenerate later."
+		case !s.LLM.HasChat(ctx):
+			return fail(errors.New("no chat model configured"))
+		default:
+			cctx, cancel := context.WithTimeout(ctx, jobTimeout)
+			out, err := s.stream(cctx, "KB: "+p.Title, id, composePrompt, "Page title: "+p.Title+"\nQuery: "+p.Query+"\n\nMemory facts:\n"+factLines(facts), false)
+			cancel()
+			if err != nil {
+				return fail(err)
+			}
+			body = strings.TrimSpace(out)
+			if cleaned, n := dropInventedLinks(body, factLines(facts)); n > 0 {
+				s.logf("warn", "page %q: removed %d link(s) not found in memory", p.Title, n)
+				body = cleaned
+			}
 		}
-		body = strings.TrimSpace(out)
-		if cleaned, n := dropInventedLinks(body, factLines(facts)); n > 0 {
-			s.logf("warn", "page %q: removed %d link(s) not found in memory", p.Title, n)
-			body = cleaned
+		src = make([]int64, len(facts))
+		for i, f := range facts {
+			src[i] = f.ID
 		}
-	}
-	src := make([]int64, len(facts))
-	for i, f := range facts {
-		src[i] = f.ID
+		// the page is written from facts that can change while a slow local model is writing: read them again before
+		// committing, and write once more from what is true NOW rather than store a page that is stale on arrival
+		if attempt == 0 && s.Memory.SourceHealth(ctx, src).Broken() {
+			s.logf("info", "page %q: a source changed while it was being written; writing it again", p.Title)
+			if facts, err = s.Memory.Find(ctx, memory.FindReq{Query: p.Query, Banks: s.allBanks(ctx), K: 40}); err != nil {
+				return fail(err)
+			}
+			continue
+		}
+		break
 	}
 	_, err = s.DB.Exec(ctx, `UPDATE kb_pages SET body=$2, sources=$3, status='ready', error='', generated_at=now(), updated_at=now() WHERE id=$1`, id, body, src)
 	if err != nil {
@@ -582,8 +619,11 @@ func (s *Service) sweep(ctx context.Context) {
 		if built >= 3 { // spread the work over several sweeps
 			return
 		}
+		s.judge(ctx, &p)
 		switch {
 		case p.GeneratedAt == nil:
+		case p.Stale && time.Since(*p.GeneratedAt) >= 15*time.Minute:
+			// a fact the page rests on was retired, corrected or lapsed: rebuild now, not after the usual age / change count
 		case time.Since(*p.GeneratedAt) < age:
 			continue
 		case s.changes(ctx, p) < max(cfg.MinChanges, 1):
@@ -634,6 +674,18 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				}
 				if p.Body == "" {
 					return "Page exists but has not been generated yet.", nil
+				}
+				if p.Stale { // never serve a page as current once its evidence moved
+					if p.GeneratedAt == nil || time.Since(*p.GeneratedAt) > 10*time.Minute {
+						go func() { _ = s.Generate(context.Background(), p.ID) }()
+					}
+					why := "some facts it rests on have changed"
+					if len(p.Dropped) > 0 {
+						why = fmt.Sprintf("facts it rests on were retired or are stale: #%v", p.Dropped)
+					} else if p.ValidUntil != nil {
+						why = "it contains volatile facts that lapsed on " + p.ValidUntil.Format("2006-01-02")
+					}
+					return "⚠ STALE PAGE — " + why + ". A rebuild has been queued; treat what follows as possibly out of date and verify anything you depend on (memory_check).\n\n" + p.Body, nil
 				}
 				return p.Body, nil
 			},

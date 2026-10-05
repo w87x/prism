@@ -114,7 +114,7 @@
 
 {#snippet prow(p, depth)}
   <button type="button" class="pr" class:on={sel === p.id} style="padding-left:{22 + depth * 14}px" onclick={() => (sel = p.id)}>
-    <Led state={p.status === 'generating' ? 'standby' : tone(p.status)} pulse={p.status === 'generating'} size={7} /><span class="ellipsis">{p.title}</span>
+    <Led state={p.status === 'generating' ? 'standby' : tone(p.status)} pulse={p.status === 'generating'} size={7} /><span class="ellipsis">{p.title}</span>{#if p.stale}<Badge tone="warn" title="A fact this page was written from has since been retired, corrected or has lapsed. It is rebuilt automatically soon.">stale</Badge>{/if}
   </button>
 {/snippet}
 
@@ -153,6 +153,7 @@
           <Switch checked={page.enrich} label="enrich" onchange={() => toggle('enrich')} title="Let an agent research gaps before writing" />
           <Switch checked={page.auto} label="auto" onchange={() => toggle('auto')} title="Regenerate automatically when memory changed" />
         </div>
+        {#if page.stale}<div class="sm attn pre">⚠ Out of date: {page.dropped?.length ? 'facts it rests on were retired or are stale (#' + page.dropped.join(', #') + ')' : page.valid_until ? 'a volatile fact it contains lapsed on ' + page.valid_until.slice(0, 10) : 'facts it rests on changed'}. It rebuilds automatically; Regenerate to do it now.</div>{/if}
         {#if page.status === 'error'}<div class="err sm pre">{page.error}</div>{/if}
         {#if page.status === 'generating'}
           <div class="gen">
