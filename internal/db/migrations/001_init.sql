@@ -177,10 +177,40 @@ CREATE TABLE memory_facts (
   valid_to      timestamptz,
   last_used     timestamptz,
   created_at    timestamptz NOT NULL DEFAULT now(),
+  -- Lifecycle (see internal/memory/claims.go). valid_to IS NULL still means "current"; for a retired row status says
+  -- why (superseded | retracted | expired). proposed = waiting for a curator, never retrieved. "contested" is not
+  -- stored: it is derived from a live contradicts-link.
+  status        text NOT NULL DEFAULT 'active' CHECK (status IN ('proposed','active','superseded','retracted','expired')),
+  -- unconfirmed | user_confirmed (the user vouched: strong, forgets slowly) | multi_source_confirmed (independent sources agree)
+  confirmation  text NOT NULL DEFAULT 'unconfirmed' CHECK (confirmation IN ('unconfirmed','user_confirmed','multi_source_confirmed')),
   expires_at    timestamptz,                  -- volatile facts (prices, availability, "currently…") retire themselves at this moment
   tsv           tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
 );
 CREATE INDEX memory_facts_expiry_idx ON memory_facts(expires_at) WHERE expires_at IS NOT NULL AND valid_to IS NULL;
+-- What backs (or refutes) a fact: one row per piece of evidence. Independence is counted by source_group (the
+-- registrable domain, or whatever origin the evidence ultimately comes from), never by the number of rows — ten
+-- pages repeating one press release are one group.
+CREATE TABLE memory_evidence (
+  id           bigserial PRIMARY KEY,
+  fact_id      bigint NOT NULL REFERENCES memory_facts ON DELETE CASCADE,
+  source_ref   text NOT NULL,                 -- the page URL / message / document the evidence came from
+  source_group text NOT NULL DEFAULT '',      -- '' = unknown origin: all unknown-origin evidence is one correlated group
+  supports     boolean NOT NULL DEFAULT true,
+  reliability  real NOT NULL DEFAULT 0.4,
+  note         text NOT NULL DEFAULT '',
+  observed_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX memory_evidence_fact_idx ON memory_evidence(fact_id);
+-- Who did what to a fact and why: the audit trail behind "why do you remember / no longer remember this".
+CREATE TABLE memory_audit (
+  id      bigserial PRIMARY KEY,
+  at      timestamptz NOT NULL DEFAULT now(),
+  actor   text NOT NULL,
+  action  text NOT NULL,   -- retain | supersede | retract | expire | confirm | unconfirm | move | promote | reject | merge
+  fact_id bigint NOT NULL, -- no FK: the trail outlives a deleted fact
+  detail  text NOT NULL DEFAULT ''
+);
+CREATE INDEX memory_audit_fact_idx ON memory_audit(fact_id, at DESC);
 -- One row per (fact, scope): retrieval alone must not reinforce a fact over and over (a popularity loop), so a
 -- fact is reinforced at most once per scope (a task, or a chat-day) — see Service.reinforce.
 CREATE TABLE memory_use_receipts (

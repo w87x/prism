@@ -84,6 +84,10 @@ type Fact struct {
 	TaskID int64 `json:"task_id,omitempty"`
 	// Pinned exempts a fact from Prune's auto-archival and from rank's time-decay in retrieval scoring.
 	Pinned bool `json:"pinned"`
+	// Status is the claim's lifecycle state: proposed (waiting for a curator), active, contested (a live fact
+	// contradicts it), or — once retired — superseded, retracted or expired. Confirmation says who vouches for it.
+	Status       string `json:"status"`
+	Confirmation string `json:"confirmation"`
 	// ValueRatio is how durable/reusable this fact is likely to be (a standing attribute vs. a one-off
 	// event), set at extraction time — see StoreReq.ValueRatio. Folds into Find's ranking weight; does not
 	// affect pruning, which stays driven by actual usage/staleness.
@@ -215,19 +219,27 @@ const factCols = `f.id,f.bank_id,b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact') ELSE 0 END,
 	CASE WHEN f.kind='conclusion' THEN EXISTS(SELECT 1 FROM memory_links e JOIN memory_facts x ON x.id=CASE WHEN e.a=f.id THEN e.b ELSE e.a END
 		WHERE (e.a=f.id OR e.b=f.id) AND e.kind='evidence' AND x.kind='fact' AND x.valid_to IS NOT NULL) ELSE false END,
-	f.origins,f.task_id,f.pinned,f.value_ratio`
+	f.origins,f.task_id,f.pinned,f.value_ratio,f.status,f.confirmation,
+	EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=f.id THEN ck.b ELSE ck.a END
+		WHERE (ck.a=f.id OR ck.b=f.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')`
 
-func scanFact(r pgx.Row) (Fact, error) {
+func scanFact(r pgx.Row) (Fact, error) { return scanFactX(r) }
+
+// scanFactX scans a factCols row followed by extra destinations (columns a query appends after factCols).
+func scanFactX(r pgx.Row, extra ...any) (Fact, error) {
 	var f Fact
 	var rk, cf, vr float32
 	var taskID *int64
-	err := r.Scan(&f.ID, &f.BankID, &f.Bank, &f.Text, &f.Tags, &rk, &f.Hits, &cf, &f.Source,
+	var contested bool
+	dest := append([]any{&f.ID, &f.BankID, &f.Bank, &f.Text, &f.Tags, &rk, &f.Hits, &cf, &f.Source,
 		&f.Supersedes, &f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsed, &f.CreatedAt, &f.Embedded, &f.Links, &f.Kind, &f.Proof, &f.Stale, &f.Origins,
-		&taskID, &f.Pinned, &vr)
+		&taskID, &f.Pinned, &vr, &f.Status, &f.Confirmation, &contested}, extra...)
+	err := r.Scan(dest...)
 	f.Rank, f.Confidence, f.ValueRatio = float64(rk), float64(cf), float64(vr)
 	if taskID != nil {
 		f.TaskID = *taskID
 	}
+	f.Status = effectiveStatus(f.Status, f.ValidTo, f.SupersededBy, contested)
 	return f, err
 }
 
@@ -331,12 +343,14 @@ func (s *Service) UpdateFact(ctx context.Context, id int64, text *string, tags [
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), superseded_by=$2 WHERE id=$1`, id, newID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), superseded_by=$2, status='superseded' WHERE id=$1`, id, newID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
+		s.audit(ctx, "user", "retain", newID, fmt.Sprintf("edit of #%d", id))
+		s.audit(ctx, "user", "supersede", id, fmt.Sprintf("replaced by #%d (edited)", newID))
 		s.changed()
 		f, err := s.GetFact(ctx, newID)
 		return &f, err
@@ -380,15 +394,7 @@ func (s *Service) SetPinned(ctx context.Context, id int64, pinned bool) error {
 // to something else (that's UpdateFact's job). It stays inspectable with history, just excluded from normal
 // (non-history) retrieval, same as any other superseded fact.
 func (s *Service) MarkOutdated(ctx context.Context, id int64) error {
-	tag, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=now() WHERE id=$1 AND valid_to IS NULL`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("fact #%d is already retired (or does not exist)", id)
-	}
-	s.changed()
-	return nil
+	return s.Retract(ctx, "user", id, "marked outdated")
 }
 
 func (s *Service) DeleteFact(ctx context.Context, id int64) error {
@@ -399,6 +405,9 @@ func (s *Service) DeleteFact(ctx context.Context, id int64) error {
 
 func (s *Service) MoveFact(ctx context.Context, id, bankID int64) error {
 	_, err := s.db.Exec(ctx, `UPDATE memory_facts SET bank_id=$2 WHERE id=$1`, id, bankID)
+	if err == nil {
+		s.audit(ctx, "user", "move", id, fmt.Sprintf("to bank %d", bankID))
+	}
 	s.changed()
 	return err
 }
@@ -467,8 +476,10 @@ type StoreReq struct {
 	Tags       []string
 	Source     string
 	Confidence float64
-	// Origin is the site (registrable domain) the fact was learned from, when it came from the web.
-	Origin string
+	// Origin is the site (registrable domain) the fact was learned from, when it came from the web; SourceRef is the
+	// exact page. Together they become a supporting entry in the evidence ledger.
+	Origin    string
+	SourceRef string
 	// TaskID is the task/conversation this fact is being stored during, when known (0 = none) — see
 	// Fact.TaskID.
 	TaskID int64
@@ -477,6 +488,10 @@ type StoreReq struct {
 	// per fact; a fact the user typed in directly is taken at their word as valuable regardless of what's
 	// passed here (see the Source=="user" override in Store).
 	ValueRatio float64
+	// Propose files the fact as a proposal (status proposed): it is stored and visible to a curator but never
+	// retrieved, and it retires nothing, until someone promotes it (Promote). Used for what a probationary agent
+	// wants to put into a shared bank.
+	Propose bool
 	// TTLDays makes a volatile fact (a price, an availability, a "currently…" state) retire itself after that
 	// many days (0 = never expires).
 	TTLDays int
@@ -567,7 +582,7 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 		return &StoreResult{Fact: f, Duplicate: true, Corroborated: cor}, err
 	}
 	var supersede []int64
-	if len(ns) > 0 && s.llm.RoleRef(ctx, "fast") != "" {
+	if len(ns) > 0 && !r.Propose && s.llm.RoleRef(ctx, "fast") != "" { // a proposal must not retire live facts before anyone approved it
 		valid := make(map[int64]bool, len(ns))
 		var lines []string
 		for _, n := range ns {
@@ -642,7 +657,12 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 		return nil, err
 	}
 	for _, old := range supersede {
-		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), superseded_by=$2 WHERE id=$1 AND valid_to IS NULL`, old, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), superseded_by=$2, status='superseded' WHERE id=$1 AND valid_to IS NULL`, old, id); err != nil {
+			return nil, err
+		}
+	}
+	if r.Propose {
+		if _, err := tx.Exec(ctx, `UPDATE memory_facts SET status='proposed' WHERE id=$1`, id); err != nil {
 			return nil, err
 		}
 	}
@@ -664,6 +684,17 @@ Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradic
 			close = append(close, neighbour{n.c.id, n.sim})
 		}
 	}
+	if r.Origin != "" {
+		_ = s.AddEvidence(ctx, Evidence{FactID: id, SourceRef: firstNonEmptyStr(&r.SourceRef, r.Origin), Group: r.Origin, Supports: true})
+	}
+	if r.Propose {
+		s.audit(ctx, firstNonEmptyStr(&r.Agent, "system"), "propose", id, r.Source)
+	} else {
+		s.audit(ctx, firstNonEmptyStr(&r.Agent, "system"), "retain", id, r.Source)
+	}
+	for _, old := range supersede {
+		s.audit(ctx, firstNonEmptyStr(&r.Agent, "system"), "supersede", old, fmt.Sprintf("replaced by #%d", id))
+	}
 	s.autoLink(ctx, id, bank.ID, r.Text, vec, close)
 	f, err := s.GetFact(ctx, id)
 	s.changed()
@@ -683,6 +714,8 @@ type cand struct {
 	conf     float64
 	pinned   bool
 	value    float64
+	// contested: a live fact contradicts this one; userConfirmed: the user vouched for it
+	contested, userConfirmed bool
 }
 
 // vecSims asks pgvector for the nearest facts to qv: id → cosine similarity.
@@ -698,7 +731,7 @@ func (s *Service) vecSims(ctx context.Context, bankIDs []int64, history bool, qv
 	}
 	model := s.embedModel(ctx)
 	rows, err := s.db.Query(ctx, `SELECT id, 1 - (vec <=> $1::vector) FROM memory_facts
-		WHERE bank_id=ANY($2) AND ($3 OR valid_to IS NULL) AND vec IS NOT NULL AND vector_dims(vec)=$4 AND (embed_model='' OR embed_model=$6)
+		WHERE bank_id=ANY($2) AND ($3 OR valid_to IS NULL) AND status<>'proposed' AND vec IS NOT NULL AND vector_dims(vec)=$4 AND (embed_model='' OR embed_model=$6)
 		ORDER BY vec <=> $1::vector LIMIT $5`, lit, bankIDs, history, len(qv), limit, model)
 	if err != nil {
 		return out
@@ -722,11 +755,11 @@ func (s *Service) candidates(ctx context.Context, bankIDs []int64, history bool,
 	if s.VectorOn {
 		emb = "NULL::bytea" // similarity is computed by Postgres; don't ship vectors
 	}
-	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio FROM memory_facts WHERE bank_id=ANY($1)`
+	sql := `SELECT id,bank_id,text,` + emb + `,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio,` + candExtra + ` FROM memory_facts WHERE bank_id=ANY($1)`
 	if !history {
 		sql += ` AND valid_to IS NULL`
 	}
-	sql += ` ORDER BY rank DESC, id DESC LIMIT $2`
+	sql += ` AND status<>'proposed' ORDER BY rank DESC, id DESC LIMIT $2`
 	rows, err := s.db.Query(ctx, sql, bankIDs, limit)
 	if err != nil {
 		return nil, err
@@ -744,7 +777,7 @@ func (s *Service) candidatesByIDs(ctx context.Context, ids []int64) ([]cand, err
 	if s.VectorOn {
 		emb = "NULL::bytea"
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,bank_id,text,`+emb+`,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio FROM memory_facts WHERE id=ANY($1)`, ids)
+	rows, err := s.db.Query(ctx, `SELECT id,bank_id,text,`+emb+`,rank,last_used,created_at,hits,confidence,embed_model,pinned,value_ratio,`+candExtra+` FROM memory_facts WHERE id=ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -752,13 +785,16 @@ func (s *Service) candidatesByIDs(ctx context.Context, ids []int64) ([]cand, err
 	return scanCands(rows)
 }
 
+// candExtra: whether the user vouched for the fact, and whether a live fact contradicts it.
+const candExtra = `confirmation='user_confirmed',EXISTS(SELECT 1 FROM memory_links ck JOIN memory_facts co ON co.id=CASE WHEN ck.a=memory_facts.id THEN ck.b ELSE ck.a END WHERE (ck.a=memory_facts.id OR ck.b=memory_facts.id) AND ck.kind='contradicts' AND co.valid_to IS NULL AND co.status<>'proposed')`
+
 func scanCands(rows pgx.Rows) ([]cand, error) {
 	var out []cand
 	for rows.Next() {
 		var c cand
 		var emb []byte
 		var rk, cf, vr float32
-		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned, &vr); err != nil {
+		if err := rows.Scan(&c.id, &c.bankID, &c.text, &emb, &rk, &c.lastUsed, &c.created, &c.hits, &cf, &c.model, &c.pinned, &vr, &c.userConfirmed, &c.contested); err != nil {
 			return nil, err
 		}
 		c.vec, c.rank, c.conf, c.value = decodeVec(emb), float64(rk), float64(cf), float64(vr)
@@ -819,7 +855,7 @@ func (s *Service) textCandidateIDs(ctx context.Context, bankIDs []int64, history
 	if q == "" {
 		return nil
 	}
-	sql := `SELECT f.id FROM memory_facts f, plainto_tsquery('simple', $1) q WHERE f.bank_id=ANY($2) AND f.tsv @@ q`
+	sql := `SELECT f.id FROM memory_facts f, plainto_tsquery('simple', $1) q WHERE f.bank_id=ANY($2) AND f.status<>'proposed' AND f.tsv @@ q`
 	if !history {
 		sql += ` AND f.valid_to IS NULL`
 	}
@@ -987,8 +1023,11 @@ func (s *Service) Find(ctx context.Context, r FindReq) ([]Fact, error) {
 		if rel[i] < r.MinRel {
 			continue
 		}
-		w := 0.8 + 0.2*math.Min(effRank(c.rank, c.lastUsed, c.created, c.pinned), 3)
+		w := 0.8 + 0.2*math.Min(effRankConfirmed(c.rank, c.lastUsed, c.created, c.pinned, c.userConfirmed), 3)
 		w *= 0.85 + 0.15*c.conf/0.7
+		if c.contested {
+			w *= contestedWeight
+		}
 		w *= 0.9 + 0.1*c.value // durable facts (a standing attribute) edge out equally-relevant transient ones
 		sc = append(sc, scoredIdx{i, (0.55*rel[i] + 0.45*fused[i]) * w})
 	}

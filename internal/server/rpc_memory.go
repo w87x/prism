@@ -62,6 +62,45 @@ func (s *Server) registerMemory() {
 	}) (bool, error) {
 		return true, a.Memory.MarkOutdated(ctx, r.ID)
 	})
+	// the user vouches for a fact (or withdraws that): trusted, and forgotten four times slower
+	rpc(s, "memory.fact_confirm", func(ctx context.Context, r struct {
+		ID      int64 `json:"id"`
+		Confirm bool  `json:"confirm"`
+	}) (bool, error) {
+		if r.Confirm {
+			return true, a.Memory.ConfirmByUser(ctx, "user", r.ID)
+		}
+		return true, a.Memory.Unconfirm(ctx, "user", r.ID)
+	})
+	// what happened to a fact, newest first
+	rpc(s, "memory.fact_audit", func(ctx context.Context, r struct {
+		ID    int64 `json:"id"`
+		Limit int   `json:"limit"`
+	}) ([]memory.AuditEntry, error) {
+		return a.Memory.Audit(ctx, r.ID, r.Limit)
+	})
+	// the ledger of sources behind a fact (supporting and refuting)
+	rpc(s, "memory.fact_evidence", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) ([]memory.Evidence, error) {
+		return a.Memory.Evidence(ctx, r.ID)
+	})
+	// proposals from probationary agents, waiting for a curator
+	rpc(s, "memory.proposals", func(ctx context.Context, r struct {
+		Limit int `json:"limit"`
+	}) ([]memory.Fact, error) {
+		return a.Memory.Proposals(ctx, r.Limit)
+	})
+	rpc(s, "memory.proposal_resolve", func(ctx context.Context, r struct {
+		ID     int64  `json:"id"`
+		Accept bool   `json:"accept"`
+		Note   string `json:"note"`
+	}) (bool, error) {
+		if r.Accept {
+			return true, a.Memory.Promote(ctx, "user", r.ID, r.Note)
+		}
+		return true, a.Memory.RejectProposal(ctx, "user", r.ID, r.Note)
+	})
 	rpc(s, "memory.fact_move", func(ctx context.Context, r struct {
 		ID     int64 `json:"id"`
 		BankID int64 `json:"bank_id"`

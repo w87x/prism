@@ -44,6 +44,7 @@ func (s *Service) reinforce(ctx context.Context, id int64, r StoreReq) bool {
 	case r.Origin != "" && !slices.Contains(origins, r.Origin):
 		origins = append(origins, r.Origin)
 		nc = math.Max(nc, corroborated(len(origins)))
+		_ = s.AddEvidence(ctx, Evidence{FactID: id, SourceRef: firstNonEmptyStr(&r.SourceRef, r.Origin), Group: r.Origin, Supports: true})
 	default:
 		return false
 	}

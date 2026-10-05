@@ -93,7 +93,8 @@ var lastSweep atomic.Int64
 
 // ExpireDue retires every fact whose expiry has passed; it reports how many.
 func (s *Service) ExpireDue(ctx context.Context) int {
-	tag, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=expires_at WHERE expires_at IS NOT NULL AND expires_at<=now() AND valid_to IS NULL`)
+	tag, err := s.db.Exec(ctx, `WITH x AS (UPDATE memory_facts SET valid_to=expires_at, status='expired' WHERE expires_at IS NOT NULL AND expires_at<=now() AND valid_to IS NULL RETURNING id)
+		INSERT INTO memory_audit(actor,action,fact_id,detail) SELECT 'system','expire',id,'lifetime ended' FROM x`)
 	if err != nil {
 		return 0
 	}

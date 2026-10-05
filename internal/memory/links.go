@@ -97,18 +97,12 @@ func (s *Service) Links(ctx context.Context, id int64) ([]Linked, error) {
 	var out []Linked
 	for rows.Next() {
 		var x Linked
-		var rk, cf, w, vr float32
-		var taskID *int64
-		if err := rows.Scan(&x.ID, &x.BankID, &x.Bank, &x.Text, &x.Tags, &rk, &x.Hits, &cf, &x.Source,
-			&x.Supersedes, &x.SupersededBy, &x.ValidFrom, &x.ValidTo, &x.LastUsed, &x.CreatedAt, &x.Embedded, &x.Links, &x.Fact.Kind, &x.Proof, &x.Stale, &x.Origins,
-			&taskID, &x.Pinned, &vr,
-			&x.LinkKind, &w, &x.Note, &x.By); err != nil {
+		var w float32
+		f, err := scanFactX(rows, &x.LinkKind, &w, &x.Note, &x.By)
+		if err != nil {
 			return nil, err
 		}
-		x.Rank, x.Confidence, x.Weight, x.ValueRatio = float64(rk), float64(cf), float64(w), float64(vr)
-		if taskID != nil {
-			x.TaskID = *taskID
-		}
+		x.Fact, x.Weight = f, float64(w)
 		out = append(out, x)
 	}
 	return out, rows.Err()

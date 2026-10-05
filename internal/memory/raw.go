@@ -432,8 +432,9 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 // Prune archives long-unused, low-rank facts into history (valid_to set) and
 // removes stale superseded facts older than keepHistory. Returns (archived, purged).
 func (s *Service) Prune(ctx context.Context, keepHistory time.Duration) (int, int, error) {
-	t1, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=now()
-		WHERE valid_to IS NULL AND NOT pinned AND rank<0.25 AND COALESCE(last_used,created_at) < now()-interval '90 days'`)
+	t1, err := s.db.Exec(ctx, `WITH x AS (UPDATE memory_facts SET valid_to=now(), status='expired'
+		WHERE valid_to IS NULL AND NOT pinned AND rank<0.25 AND COALESCE(last_used,created_at) < now()-interval '90 days' RETURNING id)
+		INSERT INTO memory_audit(actor,action,fact_id,detail) SELECT 'system','expire',id,'unused for 90 days' FROM x`)
 	if err != nil {
 		return 0, 0, err
 	}

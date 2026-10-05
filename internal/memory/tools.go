@@ -203,11 +203,15 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 					src += " (tainted)"
 					a.Tags = append(a.Tags, "unverified")
 				}
-				r, err := s.Store(ctx, StoreReq{Bank: a.Bank, Agent: env.Agent, Text: a.Text, Tags: a.Tags, Source: src, Confidence: conf, Origin: origin, TaskID: env.TaskID, TTLDays: clampTTL(a.TTL)})
+				// a probationary agent may only keep notes for itself; for a shared bank it can propose
+				propose := env.Restricted && !strings.HasPrefix(strings.ToLower(a.Bank), "profile")
+				r, err := s.Store(ctx, StoreReq{Propose: propose, Bank: a.Bank, Agent: env.Agent, Text: a.Text, Tags: a.Tags, Source: src, Confidence: conf, Origin: origin, TaskID: env.TaskID, TTLDays: clampTTL(a.TTL), SourceRef: a.URL})
 				if err != nil {
 					return "", err
 				}
 				switch {
+				case propose && !r.Duplicate:
+					return fmt.Sprintf("Proposed as #%d: you are on probation, so a curator must approve it before it enters %s. It is not used until then.", r.Fact.ID, a.Bank), nil
 				case r.Corroborated:
 					return fmt.Sprintf("Already known (fact #%d); a second source raised its confidence to %.0f%% (sources: %s).", r.Fact.ID, r.Fact.Confidence*100, strings.Join(r.Fact.Origins, ", ")), nil
 				case r.Duplicate:

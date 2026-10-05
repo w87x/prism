@@ -34,6 +34,7 @@ type Review struct {
 	StaleConclusions []Fact          `json:"stale_conclusions"`
 	PruneCandidates  []Fact          `json:"prune_candidates"`
 	Unverified       []Fact          `json:"unverified"` // web-learned facts nobody has confirmed yet
+	Proposed         []Fact          `json:"proposed"`   // what probationary agents want in a shared bank, waiting for approval
 	Open             []Fact          `json:"open"`       // hypotheses and questions from deep analysis
 }
 
@@ -41,7 +42,7 @@ func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 40
 	}
-	out := &Review{Contradictions: []Contradiction{}, StaleConclusions: []Fact{}, PruneCandidates: []Fact{}, Unverified: []Fact{}, Open: []Fact{}}
+	out := &Review{Contradictions: []Contradiction{}, StaleConclusions: []Fact{}, PruneCandidates: []Fact{}, Unverified: []Fact{}, Proposed: []Fact{}, Open: []Fact{}}
 
 	crows, err := s.db.Query(ctx, `SELECT
 			a.id, ba.kind||CASE WHEN ba.kind='user' THEN '' ELSE ':'||ba.name END, a.text, a.confidence, a.rank,
@@ -97,7 +98,8 @@ func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 		dst  *[]Fact
 		cond string
 	}{
-		{&out.Unverified, `f.kind='fact' AND f.confidence<0.5`},
+		{&out.Proposed, `f.status='proposed'`},
+		{&out.Unverified, `f.kind='fact' AND f.confidence<0.5 AND f.status<>'proposed'`},
 		{&out.Open, `f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis','question']`},
 	} {
 		rows, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id

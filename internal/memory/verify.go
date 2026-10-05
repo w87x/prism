@@ -148,6 +148,9 @@ func (s *Service) ApplyVerdict(ctx context.Context, id int64, verdict, note stri
 			}
 			return fmt.Sprintf("#%d confirmed by %s: stored as a trusted fact", id, strings.Join(distinct, ", ")), nil
 		}
+		for _, o := range distinct {
+			_ = s.AddEvidence(ctx, Evidence{FactID: id, SourceRef: o, Group: o, Supports: true, Note: "verified: " + strings.TrimSpace(note)})
+		}
 		all := append(append([]string{}, f.Origins...), distinct...)
 		var uniq []string
 		for _, o := range all {
@@ -165,10 +168,13 @@ func (s *Service) ApplyVerdict(ctx context.Context, id int64, verdict, note stri
 		s.changed()
 		return fmt.Sprintf("#%d confirmed by %s: now trusted", id, strings.Join(distinct, ", ")), nil
 	case "contradicted":
+		for _, o := range distinct {
+			_ = s.AddEvidence(ctx, Evidence{FactID: id, SourceRef: o, Group: o, Supports: false, Note: "contradicted: " + strings.TrimSpace(note)})
+		}
 		if hyp {
 			_, err = s.ResolveInsight(ctx, id, "reject", "")
 		} else {
-			err = s.MarkOutdated(ctx, id)
+			err = s.Retract(ctx, "verify", id, "contradicted: "+strings.TrimSpace(note))
 		}
 		if err != nil {
 			return "", err
