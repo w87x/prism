@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 
 	"prism/internal/onboarding"
@@ -38,5 +39,19 @@ func TestOnboardingJobSurvivesTheWindow(t *testing.T) {
 	s.clearOnboardingJob()
 	if s.onboardingJob() != nil {
 		t.Fatal("cleared once applied")
+	}
+}
+
+func TestThoughtTailIsBounded(t *testing.T) {
+	j := (&Server{}).startOnboardingJob(1)
+	for i := 0; i < 400; i++ {
+		j.addThought("0123456789 0123456789 0123456789\n")
+	}
+	if n := len([]rune(j.Think)); n > maxThoughtTail || n < maxThoughtTail-5 {
+		t.Fatalf("the kept thinking tail must stay bounded at %d, got %d", maxThoughtTail, n)
+	}
+	j.addThought("LAST")
+	if !strings.HasSuffix(j.Think, "LAST") {
+		t.Fatal("the tail keeps the newest text")
 	}
 }

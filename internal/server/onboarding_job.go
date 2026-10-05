@@ -19,6 +19,7 @@ type obJob struct {
 	Finished  bool               `json:"finished"`
 	Generated bool               `json:"generated"` // a model wrote it (false: built-in templates stood in)
 	Error     string             `json:"error,omitempty"`
+	Think     string             `json:"think,omitempty"` // the tail of what the model has written so far, for a window opened mid-way
 }
 
 func (s *Server) startOnboardingJob(id int64) *obJob {
@@ -69,11 +70,23 @@ func (s *Server) onboardingJob() *obJob {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return &obJob{Job: j.Job, Stage: j.Stage, Note: j.Note, Total: j.Total, Drafts: append([]onboarding.Draft(nil), j.Drafts...),
-		Finished: j.Finished, Generated: j.Generated, Error: j.Error}
+		Finished: j.Finished, Generated: j.Generated, Error: j.Error, Think: j.Think}
 }
 
 func (s *Server) clearOnboardingJob() {
 	s.obMu.Lock()
 	s.obJob = nil
 	s.obMu.Unlock()
+}
+
+// maxThoughtTail bounds the thinking text kept on the job for a window that is opened (or reopened) mid-generation.
+const maxThoughtTail = 6000
+
+func (j *obJob) addThought(text string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Think += text
+	if r := []rune(j.Think); len(r) > maxThoughtTail {
+		j.Think = string(r[len(r)-maxThoughtTail:])
+	}
 }

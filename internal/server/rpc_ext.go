@@ -812,7 +812,7 @@ func (s *Server) registerOnboarding() {
 			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Constraints, r.Model, func(p onboarding.Progress) {
 				st.progress(p)
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
-			})
+			}, onboarding.WithCompleter(s.onboardingCompleter(job, st, r.Model)))
 			note := ""
 			if err != nil {
 				note = err.Error()

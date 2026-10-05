@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"prism/internal/agent"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -386,5 +388,76 @@ func TestFullAutoLetsTheModelDecideTheTeamSize(t *testing.T) {
 	}
 	if (Constraints{MaxAgents: 5}).free() || (Constraints{Count: 3}).free() {
 		t.Fatal("any explicit size or cap means not free")
+	}
+}
+
+func TestMCPToolsAreListedPerServerWithAWildcardForAWholeServer(t *testing.T) {
+	few := map[string][]string{"github": {"mcp__github__b — x", "mcp__github__a — y"}, "spotify": {"mcp__spotify__play — z"}}
+	lines := strings.Join(mcpToolLines(few), "\n")
+	for _, want := range []string{"mcp__<server>__*", "mcp__github__a — y", "mcp__spotify__play — z"} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("few tools are all listed, with the wildcard rule; missing %q:\n%s", want, lines)
+		}
+	}
+	many := map[string][]string{}
+	for i := 0; i < 120; i++ {
+		many["big"] = append(many["big"], fmt.Sprintf("mcp__big__t%03d — thing", i))
+	}
+	many["small"] = []string{"mcp__small__only — one"}
+	got := mcpToolLines(many)
+	text := strings.Join(got, "\n")
+	if len(got) > 6 || !strings.Contains(text, `server "big" — 120 tools`) || !strings.Contains(text, "mcp__big__*") || strings.Contains(text, "mcp__big__t100") {
+		t.Fatalf("a big roster is summarised per server, not dumped (nor silently cut at 60):\n%s", text)
+	}
+	if mcpToolLines(nil) != nil {
+		t.Fatal("no MCP servers, no lines")
+	}
+}
+
+func TestExpandToolsHandlesWholeServerWildcards(t *testing.T) {
+	valid := map[string]bool{"shell": true, "mcp__gh__a": true, "mcp__gh__b": true, "mcp__other__x": true}
+	got := expandTools([]string{"shell", "mcp__gh__*", "mcp__gh__a", "nonsense", "mcp__none__*"}, valid)
+	if strings.Join(got, ",") != "shell,mcp__gh__a,mcp__gh__b" {
+		t.Fatalf("expand: %v", got)
+	}
+}
+
+func TestProposeGivesAWholeMCPServerOnAWildcardAndUsesTheCompleter(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := tools.NewRegistry(d.Pool)
+	for _, n := range []string{"create_issue", "list_prs", "comment"} {
+		reg.Register(&tools.Tool{Name: "mcp__github__" + n, Description: "[MCP github] " + n, Category: "mcp:github", Risk: tools.RiskExec, Deferred: true, Params: tools.Obj(""),
+			Run: func(context.Context, *tools.Env, json.RawMessage) (string, error) { return "", nil }})
+	}
+	reg.Register(&tools.Tool{Name: "mcp__spotify__play", Description: "[MCP spotify] play", Category: "mcp:spotify", Risk: tools.RiskExec, Deferred: true, Params: tools.Obj(""),
+		Run: func(context.Context, *tools.Env, json.RawMessage) (string, error) { return "", nil }})
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Hub, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		return testutil.Reply{Content: `{"agents":[{"name":"Hub","group":"Code","description":"works with GitHub","tools":["mcp__github__*"]}]}`}
+	}
+	var titles []string
+	var mu sync.Mutex
+	viaCompleter := func(ctx context.Context, title, system, user string, jsonOut bool) (string, error) {
+		mu.Lock()
+		titles = append(titles, title)
+		mu.Unlock()
+		return r.Complete(ctx, "", system, user, jsonOut)
+	}
+	out, used, err := Propose(context.Background(), r, reg, nil, "use all available tools", Constraints{Count: 1}, "", nil, WithCompleter(viaCompleter))
+	if err != nil || !used || len(out) != 1 {
+		t.Fatalf("propose: %v %v %v", used, err, out)
+	}
+	if len(out[0].Tools) != 3 || strings.Contains(strings.Join(out[0].Tools, ","), "spotify") {
+		t.Fatalf("the wildcard must give exactly the github server's tools: %v", out[0].Tools)
+	}
+	sort.Strings(titles)
+	if len(titles) != 2 || titles[0] != "Onboarding: planning the team" || titles[1] != "Onboarding: writing Hub" {
+		t.Fatalf("every model call goes through the completer, titled for the UI: %v", titles)
 	}
 }

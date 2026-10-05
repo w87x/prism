@@ -322,10 +322,32 @@ type Progress struct {
 // SoulParallelism bounds how many agents' souls are written at the same time.
 var SoulParallelism = 4
 
+// Completer runs one model call for Propose. The server supplies one that streams the call as a visible agent run
+// (so its thinking shows in the UI); without it Propose uses the router directly.
+type Completer func(ctx context.Context, title, system, user string, jsonOut bool) (string, error)
+
+type proposeOpts struct{ complete Completer }
+
+// Option tunes Propose.
+type Option func(*proposeOpts)
+
+// WithCompleter makes Propose route its model calls through c.
+func WithCompleter(c Completer) Option { return func(o *proposeOpts) { o.complete = c } }
+
 // Propose plans a team with the chat model, then writes each agent's soul in its own
 // call so slow local models make visible progress instead of one huge request. On
 // failure it falls back to templates. progress may be nil.
-func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing []string, hints string, cons Constraints, model string, progress func(Progress)) (drafts []Draft, usedModel bool, err error) {
+func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing []string, hints string, cons Constraints, model string, progress func(Progress), options ...Option) (drafts []Draft, usedModel bool, err error) {
+	var po proposeOpts
+	for _, o := range options {
+		o(&po)
+	}
+	complete := po.complete
+	if complete == nil {
+		complete = func(ctx context.Context, _, system, user string, jsonOut bool) (string, error) {
+			return r.Complete(ctx, model, system, user, jsonOut)
+		}
+	}
 	if progress == nil {
 		progress = func(Progress) {}
 	}
@@ -345,7 +367,8 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	if !r.HasChat(ctx) {
 		return fallback("no chat model configured")
 	}
-	var tl, mcpTools []string
+	var tl []string
+	mcpByServer := map[string][]string{} // server → "tool — description" lines
 	valid := map[string]bool{}
 	for _, t := range reg.All() {
 		valid[t.Name] = true
@@ -359,7 +382,8 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			if r := []rune(d); len(r) > 90 {
 				d = string(r[:90]) + "…"
 			}
-			mcpTools = append(mcpTools, fmt.Sprintf("%s — %s", t.Name, d))
+			srv := strings.TrimPrefix(t.Category, "mcp:")
+			mcpByServer[srv] = append(mcpByServer[srv], fmt.Sprintf("%s — %s", t.Name, d))
 			continue
 		}
 		if t.Base || t.Deferred || strings.HasPrefix(t.Name, "agent_") || strings.HasPrefix(t.Name, "memory_") || t.Name == "delegate" || t.Name == "evolve_propose" || t.Name == "task_status" || t.Name == "notify_user" {
@@ -371,14 +395,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}
 		tl = append(tl, fmt.Sprintf("%s — %s", t.Name, d))
 	}
-	if n := len(mcpTools); n > 0 {
-		const maxMCP = 60
-		if n > maxMCP {
-			mcpTools = append(mcpTools[:maxMCP], fmt.Sprintf("…and %d more MCP tools (same prefixes)", n-maxMCP))
-		}
-		tl = append(tl, "", "MCP tools (from connected external servers — give an agent the ones its job needs):")
-		tl = append(tl, mcpTools...)
-	}
+	tl = append(tl, mcpToolLines(mcpByServer)...)
 	userHints := "Hints from the user:\n" + strings.TrimSpace(hints)
 	if strings.TrimSpace(hints) == "" {
 		userHints = "The user gave no hints: propose a broadly useful starting team."
@@ -388,7 +405,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	system := cons.render(strings.Join(existing, ", "), strings.Join(tl, "\n"))
 	askPlan := func(user string) ([]Draft, error) {
 		pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		out, err := r.Complete(pctx, model, system, user, true)
+		out, err := complete(pctx, "Onboarding: planning the team", system, user, true)
 		cancel()
 		if err != nil {
 			return nil, err
@@ -411,13 +428,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 				continue
 			}
 			seen[strings.ToLower(d.Name)] = true
-			var ts []string
-			for _, t := range d.Tools {
-				if valid[t] {
-					ts = append(ts, t)
-				}
-			}
-			d.Tools = ts
+			d.Tools = expandTools(d.Tools, valid)
 			if d.Group == "" {
 				d.Group = "General"
 			}
@@ -470,7 +481,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			pmu.Unlock()
 			report(Progress{Stage: "writing", Note: fmt.Sprintf("Writing %s (%d of %d started)…", items[i].Name, n, len(items)), Total: len(items)})
 			wctx, wcancel := context.WithTimeout(ctx, 5*time.Minute)
-			soul, err := r.Complete(wctx, model, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
+			soul, err := complete(wctx, "Onboarding: writing "+items[i].Name, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
 			wcancel()
 			soul = strings.TrimSpace(strings.Trim(strings.TrimSpace(soul), "`"))
 			if err != nil || len(soul) < 40 {
@@ -521,4 +532,75 @@ func Apply(ctx context.Context, ps *agent.ProfileStore, drafts []Draft, replace 
 		created++
 	}
 	return created, nil
+}
+
+// maxListedMCP is how many MCP tools are listed one by one in the planner's prompt; beyond that each server is
+// summarised (count and a few examples) so the prompt does not drown, and the planner names a whole server with
+// a wildcard instead.
+const maxListedMCP = 80
+
+// mcpToolLines describes the connected MCP servers' tools for the planner: every tool when there are few, a
+// per-server summary when there are many — and always how to give an agent a whole server.
+func mcpToolLines(by map[string][]string) []string {
+	if len(by) == 0 {
+		return nil
+	}
+	servers := make([]string, 0, len(by))
+	total := 0
+	for srv, ls := range by {
+		servers = append(servers, srv)
+		sort.Strings(ls)
+		total += len(ls)
+	}
+	sort.Strings(servers)
+	out := []string{"", "MCP tools (from connected external servers). To give an agent EVERY tool of one server write mcp__<server>__* in its tools (for example mcp__github__*); otherwise name the tools it needs:"}
+	if total <= maxListedMCP {
+		for _, srv := range servers {
+			out = append(out, by[srv]...)
+		}
+		return out
+	}
+	for _, srv := range servers {
+		ls := by[srv]
+		ex := make([]string, 0, 6)
+		for i := 0; i < len(ls) && i < 6; i++ {
+			ex = append(ex, ls[i][:strings.Index(ls[i], " — ")])
+		}
+		out = append(out, fmt.Sprintf("server %q — %d tools, e.g. %s … (all of them: mcp__%s__*)", srv, len(ls), strings.Join(ex, ", "), srv))
+	}
+	return out
+}
+
+// expandTools keeps real tool names and expands mcp__<server>__* wildcards to every tool of that server; unknown
+// names are dropped, order is kept and duplicates removed.
+func expandTools(in []string, valid map[string]bool) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, t := range in {
+		t = strings.TrimSpace(t)
+		if strings.HasPrefix(t, "mcp__") && strings.HasSuffix(t, "*") {
+			prefix := strings.TrimSuffix(t, "*")
+			var matches []string
+			for n := range valid {
+				if strings.HasPrefix(n, prefix) {
+					matches = append(matches, n)
+				}
+			}
+			sort.Strings(matches)
+			for _, n := range matches {
+				add(n)
+			}
+			continue
+		}
+		if valid[t] {
+			add(t)
+		}
+	}
+	return out
 }

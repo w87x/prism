@@ -1,7 +1,8 @@
 <script>
   import { untrack } from 'svelte';
   import { FA } from '../lib/icons.js';
-  import { S, call, listen, toast, confirmBox, refreshAll, skipOnboarding, loadModels, modelOptions, loadTools, go } from '../lib/store.svelte.js';
+  import { S, call, listen, toast, confirmBox, refreshAll, skipOnboarding, loadModels, modelOptions, loadTools, go, activeRuns } from '../lib/store.svelte.js';
+  import RunText from '../lib/RunText.svelte';
   import Logo from '../lib/ui/Logo.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Input from '../lib/ui/Input.svelte';
@@ -158,6 +159,10 @@
   let open = $state(-1);
   let job = 0;
   let stageNote = $state('');
+  // what the model is writing right now: the live runs of this generation (Forge, one per planning / soul call) —
+  // or, in a window opened mid-way, the tail the server kept
+  let thinkTail = $state('');
+  const liveThinking = $derived(activeRuns().filter((r) => r.agent === 'Forge' && (r.title || '').startsWith('Onboarding')));
   $effect(() => { if (step === 3) loadTools(); });
   const toolOpts = $derived((S.tools || []).map((t) => ({ value: t.name, label: t.name, hint: t.category, badge: t.risk === 'exec' ? 'exec' : t.risk === 'write' ? 'write' : t.category?.startsWith('mcp:') ? 'mcp' : '' })));
   // connected MCP servers, shown so it's clear what "built-in templates" can fold tools from before generating
@@ -202,7 +207,7 @@
       pick = {};
       drafts.forEach((d, i) => { if (!d.exists) pick[i] = true; });
       if (j.finished) { note = j.error || (j.generated ? '' : 'Built-in templates.'); }
-      else { gBusy = true; job = j.job; stageNote = j.note || 'Working…'; }
+      else { gBusy = true; job = j.job; stageNote = j.note || 'Working…'; thinkTail = j.think || ''; }
     });
   });
   function inBackground() { toast('Generating in the background — you will be notified when the team draft is ready'); close(); }
@@ -350,6 +355,11 @@
           <Button onclick={templates}>Use built-in templates</Button>
         </div>
         {#if regen}<Checkbox bind:checked={replace} label="overwrite existing — replace my current specialist agents with the selected ones (well-known agents stay)" />{/if}
+        {#if gBusy && (liveThinking.length || thinkTail)}
+          <div class="think scroll" title="what the model is writing right now">
+            {#each liveThinking as r (r.id)}<div class="tk"><b class="hi">▸ {r.title.replace('Onboarding: ', '')}</b></div><div class="tx"><RunText text={r.buf} /></div>{:else}<div class="tx pre">{thinkTail}</div>{/each}
+          </div>
+        {/if}
         {#if gBusy}<div class="acc sm row wrap"><Led state="ok" pulse size={8} /> {stageNote} <span class="mute">— local models can take a few minutes; drafts appear as they are written</span><Button size="sm" variant="ghost" title="close this window; generation keeps running and you get a notification when the draft is ready" onclick={inBackground}>Run in background</Button></div>{/if}
         {#if note}<div class="attn sm">{note}</div>{/if}
         {#if drafts.length}
@@ -425,4 +435,6 @@
   .danger { border: 1px solid var(--err-dim); background: color-mix(in srgb, var(--err) 6%, transparent); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
   .genrow { align-items: flex-end; }
   .next { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; color: var(--fg-dim); }
+  .think { max-height: 190px; overflow: auto; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line-2); background: var(--bg); font-size: var(--fs-sm); color: var(--fg-dim); display: flex; flex-direction: column; gap: 2px; }
+  .think .tx { white-space: pre-wrap; word-break: break-word; }
 </style>
