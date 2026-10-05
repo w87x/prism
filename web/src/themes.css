@@ -1,0 +1,125 @@
+/* Themes. The default ("terminal": mint on black) lives in app.css; a theme overrides its tokens through
+   <html data-theme="…">. Anything that glows or tints is built from the --rgb-* triplets, so changing those and
+   the solid colours below re-colours the whole app. Semantic colours (attention orange, warning yellow, error red)
+   stay readable in every theme. */
+
+/* ── Tanzanite ─ a blue-violet gemstone with flashes of sapphire, magenta and burgundy: "a galaxy in a pocket" ── */
+:root[data-theme='tanzanite'] {
+  --rgb-fg: 169 155 255;
+  --rgb-accent: 79 180 255;
+
+  --bg: #04021a;
+  --bg-1: #08052b;
+  --bg-2: #0d0942;
+  --bg-3: #150e60;
+  --bg-4: #20158a;
+  --line: #1e1670;
+  --line-2: #3a2bab;
+  --line-3: #5a46dc;
+
+  --fg: #a99bff;
+  --fg-hi: #e8e2ff;
+  --fg-dim: #8979f2;
+  --fg-mute: #7667dc;
+  --fg-faint: #4d3fae;
+
+  --ico: #7fb0ff;
+  --ico-hi: #bcd6ff;
+
+  --accent: #4fb4ff;
+  --accent-hi: #9bd8ff;
+  --accent-dim: #2f78b8;
+  --accent-bg: #071832;
+}
+:root[data-theme='tanzanite'] body {
+  background:
+    /* stars */
+    radial-gradient(1px 1px at 6% 14%, rgb(255 255 255 / 0.8), transparent 70%),
+    radial-gradient(1px 1px at 13% 71%, rgb(200 210 255 / 0.6), transparent 70%),
+    radial-gradient(1.5px 1.5px at 19% 36%, rgb(255 255 255 / 0.85), transparent 70%),
+    radial-gradient(1px 1px at 27% 88%, rgb(220 200 255 / 0.55), transparent 70%),
+    radial-gradient(1px 1px at 34% 8%, rgb(255 255 255 / 0.65), transparent 70%),
+    radial-gradient(1.5px 1.5px at 41% 57%, rgb(190 220 255 / 0.7), transparent 70%),
+    radial-gradient(1px 1px at 48% 93%, rgb(255 255 255 / 0.5), transparent 70%),
+    radial-gradient(1px 1px at 55% 26%, rgb(255 230 255 / 0.7), transparent 70%),
+    radial-gradient(2px 2px at 63% 47%, rgb(255 255 255 / 0.9), transparent 70%),
+    radial-gradient(1px 1px at 69% 81%, rgb(200 210 255 / 0.6), transparent 70%),
+    radial-gradient(1px 1px at 76% 12%, rgb(255 255 255 / 0.7), transparent 70%),
+    radial-gradient(1.5px 1.5px at 83% 62%, rgb(220 190 255 / 0.75), transparent 70%),
+    radial-gradient(1px 1px at 91% 33%, rgb(255 255 255 / 0.6), transparent 70%),
+    radial-gradient(1px 1px at 96% 90%, rgb(200 220 255 / 0.55), transparent 70%),
+    /* nebula: violet, magenta and sapphire */
+    radial-gradient(ellipse 70% 55% at 16% 10%, rgb(125 72 255 / 0.22), transparent 62%),
+    radial-gradient(ellipse 55% 50% at 90% 82%, rgb(255 72 200 / 0.13), transparent 64%),
+    radial-gradient(ellipse 60% 45% at 62% 38%, rgb(40 110 255 / 0.11), transparent 66%),
+    var(--bg);
+  background-attachment: fixed;
+}
+/* the light playing inside the stone: two slow, faint colour flashes drifting behind the content */
+:root[data-theme='tanzanite'] body::before {
+  content: '';
+  position: fixed;
+  inset: -35%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    conic-gradient(from 210deg at 30% 40%, transparent 0 18%, rgb(120 80 255 / 0.10) 26%, transparent 36% 62%, rgb(255 70 190 / 0.07) 72%, transparent 82%),
+    conic-gradient(from 20deg at 72% 62%, transparent 0 22%, rgb(60 150 255 / 0.09) 31%, transparent 42% 70%, rgb(160 60 255 / 0.08) 80%, transparent 90%);
+  animation: tanzanite-flash 90s linear infinite;
+}
+@keyframes tanzanite-flash { to { transform: rotate(360deg); } }
+
+/* ── Cobalt ─ blue, silver and cobalt, with an orange accent ── */
+:root[data-theme='cobalt'] {
+  --rgb-fg: 196 210 230;
+  --rgb-accent: 255 138 31;
+  --rgb-attn: 255 197 51;
+  --rgb-warn: 255 240 77;
+
+  --bg: #030914;
+  --bg-1: #07111f;
+  --bg-2: #0b1a31;
+  --bg-3: #122949;
+  --bg-4: #193b68;
+  --line: #17335e;
+  --line-2: #26518f;
+  --line-3: #3b75c6;
+
+  --fg: #c4d2e6;
+  --fg-hi: #f2f6fc;
+  --fg-dim: #9aabc4;
+  --fg-mute: #7486a3;
+  --fg-faint: #4d5f7c;
+
+  --ico: #6c9be0;
+  --ico-hi: #a9c6f2;
+
+  /* orange is the accent here, so "attention" moves to amber to stay distinguishable */
+  --accent: #ff8a1f;
+  --accent-hi: #ffb765;
+  --accent-dim: #b4600f;
+  --accent-bg: #261600;
+
+  --attn: #ffc533;
+  --attn-hi: #ffdc80;
+  --attn-dim: #a8821a;
+  --attn-bg: #241c00;
+
+  --warn: #fff04d;
+  --warn-dim: #a39c2f;
+  --warn-bg: #1d1b00;
+}
+:root[data-theme='cobalt'] body {
+  background:
+    linear-gradient(rgb(var(--rgb-fg) / 0.03) 1px, transparent 1px) 0 0 / 19px 19px,
+    linear-gradient(90deg, rgb(var(--rgb-fg) / 0.03) 1px, transparent 1px) 0 0 / 19px 19px,
+    radial-gradient(ellipse 85% 55% at 28% -12%, rgb(45 100 215 / 0.26), transparent 62%),
+    radial-gradient(ellipse 60% 45% at 78% -8%, rgb(var(--rgb-fg) / 0.09), transparent 60%),
+    radial-gradient(ellipse 60% 55% at 105% 108%, rgb(var(--rgb-accent) / 0.12), transparent 62%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='tanzanite'] body::before { animation: none; }
+}

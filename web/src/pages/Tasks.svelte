@@ -201,7 +201,7 @@
   .mchips { display: flex; gap: 6px; overflow-x: auto; flex: none; scrollbar-width: none; }
   .mchips::-webkit-scrollbar { display: none; }
   .mchip { flex: none; min-height: 36px; padding: 0 14px; background: var(--bg-1); border: 1px solid var(--line-2); color: var(--fg-dim); font-size: var(--fs-sm); white-space: nowrap; }
-  .mchip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.14), transparent); }
+  .mchip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgb(var(--rgb-fg) / 0.14), transparent); }
   .mlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
   .mcard { flex: none; padding: 10px 12px; background: var(--panel-bg); border: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
   .mcard:active { background: var(--bg-2); }

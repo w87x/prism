@@ -38,11 +38,11 @@
 <style>
   .crt {
     position: relative; flex: none; background: radial-gradient(ellipse at center, #04120c 0%, #010503 100%);
-    border: 1px solid var(--line-3); box-shadow: inset 0 0 22px rgba(62, 232, 166, 0.1), var(--glow-sm);
+    border: 1px solid var(--line-3); box-shadow: inset 0 0 22px rgb(var(--rgb-fg) / 0.1), var(--glow-sm);
     padding: 4px 8px 5px; overflow: hidden;
   }
   .crt::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0.22) 3px); mix-blend-mode: multiply; }
-  .crt.attn { border-color: var(--attn); box-shadow: inset 0 0 22px rgba(255, 153, 0, 0.12), var(--glow-attn); background: radial-gradient(ellipse at center, #140c00 0%, #050300 100%); }
+  .crt.attn { border-color: var(--attn); box-shadow: inset 0 0 22px rgb(var(--rgb-attn) / 0.12), var(--glow-attn); background: radial-gradient(ellipse at center, #140c00 0%, #050300 100%); }
   .idle { color: var(--accent); text-shadow: var(--glow-accent); letter-spacing: 0.2em; font-size: 10.5px; line-height: 1.45; height: calc(3 * 1.45 * 10.5px + 16px); display: flex; align-items: flex-start; gap: 8px; padding-top: 1px; }
   .idle :global(.led) { margin-top: 3px; }
   .cols { display: grid; gap: 10px; }
@@ -51,7 +51,7 @@
   .hd { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px; color: var(--fg-mute); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
   .nm { color: var(--fg-dim); font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
   .body { height: calc(3 * 1.45 * 10.5px); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
-  .txt { color: var(--fg-dim); font-size: 10.5px; text-shadow: 0 0 4px rgba(62, 232, 166, 0.28); white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .txt { color: var(--fg-dim); font-size: 10.5px; text-shadow: 0 0 4px rgb(var(--rgb-fg) / 0.28); white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .more { color: var(--fg-mute); font-size: 10.5px; text-align: right; }
   .askwrap { min-height: calc(3 * 1.45em + 12px); display: flex; flex-direction: column; justify-content: center; gap: 4px; }
 </style>

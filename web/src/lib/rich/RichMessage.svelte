@@ -186,7 +186,7 @@
   .bar button { background: none; border: 0; color: var(--accent); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 0 2px; } .bar button:hover { color: var(--accent-hi); }
   pre { margin: 0; border: 0; background: transparent; padding: 7px 10px; } pre code { background: none; padding: 0; border: 0; color: var(--fg); font-size: 12px; }
   .tb { padding: 6px 10px; overflow: auto; max-height: 360px; }
-  .tw { margin: 0.7em 0; overflow-x: auto; border: 1px solid var(--line-2); background: var(--bg); box-shadow: 0 0 10px rgba(62, 232, 166, 0.04); }
+  .tw { margin: 0.7em 0; overflow-x: auto; border: 1px solid var(--line-2); background: var(--bg); box-shadow: 0 0 10px rgb(var(--rgb-fg) / 0.04); }
   table { width: 100%; border-collapse: collapse; font-size: 0.95em; min-width: max-content; }
   th, td { padding: 4px 11px; vertical-align: top; border-bottom: 1px solid var(--line); }
   th { color: var(--accent-hi); background: var(--bg-2); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.84em; white-space: nowrap; border-bottom: 1px solid var(--accent-dim); }

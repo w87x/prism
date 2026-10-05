@@ -61,7 +61,7 @@
   .x { background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 2px 9px; }
   .x:hover { color: var(--fg-hi); border-color: var(--fg-dim); }
   .grid { flex: 1; min-height: 0; display: grid; gap: 8px; }
-  .tile { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-3); background: rgba(2, 10, 6, 0.85); box-shadow: inset 0 0 18px rgba(62, 232, 166, 0.08); padding: 6px 9px; cursor: pointer; overflow: hidden; }
+  .tile { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-3); background: rgba(2, 10, 6, 0.85); box-shadow: inset 0 0 18px rgb(var(--rgb-fg) / 0.08); padding: 6px 9px; cursor: pointer; overflow: hidden; }
   .tile:hover { border-color: var(--fg-dim); }
   .tile.done { opacity: 0.55; }
   .tile.empty { align-items: center; justify-content: center; border-style: dashed; border-color: var(--line-2); cursor: default; box-shadow: none; background: transparent; }
@@ -71,7 +71,7 @@
   .tk { overflow: hidden; text-overflow: ellipsis; }
   .body { flex: 1; min-height: 0; overflow: auto; padding-top: 5px; scrollbar-width: none; }
   .body::-webkit-scrollbar { display: none; }
-  .txt { color: var(--fg); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; text-shadow: 0 0 4px rgba(62, 232, 166, 0.28); }
+  .txt { color: var(--fg); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; text-shadow: 0 0 4px rgb(var(--rgb-fg) / 0.28); }
   .cur { color: var(--accent); animation: blink 1s step-start infinite; }
   .tile.done .cur { display: none; }
   @keyframes blink { 50% { opacity: 0; } }

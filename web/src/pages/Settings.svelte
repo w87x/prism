@@ -19,6 +19,7 @@
   import Empty from '../lib/ui/Empty.svelte';
   import Icon from '../lib/ui/Icon.svelte';
   import Bar from '../lib/ui/Bar.svelte';
+  import ThemePicker from '../lib/ThemePicker.svelte';
 
   let tab = $state('general');
 
@@ -292,6 +293,10 @@
           <Field label="Reply language" hint="preferred language for replies, free text (e.g. Russian, English)"><Input bind:value={gen.language} /></Field>
           <Field label="Timezone" hint="cron schedules, reminders and agents' clock"><Select bind:value={gen.timezone} options={zoneOpts} searchable /></Field>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('general', gen, 'Saved')}>Save</Button></div>
+        </Panel>
+        <Panel title="Theme">
+          <ThemePicker />
+          <div class="sm mute">Applies at once and is remembered on this device (the phone and the Mac can differ).</div>
         </Panel>
         <Panel title="System">
           <div class="kv"><span>Database</span><b>{S.status?.leds?.find((l) => l.id === 'db')?.detail || '—'}</b></div>

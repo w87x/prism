@@ -99,7 +99,7 @@
   function resolveColors() {
     const cs = getComputedStyle(canvas);
     const g = (v) => cs.getPropertyValue(v).trim() || '#888';
-    colors = { bg: g('--bg'), bg2: g('--bg-2'), bg4: g('--bg-4'), fg: g('--fg'), hi: g('--fg-hi'), dim: g('--fg-dim'), mute: g('--fg-mute'), line: g('--line-2'), accent: g('--accent'), accentHi: g('--accent-hi'), attn: g('--attn'), err: g('--err'), off: '#2c4038' };
+    colors = { bg: g('--bg'), bg2: g('--bg-2'), bg4: g('--bg-4'), fg: g('--fg'), hi: g('--fg-hi'), dim: g('--fg-dim'), mute: g('--fg-mute'), line: g('--line-2'), accent: g('--accent'), accentHi: g('--accent-hi'), attn: g('--attn'), err: g('--err'), off: g('--fg-faint'), maint: g('--accent-dim'), disabled: g('--fg-mute') };
   }
   const nodeColor = (a) => (!a.enabled ? colors.off : a.role === 'entry' ? colors.hi : a.role === 'maint' ? colors.accent : colors.fg);
 
@@ -161,7 +161,7 @@
       // "how much does Atlas actually route here" instead of every spoke looking equally important.
       const spokeHeat = n.a.role === 'maint' ? 0 : heatOf(n.a.name);
       ctx.beginPath(); ctx.moveTo(atlas.x, atlas.y); ctx.lineTo(n.x, n.y);
-      ctx.lineWidth = live ? 2 : 1 + spokeHeat * 0.8; ctx.strokeStyle = live ? colors.fg : n.a.role === 'maint' ? '#1b3a5e' : colors.line;
+      ctx.lineWidth = live ? 2 : 1 + spokeHeat * 0.8; ctx.strokeStyle = live ? colors.fg : n.a.role === 'maint' ? colors.maint : colors.line;
       ctx.globalAlpha = live ? 1 : 0.4 + spokeHeat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
       ctx.stroke(); ctx.shadowBlur = 0;
@@ -206,7 +206,7 @@
       if (blocked) { ctx.fillStyle = colors.err; ctx.font = '800 13px monospace'; ctx.fillText('!', 0, -r - 8); }
       ctx.textBaseline = 'alphabetic';
       if (compact() && !(hovered || selected || active || blocked || a.role === 'entry')) { ctx.restore(); continue; }
-      ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? '#4d6058' : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
+      ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? colors.disabled : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
       ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.fillText((a.probation ? 'on probation' : a.role === 'entry' ? 'entry' : a.role === 'maint' ? 'staff' : a.group).toUpperCase(), 0, r + 25);
       ctx.restore();
     }
@@ -309,7 +309,7 @@
   @media (max-width: 820px) { .f { width: 100%; flex: 1; } }
   .sugg { display: flex; flex-direction: column; gap: 4px; flex: none; }
   .srow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--accent-dim); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .graph { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line-2); overflow: hidden; background: radial-gradient(circle at 50% 50%, #0a1c15 0%, #030806 100%); }
+  .graph { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line-2); overflow: hidden; background: radial-gradient(circle at 50% 50%, var(--bg-2) 0%, var(--bg) 100%); }
   canvas { position: absolute; inset: 0; display: block; touch-action: none; }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   .lg { vertical-align: middle; }

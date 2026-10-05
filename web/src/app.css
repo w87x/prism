@@ -2,6 +2,13 @@
    orange = attention, yellow = warning, red = error. */
 :root {
   color-scheme: dark;
+  /* the colours that glows, grids and tints are made of, as space-separated r g b — a theme only changes these
+     and the solid tokens below (see themes.css) */
+  --rgb-fg: 62 232 166;
+  --rgb-accent: 68 153 238;
+  --rgb-attn: 255 153 0;
+  --rgb-warn: 255 255 0;
+  --rgb-err: 255 111 102;
   --bg: #030806;
   --bg-1: #070e0b;
   --bg-2: #0b1713;
@@ -39,12 +46,12 @@
   --err-dim: #a3524d;
   --err-bg: #261211;
 
-  --glow: 0 0 5px rgba(62, 232, 166, 0.55), 0 0 14px rgba(62, 232, 166, 0.22);
-  --glow-sm: 0 0 4px rgba(62, 232, 166, 0.5);
-  --glow-accent: 0 0 5px rgba(68, 153, 238, 0.6), 0 0 14px rgba(68, 153, 238, 0.25);
-  --glow-attn: 0 0 5px rgba(255, 153, 0, 0.65), 0 0 14px rgba(255, 153, 0, 0.3);
-  --glow-warn: 0 0 5px rgba(255, 255, 0, 0.6), 0 0 12px rgba(255, 255, 0, 0.25);
-  --glow-err: 0 0 5px rgba(255, 111, 102, 0.55), 0 0 14px rgba(255, 111, 102, 0.22);
+  --glow: 0 0 5px rgb(var(--rgb-fg) / 0.55), 0 0 14px rgb(var(--rgb-fg) / 0.22);
+  --glow-sm: 0 0 4px rgb(var(--rgb-fg) / 0.5);
+  --glow-accent: 0 0 5px rgb(var(--rgb-accent) / 0.6), 0 0 14px rgb(var(--rgb-accent) / 0.25);
+  --glow-attn: 0 0 5px rgb(var(--rgb-attn) / 0.65), 0 0 14px rgb(var(--rgb-attn) / 0.3);
+  --glow-warn: 0 0 5px rgb(var(--rgb-warn) / 0.6), 0 0 12px rgb(var(--rgb-warn) / 0.25);
+  --glow-err: 0 0 5px rgb(var(--rgb-err) / 0.55), 0 0 14px rgb(var(--rgb-err) / 0.22);
 
   --font: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --fs: 12.5px;
@@ -72,10 +79,10 @@ html { touch-action: manipulation; overscroll-behavior: none; -webkit-tap-highli
 body {
   /* soft gradients plus a fine ½ cm grid (19 px) */
   background:
-    linear-gradient(rgba(62, 232, 166, 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
-    linear-gradient(90deg, rgba(62, 232, 166, 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
-    radial-gradient(ellipse 90% 60% at 50% -12%, rgba(62, 232, 166, 0.11), transparent 60%),
-    radial-gradient(ellipse 60% 60% at 105% 105%, rgba(68, 153, 238, 0.09), transparent 62%),
+    linear-gradient(rgb(var(--rgb-fg) / 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
+    linear-gradient(90deg, rgb(var(--rgb-fg) / 0.028) 1px, transparent 1px) 0 0 / 19px 19px,
+    radial-gradient(ellipse 90% 60% at 50% -12%, rgb(var(--rgb-fg) / 0.11), transparent 60%),
+    radial-gradient(ellipse 60% 60% at 105% 105%, rgb(var(--rgb-accent) / 0.09), transparent 62%),
     var(--bg);
   background-attachment: fixed;
   color: var(--fg);

@@ -365,7 +365,7 @@
   .ov { position: fixed; inset: 0; z-index: 2000; background: radial-gradient(ellipse at 50% 30%, #06140f 0%, #010503 75%); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 12px 12px; overflow: auto; }
   .dlg { width: min(880px, 100%); background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: var(--glow), 0 24px 80px rgba(0, 0, 0, 0.8); display: flex; flex-direction: column; max-height: 92vh; }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--bg-2); }
-  .wm { font-weight: 700; letter-spacing: 0.34em; font-size: 17px; background: linear-gradient(90deg, #3ee8a6, #4499ee); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .wm { font-weight: 700; letter-spacing: 0.34em; font-size: 17px; background: linear-gradient(90deg, var(--fg), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .sub { color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.14em; font-size: var(--fs-sm); }
   .steps { display: flex; border-bottom: 1px solid var(--line-2); }
   .st { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 4px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-sm); display: flex; align-items: center; justify-content: center; gap: 6px; }

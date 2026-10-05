@@ -88,7 +88,7 @@
   .sep { flex: none; width: 1px; background: var(--line-3); margin: 4px 2px; }
   .chip.kind { border-style: dashed; }
   .chip.sm { min-height: 30px; font-size: 11px; }
-  .chip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.14), transparent); }
+  .chip.on { color: var(--fg-hi); border-color: var(--accent); background: linear-gradient(180deg, rgb(var(--rgb-fg) / 0.14), transparent); }
   .list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
   .fc { flex: none; text-align: left; display: block; width: 100%; padding: 11px 12px; background: var(--panel-bg); border: 1px solid var(--line-2); color: var(--fg); }
   .fc:active { background: var(--bg-2); }

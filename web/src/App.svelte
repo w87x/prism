@@ -211,12 +211,12 @@
   .shell.nav-c { grid-template-columns: 42px minmax(0, 1fr) 286px; }
   .shell.w-c { grid-template-columns: 158px minmax(0, 1fr) 0; }
   .shell.nav-c.w-c { grid-template-columns: 42px minmax(0, 1fr) 0; }
-  .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--line-2); box-shadow: 0 1px 12px rgba(62, 232, 166, 0.06); }
+  .top { grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 8px; background: var(--panel-bg); border-bottom: 1px solid var(--line-2); box-shadow: 0 1px 12px rgb(var(--rgb-fg) / 0.06); }
   /* centred both ways: on a phone every button has a 30px minimum height, which left the icon stuck at the top of it */
   .ico { background: none; border: 0; color: var(--ico); padding: 3px; display: flex; align-items: center; justify-content: center; } .ico:hover { color: var(--ico-hi); }
   .ico.kbd { font-size: 13px; font-weight: 700; }
   .brand { display: flex; align-items: center; gap: 8px; }
-  .wm { font-weight: 700; letter-spacing: 0.32em; font-size: 15px; background: linear-gradient(90deg, #3ee8a6, #4499ee); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 4px rgba(62, 232, 166, 0.45)); }
+  .wm { font-weight: 700; letter-spacing: 0.32em; font-size: 15px; background: linear-gradient(90deg, var(--fg), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 4px rgb(var(--rgb-fg) / 0.45)); }
   .sep { width: 1px; height: 18px; background: var(--line-2); }
   .pg { text-transform: uppercase; letter-spacing: 0.14em; font-size: var(--fs-sm); color: var(--fg-dim); }
   .act { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--fg); text-transform: uppercase; letter-spacing: 0.07em; }
@@ -226,7 +226,7 @@
   .ic { display: inline-flex; color: var(--ico); }
   .ni:hover { color: var(--fg); background: var(--bg-2); } .ni:hover .ic { color: var(--ico-hi); }
   .ni.on .ic { color: var(--ico-hi); filter: drop-shadow(0 0 3px rgba(106, 169, 189, 0.55)); }
-  .ni.on { color: var(--fg-hi); border-left-color: var(--fg); background: linear-gradient(90deg, rgba(62, 232, 166, 0.12), transparent); text-shadow: var(--glow-sm); }
+  .ni.on { color: var(--fg-hi); border-left-color: var(--fg); background: linear-gradient(90deg, rgb(var(--rgb-fg) / 0.12), transparent); text-shadow: var(--glow-sm); }
   .dot { position: absolute; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); box-shadow: var(--glow-attn); animation: pulse 1s infinite; }
   .main { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 6px; }
   .pagebox { flex: 1; min-height: 0; }
@@ -265,7 +265,7 @@
   .shell.mobile .nav-old { background: var(--bg); position: fixed; z-index: 120; top: 0; bottom: 0; left: 0; width: 236px; padding-top: calc(env(safe-area-inset-top) + 8px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: 8px 0 28px rgba(0, 0, 0, 0.6); overflow: auto; }
   .tabbar { grid-area: tabs; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel-bg); border-top: 1px solid var(--line-2); padding-bottom: env(safe-area-inset-bottom); }
   .tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 46px; padding: 4px 2px; background: none; border: 0; border-top: 2px solid transparent; color: var(--fg-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .tb.on { color: var(--fg-hi); border-top-color: var(--accent); background: linear-gradient(180deg, rgba(62, 232, 166, 0.1), transparent); }
+  .tb.on { color: var(--fg-hi); border-top-color: var(--accent); background: linear-gradient(180deg, rgb(var(--rgb-fg) / 0.1), transparent); }
   .tb .dot, .mi .dot { position: absolute; top: 6px; right: 26%; }
   .more { position: fixed; z-index: 120; left: 0; right: 0; bottom: calc(46px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-top: 1px solid var(--line-3); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6); }
   .mi { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 76px; padding: 8px 4px; background: var(--bg); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
