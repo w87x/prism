@@ -21,7 +21,7 @@ const (
 var producedTables = []string{
 	"agent_profiles", "soul_history", "evolution_proposals", "sessions", "session_messages", "tasks", "task_summaries",
 	"chat_messages", "pending_asks", "memory_banks", "memory_facts", "memory_raw", "memory_links", "memory_pending_facts",
-	"memory_ops", "memory_entities", "memory_entity_mentions", "memory_entity_links", "skills", "crons", "intents",
+	"memory_ops", "memory_audit", "memory_entities", "memory_entity_mentions", "memory_entity_links", "skills", "crons", "intents",
 	"briefings", "bookmarks", "artifacts", "downloads", "doc_chunks", "logs", "notifications", "kb_folders", "kb_pages",
 	"llm_calls", "tool_calls", "folder_maps", "folder_map_entries", "bg_processes", "trackers", "tracker_rows", "tracker_changes",
 }
