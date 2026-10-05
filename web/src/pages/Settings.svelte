@@ -721,8 +721,8 @@
 <style>
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 8px; align-items: start; }
-  .cols.dense { grid-auto-flow: dense; }
+  .cols { columns: 380px; column-gap: 8px; }
+  .cols > :global(.p) { break-inside: avoid; margin-bottom: 8px; overflow: hidden; }
   .col { display: flex; flex-direction: column; gap: 8px; }
   /* integrations: panels flow into as many columns as fit and balance their heights. overflow:hidden here
      (not on Panel itself, which relies on its corner-accent glow bleeding slightly elsewhere) because a
