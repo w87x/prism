@@ -150,6 +150,7 @@
   let maxTools = $state(saved.max_tools ?? 8);
   let style = $state(saved.style ?? 'job');
   let allowDelegate = $state(saved.allow_delegate ?? false);
+  let coverAll = $state(saved.cover_all ?? false);
   let genModel = $state('');
   let drafts = $state([]);
   let pick = $state({});
@@ -213,7 +214,7 @@
   function inBackground() { toast('Generating in the background — you will be notified when the team draft is ready'); close(); }
   async function generate() {
     gBusy = true; note = ''; drafts = []; pick = {}; job = 0; stageNote = 'Starting…';
-    const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate };
+    const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate, cover_all: coverAll };
     try { localStorage.setItem(LIMITS_KEY, JSON.stringify(limits)); } catch {}
     const r = await call('onboarding.propose', { hints, ...limits, model: genModel });
     if (!r) { gBusy = false; return; }
@@ -349,6 +350,7 @@
           <Field label="Max tools per agent" hint="0 = no limit"><NumberInput bind:value={maxTools} min={0} max={40} /></Field>
           <Field label="Team style" hint={style === 'domain' ? 'one agent per area of your life or work, owning it end to end' : 'one agent per kind of work'}><Segmented bind:value={style} options={[{ value: 'job', label: 'By job' }, { value: 'domain', label: 'By domain' }]} /></Field>
           <Checkbox bind:checked={allowDelegate} label="allow agents to delegate" />
+          <Checkbox bind:checked={coverAll} label="use every available tool — spread across agents, within the limit above (the common tools every agent gets are not counted)" />
           <div class="sm mute" style="flex-basis:100%">Limits are written into the planner's prompt and enforced afterwards: a plan that breaks one is sent back once with the exact violations, and whatever still breaks is trimmed. Agents cannot load tools later, so keep the limit generous enough for the job.</div>
           <div class="gm"><Field label="Model (fast = finishes sooner)"><Select bind:value={genModel} options={[{ value: '', label: 'chat model (default)' }, { value: 'role:fast', label: 'fast model' }, ...modelOptions('chat')]} /></Field></div>
           <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>

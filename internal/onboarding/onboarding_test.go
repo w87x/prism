@@ -229,7 +229,7 @@ func TestConstraintsViolationsAndEnforcement(t *testing.T) {
 		{Name: "Three", Group: "Web", Tools: []string{"nonsense", "a"}},
 	}
 	c := Constraints{MaxTools: 2, MaxAgents: 2, Style: "domain"}
-	v := strings.Join(c.violations(plan, valid), "\n")
+	v := strings.Join(c.violations(plan, valid, nil), "\n")
 	for _, want := range []string{"3 agents; at most 2", "One has 4 tools; at most 2", "One has can_delegate true", "share the domain"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("violations lack %q:\n%s", want, v)
@@ -242,10 +242,10 @@ func TestConstraintsViolationsAndEnforcement(t *testing.T) {
 	if len(out) != 2 || len(out[0].Tools) != 2 || out[0].Tools[0] != "a" || out[0].CanDelegate || len(notes) < 2 {
 		t.Fatalf("enforce: %+v %v", out, notes)
 	}
-	if got := strings.Join((Constraints{Count: 4}).violations(plan, valid), "\n"); !strings.Contains(got, "exactly 4") {
+	if got := strings.Join((Constraints{Count: 4}).violations(plan, valid, nil), "\n"); !strings.Contains(got, "exactly 4") {
 		t.Fatalf("an exact count is a limit too: %v", got)
 	}
-	if v := (Constraints{}).violations(plan[:1], valid); len(v) != 1 || !strings.Contains(v[0], "can_delegate") {
+	if v := (Constraints{}).violations(plan[:1], valid, nil); len(v) != 1 || !strings.Contains(v[0], "can_delegate") {
 		t.Fatalf("with no limits only delegation (off by default) is flagged: %v", v)
 	}
 }
@@ -373,7 +373,7 @@ func TestFullAutoLetsTheModelDecideTheTeamSize(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		plan = append(plan, Draft{Name: fmt.Sprintf("A%d", i), Group: fmt.Sprintf("G%d", i)})
 	}
-	if v := c.violations(plan, nil); len(v) != 0 {
+	if v := c.violations(plan, nil, nil); len(v) != 0 {
 		t.Fatalf("a big plan is fine in full auto: %v", v)
 	}
 	if out, notes := c.enforce(plan); len(out) != 12 || len(notes) != 0 {
@@ -459,5 +459,126 @@ func TestProposeGivesAWholeMCPServerOnAWildcardAndUsesTheCompleter(t *testing.T)
 	sort.Strings(titles)
 	if len(titles) != 2 || titles[0] != "Onboarding: planning the team" || titles[1] != "Onboarding: writing Hub" {
 		t.Fatalf("every model call goes through the completer, titled for the UI: %v", titles)
+	}
+}
+
+func eligibleTools() []ToolInfo {
+	return []ToolInfo{
+		{"web_search", "web", "search the web for pages"}, {"web_fetch", "web", "fetch a web page"}, {"web_media", "web", "find images and video"},
+		{"calendar_add", "calendar", "add a calendar event"}, {"calendar_list", "calendar", "list calendar events"}, {"reminders_add", "calendar", "add a reminder"},
+		{"mac_say", "macos", "speak text aloud"}, {"mac_clipboard_get", "macos", "read the clipboard"},
+		{"mcp__gh__issues", "mcp:gh", "list issues"}, {"mcp__gh__prs", "mcp:gh", "list pull requests"},
+	}
+}
+
+// "Use every tool": the limit is met by SPREADING tools over agents, never by dropping them.
+func TestCoverAllPlacesEveryToolWithoutBreakingTheLimit(t *testing.T) {
+	c := Constraints{MaxTools: 3, CoverAll: true}
+	plan := []Draft{
+		{Name: "Marlo", Group: "Web", Description: "finds prices and news on the web", Traits: []string{"web", "search"}, Tools: []string{"web_search"}},
+		{Name: "Dova", Group: "Home", Description: "reminders and the calendar", Traits: []string{"calendar", "reminders"}, Tools: []string{"calendar_add", "calendar_list"}},
+	}
+	un := uncovered(plan, eligibleTools())
+	if len(un) != 7 {
+		t.Fatalf("7 offered tools are unused: %d", len(un))
+	}
+	if v := coverageViolation(un, 3); !strings.Contains(v, "7 tools are not given to any agent") || !strings.Contains(v, "without any agent exceeding 3") {
+		t.Fatalf("violation wording: %s", v)
+	}
+	if got := strings.Join(c.violations(plan, map[string]bool{"web_search": true, "calendar_add": true, "calendar_list": true}, eligibleTools()), "\n"); !strings.Contains(got, "not given to any agent") {
+		t.Fatalf("an unused tool is a violation under CoverAll: %s", got)
+	}
+	if got := (Constraints{MaxTools: 3}).violations(plan, nil, eligibleTools()); len(got) != 0 {
+		t.Fatalf("without CoverAll unused tools are fine: %v", got)
+	}
+	out, notes := c.cover(plan, eligibleTools(), map[string]bool{"marlo": true, "dova": true})
+	have := map[string]bool{}
+	for _, d := range out {
+		if len(d.Tools) > 3 {
+			t.Fatalf("%s breaks the limit with %d tools", d.Name, len(d.Tools))
+		}
+		for _, tl := range d.Tools {
+			if have[tl] {
+				t.Fatalf("%s given to two agents", tl)
+			}
+			have[tl] = true
+		}
+	}
+	for _, e := range eligibleTools() {
+		if !have[e.Name] {
+			t.Fatalf("%s was dropped", e.Name)
+		}
+	}
+	// the web tool went to the web agent, the reminder to the calendar agent (fit), the rest to new agents by category
+	if !strings.Contains(strings.Join(out[0].Tools, ","), "web_fetch") || !strings.Contains(strings.Join(out[1].Tools, ","), "reminders_add") {
+		t.Fatalf("tools go to the agent they fit first: %+v", out[:2])
+	}
+	if len(out) <= 2 || len(notes) < 2 {
+		t.Fatalf("overflow becomes new agents, and the user is told: %d %v", len(out), notes)
+	}
+	var names []string
+	for _, d := range out[2:] {
+		names = append(names, d.Name)
+	}
+	if !strings.Contains(strings.Join(names, ","), "Macos") || !strings.Contains(strings.Join(names, ","), "Gh") {
+		t.Fatalf("overflow agents are named for their category: %v", names)
+	}
+	// an exact team size is never exceeded: what does not fit is reported
+	fixed, fnotes := (Constraints{Count: 2, MaxTools: 3, CoverAll: true}).cover(plan, eligibleTools(), map[string]bool{})
+	if len(fixed) != 2 || !strings.Contains(strings.Join(fnotes, ";"), "could not be placed") {
+		t.Fatalf("a fixed team size wins over coverage: %d %v", len(fixed), fnotes)
+	}
+	// with no tool limit nobody ever lacks room, so no agent is added
+	loose, _ := (Constraints{CoverAll: true}).cover(plan, eligibleTools(), map[string]bool{})
+	if len(loose) != 2 || len(uncovered(loose, eligibleTools())) != 0 {
+		t.Fatalf("without a limit everything fits the existing agents: %d", len(loose))
+	}
+}
+
+func TestProposeCoverAllRepairsThenFillsWhatTheModelLeaves(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := regWithTools(7)
+	var planCalls int
+	var repairUser string
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		user, _ := ms[len(ms)-1].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			return testutil.Reply{Content: "You are Someone, a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		planCalls++
+		if strings.Contains(sys, "USE EVERY TOOL") == false {
+			t.Errorf("the planner prompt must carry the coverage rule")
+		}
+		if strings.Contains(user, "breaks these limits") {
+			repairUser = user
+		}
+		// the model keeps covering only two tools, whatever it is told
+		return testutil.Reply{Content: `{"agents":[{"name":"Alpha","group":"A","description":"a","tools":["tool_1","tool_2"]}]}`}
+	}
+	out, _, err := Propose(context.Background(), r, reg, nil, "use all tools", Constraints{MaxTools: 3, CoverAll: true}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planCalls != 2 || !strings.Contains(repairUser, "5 tools are not given to any agent") {
+		t.Fatalf("one repair round naming the unused tools: calls=%d repair=%q", planCalls, repairUser)
+	}
+	covered := map[string]bool{}
+	for _, a := range out {
+		if len(a.Tools) > 3 {
+			t.Fatalf("limit broken: %+v", a)
+		}
+		for _, tl := range a.Tools {
+			covered[tl] = true
+		}
+		if a.Soul == "" {
+			t.Fatalf("every agent, added ones included, gets a soul: %s", a.Name)
+		}
+	}
+	if len(covered) != 7 {
+		t.Fatalf("all 7 tools must be placed: %v (%d agents)", covered, len(out))
 	}
 }

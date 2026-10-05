@@ -171,7 +171,7 @@ const planPrompt = `You design the initial team of specialist AI agents for a pe
 
 {{COUNT}}
 {{STYLE}}
-For each agent give:
+{{COVER}}For each agent give:
 - "name": a short, memorable, unique first-name-like name (NOT descriptive like "SearchBot"). Must not be any of: {{EXISTING}}.
 - "group": a broad category (Web, Coding, Data Analysis, Writing, Research, Home, Finance, Learning, Media, Health, ...).
 - "description": one line — what it is good for (shown in the agent catalog).
@@ -197,6 +197,7 @@ type Constraints struct {
 	MaxTools      int    `json:"max_tools"`      // per agent, a hard limit; 0 = none
 	Style         string `json:"style"`          // "job" (an agent per kind of work) or "domain" (an agent per area, owning it end to end)
 	AllowDelegate bool   `json:"allow_delegate"` // may a generated agent delegate? (Atlas and its team leads do that; specialists should not)
+	CoverAll      bool   `json:"cover_all"`      // every offered tool must go to some agent: spread them, do not drop them
 }
 
 // hardAgentCeiling is a safety net only: with no limit set the model decides how big the team is, but a runaway plan
@@ -249,18 +250,34 @@ func (c Constraints) delegateRule() string {
 	return "false for every agent (specialists do their own work; delegation is Atlas's job)."
 }
 
+func (c Constraints) coverRule() string {
+	if !c.CoverAll {
+		return ""
+	}
+	limit := "."
+	if c.MaxTools > 0 {
+		limit = fmt.Sprintf(", so that no agent has more than %d — split work into more, narrower agents when that is what it takes.", c.MaxTools)
+	}
+	return "USE EVERY TOOL: each tool in the list below must be given to at least one agent (nothing may stay unused). Spread them over the agents by what each agent's job needs" + limit + " The tools every agent already gets (memory, notes, asking colleagues) are not in the list and do not count.\n"
+}
+
 func (c Constraints) render(existing, tools string) string {
-	return strings.NewReplacer("{{COUNT}}", c.countRule(), "{{STYLE}}", c.styleRule(), "{{EXISTING}}", existing,
+	return strings.NewReplacer("{{COVER}}", c.coverRule(), "{{COUNT}}", c.countRule(), "{{STYLE}}", c.styleRule(), "{{EXISTING}}", existing,
 		"{{TOOLS_RULE}}", c.toolsRule(), "{{DELEGATE_RULE}}", c.delegateRule(), "{{TOOLS}}", tools).Replace(planPrompt)
 }
 
 // violations lists, in words a model can act on, what a plan breaks.
-func (c Constraints) violations(agents []Draft, valid map[string]bool) []string {
+func (c Constraints) violations(agents []Draft, valid map[string]bool, eligible []ToolInfo) []string {
 	var v []string
 	if c.Count > 0 && len(agents) != c.Count {
 		v = append(v, fmt.Sprintf("the plan has %d agents; it must have exactly %d", len(agents), c.Count))
 	} else if c.Count == 0 && !c.free() && len(agents) > c.agentCap() {
 		v = append(v, fmt.Sprintf("the plan has %d agents; at most %d are allowed — merge overlapping ones", len(agents), c.agentCap()))
+	}
+	if c.CoverAll {
+		if un := uncovered(agents, eligible); len(un) > 0 {
+			v = append(v, coverageViolation(un, c.MaxTools))
+		}
 	}
 	groups := map[string][]string{}
 	for _, d := range agents {
@@ -368,6 +385,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		return fallback("no chat model configured")
 	}
 	var tl []string
+	var eligible []ToolInfo              // every tool the planner is offered: what CoverAll must place
 	mcpByServer := map[string][]string{} // server → "tool — description" lines
 	valid := map[string]bool{}
 	for _, t := range reg.All() {
@@ -384,6 +402,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			}
 			srv := strings.TrimPrefix(t.Category, "mcp:")
 			mcpByServer[srv] = append(mcpByServer[srv], fmt.Sprintf("%s — %s", t.Name, d))
+			eligible = append(eligible, ToolInfo{t.Name, t.Category, d})
 			continue
 		}
 		if t.Base || t.Deferred || strings.HasPrefix(t.Name, "agent_") || strings.HasPrefix(t.Name, "memory_") || t.Name == "delegate" || t.Name == "evolve_propose" || t.Name == "task_status" || t.Name == "notify_user" {
@@ -394,6 +413,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			d = d[:i]
 		}
 		tl = append(tl, fmt.Sprintf("%s — %s", t.Name, d))
+		eligible = append(eligible, ToolInfo{t.Name, t.Category, d})
 	}
 	tl = append(tl, mcpToolLines(mcpByServer)...)
 	userHints := "Hints from the user:\n" + strings.TrimSpace(hints)
@@ -443,7 +463,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	items := clean(raw)
 	// The check-and-repair loop: a plan that breaks a limit goes back to the model once, with the exact violations;
 	// what still breaks afterwards is enforced mechanically (tools trimmed, delegation off, extra agents dropped).
-	if v := cons.violations(items, valid); len(v) > 0 {
+	if v := cons.violations(items, valid, eligible); len(v) > 0 {
 		progress(Progress{Stage: "planning", Note: "Checking the plan against your limits (" + fmt.Sprint(len(v)) + " to fix)…", Total: cons.agentCap()})
 		prev, _ := json.Marshal(map[string]any{"agents": items})
 		fixed, ferr := askPlan(userHints + "\n\nYour previous plan:\n" + string(prev) + "\n\nIt breaks these limits:\n- " + strings.Join(v, "\n- ") + "\n\nReturn the corrected FULL plan, in the same JSON shape, that respects every limit.")
@@ -455,6 +475,18 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	}
 	var notes []string
 	items, notes = cons.enforce(items)
+	if cons.CoverAll { // what the model still left unused is placed mechanically (after trimming, which may free tools up)
+		taken := map[string]bool{}
+		for _, n := range existing {
+			taken[strings.ToLower(n)] = true
+		}
+		for _, d := range items {
+			taken[strings.ToLower(d.Name)] = true
+		}
+		var cn []string
+		items, cn = cons.cover(items, eligible, taken)
+		notes = append(notes, cn...)
+	}
 	if len(items) == 0 {
 		return fallback("the model returned no usable plan")
 	}
