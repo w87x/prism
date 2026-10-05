@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"prism/internal/testutil"
 	"prism/internal/tools"
@@ -98,4 +100,62 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// The team's souls are independent, so they are written in parallel (bounded), the final list keeps the planner's
+// order, and progress events never overlap (the callback feeds a websocket and is not required to be reentrant).
+func TestProposeWritesSoulsInParallelButReportsInOrder(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	reg := tools.NewRegistry(d.Pool)
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		if strings.Contains(sys, "Write the system prompt") {
+			user, _ := ms[len(ms)-1].(map[string]any)["content"].(string)
+			name := user[strings.Index(user, "Agent: ")+7:]
+			name = name[:strings.IndexByte(name, '\n')]
+			// DelayMS runs outside the fake's lock: four overlapping requests take one delay, four queued ones take four
+			return testutil.Reply{DelayMS: 250, Content: "You are " + name + ", a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
+		}
+		return testutil.Reply{Content: `{"agents":[{"name":"Alpha","group":"G","description":"a"},{"name":"Beta","group":"G","description":"b"},{"name":"Gamma","group":"G","description":"c"},{"name":"Delta","group":"G","description":"d"}]}`}
+	}
+	var busy atomic.Int32
+	var overlap atomic.Bool
+	var drafts []string
+	start := time.Now()
+	out, used, err := Propose(context.Background(), r, reg, nil, "hints", 4, "", func(p Progress) {
+		if busy.Add(1) > 1 {
+			overlap.Store(true)
+		}
+		time.Sleep(2 * time.Millisecond)
+		if p.Draft != nil {
+			drafts = append(drafts, p.Draft.Name)
+		}
+		busy.Add(-1)
+	})
+	if err != nil || !used {
+		t.Fatalf("propose: used=%v err=%v", used, err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 800*time.Millisecond { // four 250ms requests in sequence would take over a second
+		t.Fatalf("souls must be written concurrently, took %v", elapsed)
+	}
+	if overlap.Load() {
+		t.Fatalf("progress callbacks must never run at the same time")
+	}
+	if len(drafts) != 4 {
+		t.Fatalf("every draft is reported as it lands: %v", drafts)
+	}
+	names := []string{}
+	for _, d := range out {
+		names = append(names, d.Name)
+		if !strings.Contains(d.Soul, "You are "+d.Name) {
+			t.Fatalf("each draft must carry its OWN soul: %s → %q", d.Name, d.Soul)
+		}
+	}
+	if strings.Join(names, ",") != "Alpha,Beta,Gamma,Delta" {
+		t.Fatalf("the final team keeps the planner's order: %v", names)
+	}
 }

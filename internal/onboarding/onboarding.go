@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -190,6 +191,9 @@ type Progress struct {
 	Total int
 }
 
+// SoulParallelism bounds how many agents' souls are written at the same time.
+var SoulParallelism = 4
+
 // Propose plans a team with the chat model, then writes each agent's soul in its own
 // call so slow local models make visible progress instead of one huge request. On
 // failure it falls back to templates. progress may be nil.
@@ -294,21 +298,40 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	if len(items) == 0 {
 		return fallback("the model returned no usable plan")
 	}
+	// The souls are independent of each other, so they are written in parallel (a hosted model, or a server that
+	// batches requests, finishes the team several times sooner; a single local model simply queues them). Progress
+	// events are serialised, and each finished draft is reported as it lands, in whatever order that is.
+	var pmu sync.Mutex
+	report := func(p Progress) { pmu.Lock(); progress(p); pmu.Unlock() }
+	sem := make(chan struct{}, max(1, min(SoulParallelism, len(items))))
+	var wg sync.WaitGroup
+	var started int
 	for i := range items {
-		progress(Progress{Stage: "writing", Note: fmt.Sprintf("Writing %s (%d/%d)…", items[i].Name, i+1, len(items)), Total: len(items)})
-		wctx, wcancel := context.WithTimeout(ctx, 5*time.Minute)
-		soul, err := r.Complete(wctx, model, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
-		wcancel()
-		soul = strings.TrimSpace(strings.Trim(strings.TrimSpace(soul), "`"))
-		if err != nil || len(soul) < 40 {
-			// keep going: a matching template soul (or a minimal one) still yields a usable agent
-			soul = fallbackSoul(items[i])
-		}
-		items[i].Soul = soul
-		items[i].Exists = have[strings.ToLower(items[i].Name)]
-		d := items[i]
-		progress(Progress{Stage: "writing", Draft: &d, Total: len(items)})
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			pmu.Lock()
+			started++
+			n := started
+			pmu.Unlock()
+			report(Progress{Stage: "writing", Note: fmt.Sprintf("Writing %s (%d of %d started)…", items[i].Name, n, len(items)), Total: len(items)})
+			wctx, wcancel := context.WithTimeout(ctx, 5*time.Minute)
+			soul, err := r.Complete(wctx, model, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
+			wcancel()
+			soul = strings.TrimSpace(strings.Trim(strings.TrimSpace(soul), "`"))
+			if err != nil || len(soul) < 40 {
+				// keep going: a matching template soul (or a minimal one) still yields a usable agent
+				soul = fallbackSoul(items[i])
+			}
+			items[i].Soul = soul // each goroutine owns its own element
+			items[i].Exists = have[strings.ToLower(items[i].Name)]
+			d := items[i]
+			report(Progress{Stage: "writing", Draft: &d, Total: len(items)})
+		}(i)
 	}
+	wg.Wait()
 	progress(Progress{Stage: "done", Total: len(items)})
 	return mark(items), true, nil
 }
