@@ -127,3 +127,63 @@ func TestUnheldToolsAreReported(t *testing.T) {
 		t.Fatalf("held or base tools must not be reported: %v", un)
 	}
 }
+
+// An upgraded database already has the built-in agents; a tool the seed gained since must reach them (agents cannot
+// load tools), but only once: a tool the user removed afterwards must not come back at the next start.
+func TestSeedAddsNewToolsToExistingBuiltInAgentsOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	m, err := h.e.Profiles.Get(ctx, "Mnemosyne")
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(p *Profile, tool string) bool {
+		for _, x := range p.Tools {
+			if x == tool {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(m, "memory_share") {
+		t.Fatalf("a fresh seed gives Mnemosyne memory_share: %v", m.Tools)
+	}
+	// simulate an old database: the profile predates the tool and nothing was ever recorded
+	old := *m
+	old.Tools = nil
+	for _, x := range m.Tools {
+		if x != "memory_share" && x != "memory_analyze" {
+			old.Tools = append(old.Tools, x)
+		}
+	}
+	if _, err := h.e.Profiles.Save(ctx, old, "test: old profile"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.DB.Exec(ctx, `DELETE FROM settings WHERE key='seed_tools'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Profiles.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = h.e.Profiles.Get(ctx, "Mnemosyne")
+	if !has(m, "memory_share") || !has(m, "memory_analyze") {
+		t.Fatalf("the missing seed tools must be added: %v", m.Tools)
+	}
+	// the user removes one on purpose; the next start leaves it removed
+	kept := *m
+	kept.Tools = nil
+	for _, x := range m.Tools {
+		if x != "memory_share" {
+			kept.Tools = append(kept.Tools, x)
+		}
+	}
+	if _, err := h.e.Profiles.Save(ctx, kept, "user edit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Profiles.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ = h.e.Profiles.Get(ctx, "Mnemosyne"); has(m, "memory_share") {
+		t.Fatalf("a tool the user removed must not be re-added: %v", m.Tools)
+	}
+}

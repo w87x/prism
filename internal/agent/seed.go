@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -163,15 +165,47 @@ func IsWellKnown(name string) bool {
 	return false
 }
 
-// Seed inserts missing well-known agents.
+// seedToolsKey records, per built-in agent, which seed tools were already offered to it.
+const seedToolsKey = "seed_tools"
+
+// Seed inserts missing well-known agents. For one that already exists it never rewrites what the user edited, with a
+// single exception: a tool the seed gained since the last time (a release added memory_share, say) is ADDED to its
+// toolset — agents cannot load tools at run time, so without this an upgraded database would leave the new tool
+// unreachable. It only adds: a tool the user took away afterwards stays away, and nothing is ever removed.
 func (s *ProfileStore) Seed(ctx context.Context) error {
+	offered := map[string][]string{}
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT value FROM settings WHERE key=$1`, seedToolsKey).Scan(&raw); err == nil {
+		_ = json.Unmarshal(raw, &offered)
+	}
 	for _, p := range WellKnown() {
-		if _, err := s.Get(ctx, p.Name); err == nil {
+		cur, err := s.Get(ctx, p.Name)
+		if err != nil {
+			if _, err := s.Save(ctx, p, "seeded"); err != nil {
+				return err
+			}
+			offered[p.Name] = append([]string{}, p.Tools...)
 			continue
 		}
-		if _, err := s.Save(ctx, p, "seeded"); err != nil {
-			return err
+		var add []string
+		for _, t := range p.Tools {
+			if !slices.Contains(cur.Tools, t) && !slices.Contains(offered[p.Name], t) {
+				add = append(add, t)
+			}
+		}
+		if len(add) > 0 {
+			cur.Tools = append(append([]string{}, cur.Tools...), add...)
+			if _, err := s.Save(ctx, *cur, "seed: new tools "+strings.Join(add, ", ")); err != nil {
+				return err
+			}
+		}
+		for _, t := range p.Tools {
+			if !slices.Contains(offered[p.Name], t) {
+				offered[p.Name] = append(offered[p.Name], t)
+			}
 		}
 	}
-	return nil
+	b, _ := json.Marshal(offered)
+	_, err := s.db.Exec(ctx, `INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, seedToolsKey, b)
+	return err
 }

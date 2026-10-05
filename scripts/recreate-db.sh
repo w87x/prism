@@ -8,6 +8,8 @@
 #
 #   scripts/recreate-db.sh                 dry run: shows what would happen, changes nothing
 #   scripts/recreate-db.sh --apply         does it (asks you to type the database name first)
+#   scripts/recreate-db.sh --in-place --apply   same result without dropping the database: wipes every table except the kept
+#                                          ones (use it when the SCHEMA did not change — it is what onboarding's "start over" does)
 #   scripts/recreate-db.sh --resume DIR    only (re)load the kept tables from an earlier run's backup folder into the
 #                                          already recreated database — if the restore step failed, fix the cause and run this
 #   options: --home DIR (PRISM_HOME, default ~/.prism)   --bin PATH (new prism binary, default ./bin/prism)   --yes
@@ -18,17 +20,18 @@
 # Needs psql and pg_dump on PATH. Passwords are never printed.
 set -euo pipefail
 
-APPLY=0; YES=0; RESUME=""
+APPLY=0; YES=0; RESUME=""; INPLACE=0
 HOME_DIR="${PRISM_HOME:-$HOME/.prism}"
 BIN="./bin/prism"
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1 ;;
     --yes) YES=1 ;;
+    --in-place) INPLACE=1 ;;
     --resume) RESUME="$2"; APPLY=1; shift ;;
     --home) HOME_DIR="$2"; shift ;;
     --bin) BIN="$2"; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -106,10 +109,11 @@ for t in "${KEEP[@]}"; do
   fi
 done
 [ ${#PRESENT[@]} -gt 0 ] || { echo "none of the kept tables exist: nothing to keep — is this the right database?" >&2; exit 1; }
-echo "Dropped: everything else (agents, tasks, chats, memory, trackers, knowledge pages, artifacts rows, logs…)."
+echo "Wiped: everything else (agents, tasks, chats, memory, trackers, knowledge pages, artifacts rows, logs…)."
+[ "$INPLACE" -eq 1 ] && echo "Mode: in place (the database and its schema stay; tables are emptied)." || echo "Mode: recreate (the database is dropped and created from the current schema)."
 
 if [ "$APPLY" -ne 1 ]; then
-  echo; echo "Dry run — nothing was changed. Re-run with --apply to recreate the database."; exit 0
+  echo; echo "Dry run — nothing was changed. Re-run with --apply to do it."; exit 0
 fi
 
 if [ -n "$RESUME" ]; then
@@ -123,6 +127,30 @@ fi
 if [ "$YES" -ne 1 ]; then
   printf 'Type the database name (%s) to drop and recreate it: ' "$DBNAME"
   read -r ans; [ "$ans" = "$DBNAME" ] || { echo "not confirmed" >&2; exit 1; }
+fi
+
+if [ "$INPLACE" -eq 1 ]; then
+  STAMP="$(date +%Y%m%d-%H%M%S)"; OUT="$HOME_DIR/backups/$STAMP"; mkdir -p "$OUT"
+  KEEPLIST="$(printf "'%s'," "${PRESENT[@]}" schema_migrations memory_predicates)"; KEEPLIST="${KEEPLIST%,}"
+  # a kept table that points at a table being wiped would be emptied by TRUNCATE ... CASCADE: refuse instead
+  DEPS="$(q "select conrelid::regclass||' -> '||confrelid::regclass from pg_constraint where contype='f' and conrelid::regclass::text in ($KEEPLIST) and confrelid::regclass::text not in ($KEEPLIST)")"
+  [ -z "$DEPS" ] || { echo "kept tables reference tables that would be wiped, use the recreate mode instead:" >&2; echo "$DEPS" >&2; exit 1; }
+  WIPE="$(q "select string_agg(format('%I', tablename), ', ') from pg_tables where schemaname='public' and tablename not in ($KEEPLIST)")"
+  [ -n "$WIPE" ] || { echo "nothing to wipe" >&2; exit 1; }
+  echo "Backing up to $OUT …"
+  pg_dump "$DSN" -Fc -f "$OUT/full.dump"; [ -s "$OUT/full.dump" ] || { echo "backup is empty — aborting" >&2; exit 1; }
+  echo "Emptying every table except the kept ones …"
+  psql "$DSN" -v ON_ERROR_STOP=1 -qc "TRUNCATE $WIPE RESTART IDENTITY CASCADE"
+  psql "$DSN" -qc "UPDATE doc_sources SET indexed_at=NULL" 2>/dev/null || true   # sources stay; their chunks are gone
+  echo "Starting the build once to seed the built-in agents and schedules …"
+  LOG="$OUT/first-start.log"; PRISM_HOME="$HOME_DIR" "$BIN" >"$LOG" 2>&1 & PID=$!
+  for _ in $(seq 1 90); do grep -q "listening on" "$LOG" 2>/dev/null && break; kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+  grep -q "listening on" "$LOG" || { kill "$PID" 2>/dev/null; echo "the build did not start — see $LOG. Backup: $OUT/full.dump" >&2; exit 1; }
+  kill "$PID"; wait "$PID" 2>/dev/null || true
+  psql "$DSN" -qc "DELETE FROM settings WHERE key='onboarding'"
+  echo "Done. Kept tables untouched; everything else was emptied and the built-in agents were re-created."
+  echo "Backup: $OUT/full.dump. Start PRISM and finish onboarding to recreate your specialists."
+  exit 0
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
