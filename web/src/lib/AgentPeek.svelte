@@ -57,7 +57,7 @@
 </Modal>
 
 <style>
-  .live { background: radial-gradient(ellipse at center, #04120c 0%, #010503 100%); border: 1px solid var(--line-2); padding: 6px 10px; font-size: var(--fs-sm); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 220px; min-height: 60px; overflow: auto; line-height: 1.45; }
+  .live { background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%); border: 1px solid var(--line-2); padding: 6px 10px; font-size: var(--fs-sm); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 220px; min-height: 60px; overflow: auto; line-height: 1.45; }
   .task { color: var(--fg-dim); max-height: 110px; overflow: auto; font-size: var(--fs-sm); }
   .ctx { min-width: 80px; max-width: 220px; margin-left: auto; }
 </style>

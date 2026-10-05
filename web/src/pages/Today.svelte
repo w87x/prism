@@ -1,4 +1,5 @@
 <script>
+  import { masonry } from '../lib/masonry.js';
   import { S, call, listen, go, ago, until, openProposal, openRef } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -153,7 +154,7 @@
         </ul>
       </Panel>
     {:else}
-      <div class="cols">
+      <div class="masonry" use:masonry style="--mw:320px">
         <Panel title="Needs your attention{d.needs_attention.length ? ` (${d.needs_attention.length})` : ''}" id="today.needs-your-attention" resizable flush>
           {#if !d.needs_attention.length}<Empty>all clear</Empty>
           {:else}<ul class="list">{#each d.needs_attention as it}{@render attn(it)}{/each}</ul>{/if}
@@ -193,10 +194,6 @@
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 8px; flex: none; }
   .body { flex: 1; min-height: 0; }
-  /* masonry: panels flow into as many columns as fit and balance their heights, so a short panel no longer leaves a hole
-     beside a tall one. overflow:hidden because multi-column layout doesn't clip glows at the column gap. */
-  .cols { columns: 320px; column-gap: 8px; }
-  .cols > :global(.p) { break-inside: avoid; margin-bottom: 8px; overflow: hidden; }
   .list { list-style: none; margin: 0; padding: 0; }
   .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
   .row:last-child { border-bottom: none; }

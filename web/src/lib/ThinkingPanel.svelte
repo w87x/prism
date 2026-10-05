@@ -37,12 +37,12 @@
 
 <style>
   .crt {
-    position: relative; flex: none; background: radial-gradient(ellipse at center, #04120c 0%, #010503 100%);
+    position: relative; flex: none; background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%);
     border: 1px solid var(--line-3); box-shadow: inset 0 0 22px rgb(var(--rgb-fg) / 0.1), var(--glow-sm);
     padding: 4px 8px 5px; overflow: hidden;
   }
   .crt::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0.22) 3px); mix-blend-mode: multiply; }
-  .crt.attn { border-color: var(--attn); box-shadow: inset 0 0 22px rgb(var(--rgb-attn) / 0.12), var(--glow-attn); background: radial-gradient(ellipse at center, #140c00 0%, #050300 100%); }
+  .crt.attn { border-color: var(--attn); box-shadow: inset 0 0 22px rgb(var(--rgb-attn) / 0.12), var(--glow-attn); background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-attn)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-attn)) 2%, #000) 100%); }
   .idle { color: var(--accent); text-shadow: var(--glow-accent); letter-spacing: 0.2em; font-size: 10.5px; line-height: 1.45; height: calc(3 * 1.45 * 10.5px + 16px); display: flex; align-items: flex-start; gap: 8px; padding-top: 1px; }
   .idle :global(.led) { margin-top: 3px; }
   .cols { display: grid; gap: 10px; }

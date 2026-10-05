@@ -1,4 +1,5 @@
 <script>
+  import { masonry } from '../lib/masonry.js';
   import { untrack } from 'svelte';
   import { S, call, listen, toast, confirmBox, loadSetting, saveSetting, loadModels, modelOptions, reopenOnboarding, ago, stamp } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
@@ -287,7 +288,7 @@
   <Tabs tabs={[{ id: 'general', label: 'General' }, { id: 'models', label: 'Models' }, { id: 'web', label: 'Web' }, { id: 'integrations', label: 'Integrations' }, { id: 'context', label: 'Advanced' }, { id: 'notify', label: 'Notifications' }, { id: 'logs', label: 'Logs' }]} bind:active={tab} />
   <div class="body scroll">
     {#if tab === 'general'}
-      <div class="cols">
+      <div class="masonry" use:masonry style="--mw:380px">
         <Panel title="You">
           <Field label="Name"><Input bind:value={gen.user_name} placeholder="how agents address you" /></Field>
           <Field label="Reply language" hint="preferred language for replies, free text (e.g. Russian, English)"><Input bind:value={gen.language} /></Field>
@@ -366,7 +367,7 @@
         {/each}
       </Panel>
     {:else if tab === 'web'}
-      <div class="cols">
+      <div class="masonry" use:masonry style="--mw:380px">
         <Panel title="Search providers (fallback order)">
           <OrderedList bind:value={web.search_order} options={wprov.map((p) => p.id)} labels={wlabels} addLabel="add provider…" />
           <div class="sm mute">The first provider that answers wins. DuckDuckGo needs no key.</div>
@@ -396,7 +397,7 @@
         </div>
       </div>
     {:else if tab === 'integrations'}
-      <div class="mas">
+      <div class="masonry" use:masonry style="--mw:380px">
         <Panel title="Telegram">
           {#snippet right()}<Led state={stLed(tgs?.state || 'off')} size={8} /><span class="sm dim">{tgs?.detail || tgs?.state || 'disabled'}</span>{/snippet}
           <Switch bind:checked={tg.enabled} label="enabled" />
@@ -511,7 +512,7 @@
           </Panel>
       </div>
     {:else if tab === 'context'}
-      <div class="cols dense">
+      <div class="masonry" use:masonry style="--mw:380px">
         <Panel title="Auto-compaction" hint="When a conversation nears the model window, old tool output is trimmed and the oldest turns summarised. The system prompt and tool definitions are rebuilt on every call and never compacted." id="set.auto-compaction" collapsible resizable>
           <div class="sm mute">When an agent's context reaches the trigger, stale results are dropped and old turns are summarized down to the target (a fixed template; memory hits are dropped since they can be queried again).</div>
           <div class="two"><Field label="Trigger (% of model window)"><NumberInput value={Math.round(ctx.compact_at * 100)} min={40} max={95} step={5} unit="%" onchange={(v) => (ctx.compact_at = v / 100)} /></Field>
@@ -585,7 +586,7 @@
         </Panel>
       </div>
     {:else if tab === 'notify'}
-      <div class="cols">
+      <div class="masonry" use:masonry style="--mw:380px">
         <Panel title="What notifies you" id="set.what-notifies-you" collapsible resizable>
           <div class="sm mute">Notifications appear under the bell in the top bar and as a toast. “Also push” sends them to macOS and Telegram (when those are configured).</div>
           <table class="t nt"><thead><tr><th>Event</th><th>Show</th><th>Also push</th></tr></thead><tbody>
@@ -721,15 +722,11 @@
 <style>
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-  .cols { columns: 380px; column-gap: 8px; }
-  .cols > :global(.p) { break-inside: avoid; margin-bottom: 8px; overflow: hidden; }
   .col { display: flex; flex-direction: column; gap: 8px; }
   /* integrations: panels flow into as many columns as fit and balance their heights. overflow:hidden here
      (not on Panel itself, which relies on its corner-accent glow bleeding slightly elsewhere) because a
      status LED's box-shadow glow otherwise paints straight across the narrow column-gap into the next
      panel — CSS multi-column layout doesn't clip overflowing paint at column boundaries on its own. */
-  .mas { columns: 380px; column-gap: 8px; }
-  .mas > :global(.p) { break-inside: avoid; margin-bottom: 8px; overflow: hidden; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .row { flex-wrap: wrap; } /* button rows wrap instead of overflowing a narrow panel */
   .kv { display: flex; justify-content: space-between; color: var(--fg-dim); }

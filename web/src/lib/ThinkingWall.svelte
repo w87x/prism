@@ -55,13 +55,13 @@
 {/if}
 
 <style>
-  .wall { position: fixed; inset: 0; z-index: 150; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: radial-gradient(ellipse at center, #04120c 0%, #010503 100%); }
+  .wall { position: fixed; inset: 0; z-index: 150; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%); }
   .top { display: flex; align-items: center; gap: 12px; flex: none; }
   .ttl { color: var(--accent); letter-spacing: 0.25em; font-size: 12px; text-shadow: var(--glow-accent); display: inline-flex; gap: 8px; align-items: center; }
   .x { background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 2px 9px; }
   .x:hover { color: var(--fg-hi); border-color: var(--fg-dim); }
   .grid { flex: 1; min-height: 0; display: grid; gap: 8px; }
-  .tile { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-3); background: rgba(2, 10, 6, 0.85); box-shadow: inset 0 0 18px rgb(var(--rgb-fg) / 0.08); padding: 6px 9px; cursor: pointer; overflow: hidden; }
+  .tile { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-3); background: color-mix(in srgb, rgb(var(--rgb-fg)) 4%, rgba(0,0,0,0.85)); box-shadow: inset 0 0 18px rgb(var(--rgb-fg) / 0.08); padding: 6px 9px; cursor: pointer; overflow: hidden; }
   .tile:hover { border-color: var(--fg-dim); }
   .tile.done { opacity: 0.55; }
   .tile.empty { align-items: center; justify-content: center; border-style: dashed; border-color: var(--line-2); cursor: default; box-shadow: none; background: transparent; }
