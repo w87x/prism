@@ -215,6 +215,10 @@
       if (k.live) { const p = bez(k.a, q, k.b, (t / 1500) % 1); ctx.fillStyle = colors.attn; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill(); }
     }
 
+    // the freshest live run of each agent, for the thinking overlay
+    const byAgent = new Map();
+    for (const r of runs) { if (!r.done && (!byAgent.has(r.agent) || r.started > byAgent.get(r.agent).started)) byAgent.set(r.agent, r); }
+
     // agents
     for (const n of nodes) {
       const a = n.a, col = nodeColor(a), active = activeNames.has(a.name), blocked = S.asks.some((x) => x.agent === a.name);
@@ -241,6 +245,61 @@
       ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? colors.disabled : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
       ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.fillText((a.probation ? 'on probation' : a.role === 'entry' ? 'entry' : a.role === 'maint' ? 'staff' : a.group).toUpperCase(), 0, r + 25);
       ctx.restore();
+    }
+    drawThinking(ctx, t, byAgent, atlas);
+  }
+
+  // Thinking, drawn: an agent that is reasoning gets three small dots orbiting it (faster while tokens are arriving) and a
+  // little thought bubble with the last words of what it is writing; one that is acting (a tool call, writing its answer)
+  // gets a soft pulse ring; and tokens travel along the live line from Atlas as dots. Everything is read from the same run
+  // events the thinking panel uses — nothing extra is sent.
+  function drawThinking(ctx, t, byAgent, atlas) {
+    let bubbles = 0;
+    for (const n of nodes) {
+      const r = byAgent.get(n.a.name);
+      if (!r) continue;
+      const rad = R(n), fresh = Date.now() - (r.lastDeltaAt || 0) < 700;
+      const thinking = r.phase === 'thinking';
+      if (reduced) { ctx.beginPath(); ctx.arc(n.x, n.y, rad + 7, 0, Math.PI * 2); ctx.strokeStyle = thinking ? colors.accent : colors.fg; ctx.globalAlpha = 0.5; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; continue; }
+      if (thinking) {
+        const spin = t / (fresh ? 520 : 1100);
+        for (let i = 0; i < 3; i++) {
+          const a = spin + (i * Math.PI * 2) / 3, d = rad + 9 + Math.sin(t / 400 + i) * 1.5;
+          ctx.beginPath(); ctx.arc(n.x + Math.cos(a) * d, n.y + Math.sin(a) * d, 2.1 + (fresh ? 0.6 : 0), 0, Math.PI * 2);
+          ctx.fillStyle = colors.accentHi; ctx.globalAlpha = 0.55 + 0.4 * Math.sin(t / 300 + i * 2); ctx.shadowColor = colors.accent; ctx.shadowBlur = 5; ctx.fill(); ctx.shadowBlur = 0;
+        }
+        ctx.globalAlpha = 1;
+        const words = (r.buf || '').replace(/\s+/g, ' ').trim();
+        if (words && bubbles < 3 && !compact()) {
+          bubbles++;
+          const text = '… ' + words.slice(-34);
+          ctx.font = 'italic 10px monospace';
+          const tw = ctx.measureText(text).width, pad = 5, bw = tw + pad * 2, by = Math.max(16, n.y - rad - 20);
+          const flip = n.x + rad + 10 + bw > w - 6; // not enough room on the right: the bubble goes to the left of the node
+          const bx = flip ? n.x - rad - 10 - bw : n.x + rad + 10;
+          ctx.globalAlpha = 0.9; ctx.fillStyle = colors.bg2; ctx.strokeStyle = colors.accent; ctx.lineWidth = 0.8;
+          ctx.beginPath(); ctx.roundRect?.(bx, by - 11, bw, 16, 6); if (!ctx.roundRect) ctx.rect(bx, by - 11, bw, 16);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = colors.accentHi; ctx.textAlign = 'left'; ctx.fillText(text, bx + pad, by); ctx.textAlign = 'center'; ctx.globalAlpha = 1;
+          // two little circles leading from the node to the bubble, like a thought
+          ctx.fillStyle = colors.accent; ctx.globalAlpha = 0.7;
+          const sx = flip ? -1 : 1;
+          ctx.beginPath(); ctx.arc(n.x + sx * rad * 0.75, n.y - rad * 0.75, 1.6, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(n.x + sx * (rad + 5), n.y - rad - 6, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+        }
+      } else {
+        const k = (t / 700) % 1;
+        ctx.beginPath(); ctx.arc(n.x, n.y, rad + 4 + k * 12, 0, Math.PI * 2);
+        ctx.strokeStyle = colors.fg; ctx.globalAlpha = (1 - k) * 0.55; ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      // tokens flowing out along the line from Atlas while this agent is streaming
+      if (atlas && n !== atlas && fresh) {
+        for (let i = 0; i < 2; i++) {
+          const u = ((t / 650) + i * 0.5) % 1;
+          ctx.beginPath(); ctx.arc(atlas.x + (n.x - atlas.x) * u, atlas.y + (n.y - atlas.y) * u, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = thinking ? colors.accentHi : colors.hi; ctx.globalAlpha = 0.5 + 0.4 * (1 - Math.abs(u - 0.5) * 2); ctx.fill(); ctx.globalAlpha = 1;
+        }
+      }
     }
   }
 
@@ -312,7 +371,7 @@
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span class="mute">agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
+        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>
@@ -354,4 +413,6 @@
   .abs { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   .list { flex: 1; border: 1px solid var(--line-2); background: var(--bg-1); }
   .gl { display: inline-block; width: 1.5em; text-align: center; }
+  .orb { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1.5px dotted var(--accent-hi); vertical-align: -1px; }
+  .pls { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--fg); vertical-align: -1px; }
 </style>
