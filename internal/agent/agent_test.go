@@ -2433,3 +2433,23 @@ func TestRunUsageIsEmittedBeforeTheModelCallReturns(t *testing.T) {
 		t.Fatalf("final run.usage missing token totals: %+v", final)
 	}
 }
+
+func TestNotCapable(t *testing.T) {
+	for in, want := range map[string]string{
+		"NOT_CAPABLE: this is a tax question, needs an accountant agent": "this is a tax question, needs an accountant agent",
+		"  not_capable - no web tools":                                   "no web tools",
+		"NOT_CAPABLE":                                                    "(no reason given)",
+	} {
+		got, ok := notCapable(in)
+		if !ok || got != want {
+			t.Errorf("notCapable(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := notCapable("Here is the result. NOT_CAPABLE of anything else"); ok {
+		t.Error("only a leading NOT_CAPABLE counts")
+	}
+	out := formatTaskResult(tasks.Task{ID: 7, ToAgent: "Chrono", Status: tasks.Done, Result: "NOT_CAPABLE: not a calendar job"})
+	if !strings.Contains(out, "[NOT CAPABLE]") || !strings.Contains(out, "not a calendar job") {
+		t.Errorf("unexpected rendering: %s", out)
+	}
+}

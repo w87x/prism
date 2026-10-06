@@ -190,9 +190,26 @@ func (e *Engine) bestSpecialist(ctx context.Context, request, caller string) (st
 	return "", errors.New("no specialist matches that request; do it yourself, or say in your answer what is missing")
 }
 
+// notCapable recognises a delegate's declination: its answer starts with NOT_CAPABLE (see delegatedRules). It returns the
+// reason the agent gave.
+func notCapable(result string) (string, bool) {
+	r := strings.TrimSpace(result)
+	if len(r) < len("NOT_CAPABLE") || !strings.EqualFold(r[:len("NOT_CAPABLE")], "NOT_CAPABLE") {
+		return "", false
+	}
+	why := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(r[len("NOT_CAPABLE"):]), ":-— "))
+	if why == "" {
+		why = "(no reason given)"
+	}
+	return why, true
+}
+
 func formatTaskResult(t tasks.Task) string {
 	switch t.Status {
 	case tasks.Done:
+		if why, ok := notCapable(t.Result); ok {
+			return fmt.Sprintf("## Task #%d → %s [NOT CAPABLE]\n%s\n(%s is not the right agent for this and did nothing. Pick a better-suited agent (agent_find, tool_search) and ask or delegate again. If none fits and you can delegate: have Forge design a suitable agent, or Metis improve the closest one, then retry; otherwise do it yourself or report_blocked to whoever asked you.)", t.ID, t.ToAgent, why, t.ToAgent)
+		}
 		return fmt.Sprintf("## Task #%d → %s [done]\n%s", t.ID, t.ToAgent, strings.TrimSpace(t.Result))
 	case tasks.WaitingInput:
 		return fmt.Sprintf("## Task #%d → %s [needs input]\nQuestion: %s\n(Answer it yourself if you can, else use ask_user; then continue with delegate(task_id=%d, instruction=<answer>).)", t.ID, t.ToAgent, t.Question, t.ID)

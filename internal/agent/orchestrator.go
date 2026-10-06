@@ -836,7 +836,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		recov = &plan
 		e.learnFromStall(ctx, t, p, res, plan)
 	}
-	if e.Memory != nil && t.FromKind == "agent" {
+	if _, declined := notCapable(res.Text); e.Memory != nil && t.FromKind == "agent" && !declined { // a declination is not knowledge
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: t.FromName, To: p.Name, Text: t.Input, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: p.Name, To: t.FromName, Text: res.Text, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
 	}
