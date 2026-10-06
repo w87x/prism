@@ -61,32 +61,64 @@ func (s *Server) onboardingCompleter(job int64, j *obJob, model string) onboardi
 
 // consultPlanner sends one planning call to an outside model through the consult service (Codex CLI or a chat website on
 // the user's own subscription). It is slow — minutes — and the prompt leaves this machine, so it is opt-in. The answer is
-// parsed like any model reply (the reply may carry prose around the JSON; llm.ExtractJSON copes).
-func (s *Server) consultPlanner(j *obJob, provider string) onboarding.Completer {
+// parsed like any model reply (the reply may carry prose around the JSON; llm.ExtractJSON copes). While it waits it shows
+// Forge as running and reports the elapsed time every few seconds, so the onboarding window does not look frozen.
+func (s *Server) consultPlanner(obJobID int64, j *obJob, provider string) onboarding.Completer {
+	a := s.App
 	return func(ctx context.Context, title, system, user string, _ bool) (string, error) {
-		svc := s.App.Ext.Consult
+		svc := a.Ext.Consult
 		if svc == nil {
 			return "", errors.New("consult is not available")
 		}
-		if provider == "" || provider == "default" {
-			provider = svc.DefaultProvider(ctx)
+		prov := provider
+		if prov == "" || prov == "default" {
+			prov = svc.DefaultProvider(ctx)
 		}
-		j.addThought("\n▸ " + title + " — asking " + provider + " (this can take several minutes)…\n")
 		prompt := system + "\n\n--- the user's request ---\n" + user + "\n\nReply with the JSON object only, no commentary."
-		job, err := svc.Start(ctx, provider, onboardingHirer, prompt, 30*time.Minute, consult.Options{})
+		cj, err := svc.Start(ctx, prov, onboardingHirer, prompt, 30*time.Minute, consult.Options{})
 		if err != nil {
 			return "", err
 		}
-		snap, err := svc.Wait(ctx, job.ID, 30*time.Minute)
-		if err != nil {
-			return "", err
+		run := a.Engine.NewRunID()
+		a.Emit("run.start", map[string]any{"run": run, "agent": onboardingHirer, "depth": 1, "title": title, "onboarding": obJobID})
+		j.addThought("\n▸ " + title + " — asking " + prov + " (this can take several minutes)…\n")
+		start := time.Now()
+		say := func(note string) {
+			p := onboarding.Progress{Stage: "planning", Note: note}
+			j.progress(p)
+			a.Emit("onboarding.progress", map[string]any{"job": obJobID, "stage": p.Stage, "note": p.Note})
 		}
-		if snap.Status == "running" {
-			_ = svc.Cancel(job.ID)
-			return "", errors.New("no answer in time")
+		say("Asking " + prov + " to plan the team — waiting for its answer…")
+		beat := time.NewTicker(5 * time.Second)
+		defer beat.Stop()
+		finished := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-finished:
+					return
+				case <-beat.C:
+					d := time.Since(start).Round(time.Second)
+					say(fmt.Sprintf("Asking %s to plan the team — waiting for its answer… %s", prov, d))
+					a.Emit("run.delta", map[string]any{"run": run, "agent": onboardingHirer, "kind": "thinking", "text": "."})
+				}
+			}
+		}()
+		snap, werr := svc.Wait(ctx, cj.ID, 30*time.Minute)
+		close(finished)
+		status, msg := "done", ""
+		switch {
+		case werr != nil:
+			status, msg = "failed", werr.Error()
+		case snap.Status == "running":
+			_ = svc.Cancel(cj.ID)
+			status, msg = "failed", "no answer in time"
+		case snap.Status != "done" || strings.TrimSpace(snap.Answer) == "":
+			status, msg = "failed", prov+": "+strings.TrimSpace(snap.Error+" "+snap.Status)
 		}
-		if snap.Status != "done" || strings.TrimSpace(snap.Answer) == "" {
-			return "", fmt.Errorf("%s: %s", provider, strings.TrimSpace(snap.Error+" "+snap.Status))
+		a.Emit("run.end", map[string]any{"run": run, "agent": onboardingHirer, "depth": 1, "status": status, "error": msg})
+		if msg != "" {
+			return "", errors.New(msg)
 		}
 		j.addThought(snap.Answer + "\n")
 		return snap.Answer, nil
@@ -98,7 +130,7 @@ func (s *Server) consultPlanner(j *obJob, provider string) onboarding.Completer 
 func planOptions(s *Server, j *obJob, model string, job int64, planWith string) []onboarding.Option {
 	opts := []onboarding.Option{onboarding.WithCompleter(s.onboardingCompleter(job, j, model))}
 	if planWith != "" && s.App.Ext.Consult != nil {
-		opts = append(opts, onboarding.WithPlanner(s.consultPlanner(j, planWith)))
+		opts = append(opts, onboarding.WithPlanner(s.consultPlanner(job, j, planWith)))
 	}
 	return opts
 }
