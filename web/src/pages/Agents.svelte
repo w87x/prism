@@ -123,18 +123,17 @@
   // of letting it oscillate, MAXV caps how fast a node can catch up (so a roster change eases in rather than
   // snapping).
   const REPEL = 2.6, RADIAL = 0.02, DAMP = 0.82, MAXV = 9;
-  // drift: every agent wanders a little, on slow overlapping sine "currents" of its own phase — never a straight
-  // line or a pattern you can read, but small and slow enough (a few seconds per turn, a few tens of px) that the
-  // orbits and clusters stay legible. The forces above keep pulling it back, so it is a wobble, not an escape.
-  const DRIFT = 0.04;
+  // drift: every agent wanders a little, on slow overlapping sine "currents" of its own phase — but only within a tolerance
+  // of its place: an angle of at most DRIFT_ANGLE of the gap between neighbours (so equal spacing stays recognisable) and a
+  // distance of at most DRIFT_DIST. Never a straight line or a pattern you can read; a few seconds per turn.
+  const DRIFT_ANGLE = 0.08, DRIFT_DIST = 0.08;
   let drift = $state(true);
   try { drift = localStorage.getItem('prism.graphDrift') !== '0'; } catch {}
   const toggleDrift = () => { drift = !drift; try { localStorage.setItem('prism.graphDrift', drift ? '1' : '0'); } catch {} };
-  const wander = (n, t) => {
-    const p = (n.ph ||= Array.from({ length: 6 }, () => Math.random() * Math.PI * 2));
-    const s = t / 1000;
-    return [DRIFT * (Math.sin(s * 0.61 + p[0]) + 0.7 * Math.sin(s * 0.23 + p[1]) + 0.4 * Math.sin(s * 1.37 + p[2])),
-            DRIFT * (Math.sin(s * 0.53 + p[3]) + 0.7 * Math.sin(s * 0.29 + p[4]) + 0.4 * Math.sin(s * 1.19 + p[5]))];
+  // a smooth value in [-1, 1] that is different for every object `o` and for each of its channels `ch`
+  const wob = (o, t, ch) => {
+    const p = (o.ph ||= Array.from({ length: 9 }, () => Math.random() * Math.PI * 2)), s = t / 1000, k = ch * 3;
+    return (Math.sin(s * (0.61 - 0.08 * ch) + p[k]) + 0.7 * Math.sin(s * 0.23 + p[k + 1]) + 0.4 * Math.sin(s * (1.37 - 0.2 * ch) + p[k + 2])) / 2.1;
   };
   // Even spacing: the members of a group take equally spaced slots round their hub (6 members → 60° apart; the first
   // slot is offset so none sits on the trunk line to Atlas), and in the rings layout equally spaced slots round the band.
@@ -148,11 +147,13 @@
     const atlas = nodes.find((n) => n.a.role === 'entry');
     if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
     if (reduced && !force) return; // prefers-reduced-motion: no continuous simulation (a shuffle settles in one go, see shuffle())
+    const live = drift && !reduced && !force; // wobbling around the places, within the tolerance
     if (layout === 'stars') for (const hb of hubs) {
       // far enough out that the whole cluster clears Atlas, whatever its size
-      const a = hb.ang + rot, sc = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))), tx = cx + Math.cos(a) * sc * ex, ty = cy + Math.sin(a) * sc * ey;
-      const wob = drift && !reduced && !force ? wander({ ph: hb.ph ||= Array.from({ length: 6 }, () => Math.random() * Math.PI * 2) }, t) : [0, 0];
-      hb.x += (tx - hb.x) * 0.06 + wob[0] * 2; hb.y += (ty - hb.y) * 0.06 + wob[1] * 2;
+      const gap = (Math.PI * 2) / Math.max(1, hubs.length), a = hb.ang + rot + (live ? DRIFT_ANGLE * gap * wob(hb, t, 0) : 0);
+      const sc = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))) * (1 + (live ? DRIFT_DIST * 0.6 * wob(hb, t, 1) : 0));
+      const tx = cx + Math.cos(a) * sc * ex, ty = cy + Math.sin(a) * sc * ey;
+      hb.x += (tx - hb.x) * 0.06; hb.y += (ty - hb.y) * 0.06;
     }
     for (const n of nodes) {
       if (n.a.role === 'entry' || n.pinned) { n.vx = 0; n.vy = 0; continue; }
@@ -166,18 +167,18 @@
       }
       const hb = layout === 'stars' ? hubOf(n.orbit) : null;
       if (hb) { // a member stays at a comfortable distance from its hub: clusters read as stars
-        const m = cnt[n.orbit] + 1, want = clusterR(hb), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m;
+        const m = cnt[n.orbit] + 1, want = clusterR(hb) * (1 + (live ? DRIFT_DIST * wob(n, t, 1) : 0)), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m + (live ? DRIFT_ANGLE * ((Math.PI * 2) / m) * wob(n, t, 0) : 0);
         fx += (hb.x + Math.cos(ang) * want - n.x) * 0.05; fy += (hb.y + Math.sin(ang) * want - n.y) * 0.05;
       } else {
-        const o = orbitOf(n.orbit), k = o ? o.k : 0.6, m = (cnt[n.orbit] ?? 0) + 1, ang = offOf(n.orbit || '') + ((n.si || 0) * Math.PI * 2) / m;
-        fx += (cx + Math.cos(ang) * k * ex - n.x) * (RADIAL + 0.01); fy += (cy + Math.sin(ang) * k * ey - n.y) * (RADIAL + 0.01);
+        const o = orbitOf(n.orbit), k = o ? o.k : 0.6, m = (cnt[n.orbit] ?? 0) + 1, ang = offOf(n.orbit || '') + ((n.si || 0) * Math.PI * 2) / m + (live ? DRIFT_ANGLE * ((Math.PI * 2) / m) * wob(n, t, 0) : 0);
+        const kk = k * (1 + (live ? DRIFT_DIST * 0.5 * wob(n, t, 1) : 0));
+        fx += (cx + Math.cos(ang) * kk * ex - n.x) * (RADIAL + 0.01); fy += (cy + Math.sin(ang) * kk * ey - n.y) * (RADIAL + 0.01);
       }
       if (layout === 'stars') for (const hb of hubs) { // keep clear of the hubs of other groups
         if (hb.key === n.orbit) continue;
         const dx = n.x - hb.x, dy = n.y - hb.y, d = Math.hypot(dx, dy) || 0.0001, minD = R(n) + 30;
         if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
       }
-      if (drift && !reduced && !force) { const [wx, wy] = wander(n, t); fx += wx; fy += wy; }
       n.vx = (n.vx + fx) * DAMP; n.vy = (n.vy + fy) * DAMP;
       const sp = Math.hypot(n.vx, n.vy);
       if (sp > MAXV) { n.vx = (n.vx / sp) * MAXV; n.vy = (n.vy / sp) * MAXV; }
@@ -489,7 +490,7 @@
     {#if view === 'graph'}
       <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }]} />
       <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
-      <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a little slow, chaotic wandering of the agents (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
+      <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a slow wobble of the agents around their places — equal spacing stays within about 8% (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
     {/if}
     <span class="sm dim">{agents.length} agents · {activeNames.size} active</span>
     <Button size="sm" onclick={newAgent}><Icon name="plus" size={11} /> New agent</Button>
