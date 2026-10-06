@@ -368,13 +368,13 @@
           const words = (r.buf || '').replace(/\s+/g, ' ').trim();
           if (r.phase !== 'thinking' || !words) continue;
           bubbles++;
-          const text = (rs.length > 1 ? `#${j + 1} ` : '') + '… ' + words.slice(-30);
-          ctx.font = 'italic 10px monospace';
-          const tw = ctx.measureText(text).width, pad = 5, bw = tw + pad * 2, by = Math.max(16, n.y - rad - 20) + row * 19;
+          const text = (rs.length > 1 ? `#${j + 1} ` : '') + '…' + words.slice(-12);
+          ctx.font = 'italic 8px monospace';
+          const tw = ctx.measureText(text).width, pad = 4, bw = tw + pad * 2, by = Math.max(14, n.y - rad - 18) + row * 15;
           const flip = n.x + rad + 10 + bw > w - 6; // not enough room on the right: the bubble goes to the left of the node
           const bx = flip ? n.x - rad - 10 - bw : n.x + rad + 10;
           ctx.globalAlpha = 0.9; ctx.fillStyle = colors.bg2; ctx.strokeStyle = colors.accent; ctx.lineWidth = 0.8;
-          ctx.beginPath(); ctx.roundRect?.(bx, by - 11, bw, 16, 6); if (!ctx.roundRect) ctx.rect(bx, by - 11, bw, 16);
+          ctx.beginPath(); ctx.roundRect?.(bx, by - 9, bw, 13, 5); if (!ctx.roundRect) ctx.rect(bx, by - 9, bw, 13);
           ctx.fill(); ctx.stroke();
           ctx.fillStyle = colors.accentHi; ctx.textAlign = 'left'; ctx.fillText(text, bx + pad, by); ctx.textAlign = 'center'; ctx.globalAlpha = 1;
           if (row === 0) { // two little circles leading from the node to the first bubble, like a thought
