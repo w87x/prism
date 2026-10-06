@@ -340,6 +340,7 @@ CREATE TABLE briefings (
   body       text NOT NULL,
   importance int NOT NULL DEFAULT 1,
   status     text NOT NULL DEFAULT 'new',     -- new | delivered | dismissed
+  questions  jsonb NOT NULL DEFAULT '[]',     -- structured questions (tools.QItem[]) the user answers with choices
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

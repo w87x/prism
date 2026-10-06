@@ -2,6 +2,7 @@
   // Full-screen briefing reader for tablets and phones: one briefing at a time in a large font, with previous / next,
   // mark read and dismiss. The queue is fixed when it opens (so acting on one does not shuffle the rest), and briefings
   // that arrive while it is open are appended and shown as they come.
+  import QuestionForm from './QuestionForm.svelte';
   import { S, call, listen, toast, ago, stamp } from './store.svelte.js';
   import RichMessage from './rich/RichMessage.svelte';
   import Button from './ui/Button.svelte';
@@ -68,9 +69,9 @@
     seen();
     if (!queue.length) close();
   }
-  async function reply() {
-    const ok = await call('briefings.reply', { id: cur.id, text: replyText });
-    if (ok) { cur.reply = replyText; replyText = ''; replyOpen = false; toast(`${cur.agent} got your answer`); S.briefRev++; }
+  async function reply(text = replyText) {
+    const ok = await call('briefings.reply', { id: cur.id, text });
+    if (ok) { cur.reply = text; replyText = ''; replyOpen = false; toast(`${cur.agent} got your answer`); S.briefRev++; }
   }
   async function obsidian() { const rel = await call('briefings.save_obsidian', { id: cur.id }); if (rel) toast(`Saved to Obsidian: ${rel}`); }
   const close = () => { S.reader.open = false; S.reader.id = null; };
@@ -87,7 +88,7 @@
   let sx = 0;
   const down = (e) => { sx = e.clientX; };
   const up = (e) => { const dx = e.clientX - sx; if (Math.abs(dx) > 90 && e.pointerType === 'touch') go(dx < 0 ? 1 : -1); };
-  const asks = (b) => b.kind === 'question' || (!b.reply && /\?/.test(b.body));
+  const asks = (b) => b.kind === 'question' || b.questions?.length > 0 || (!b.reply && /\?/.test(b.body));
 </script>
 
 <svelte:window onkeydown={key} />
@@ -117,10 +118,14 @@
           <h1>{cur.title}</h1>
           <div class="body"><RichMessage text={cur.body} /></div>
           {#if cur.reply}<h2>Your answer</h2><div class="body dim"><RichMessage text={cur.reply} /></div>{/if}
+          {#if cur.questions?.length && !cur.reply}
+            <h2>Questions</h2>
+            <QuestionForm items={cur.questions} submitLabel="Send answer" onsubmit={(t) => reply(t)} />
+          {/if}
           {#if replyOpen}
             <h2>{cur.reply ? 'Add to your answer' : 'Answer'}</h2>
             <Textarea bind:value={replyText} rows={4} mono={false} placeholder="{cur.agent} reads this, remembers what matters and acts on it" />
-            <div class="rrow"><Button variant="ghost" onclick={() => (replyOpen = false)}>Cancel</Button><Button variant="primary" disabled={!replyText.trim()} onclick={reply}>Send</Button></div>
+            <div class="rrow"><Button variant="ghost" onclick={() => (replyOpen = false)}>Cancel</Button><Button variant="primary" disabled={!replyText.trim()} onclick={() => reply()}>Send</Button></div>
           {/if}
         </article>
       </main>

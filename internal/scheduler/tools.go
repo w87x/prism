@@ -299,12 +299,14 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 			Description: "Add a briefing for the user (importance 1–5; 4+ is delivered to them immediately, lower ones wait in the briefing list). " +
 				"If the user already dismissed a similar briefing this is refused unless you pass new_info stating what is materially new.",
 			Params: tools.Obj("title,body", tools.Str("title", "headline"), tools.Str("body", "specific, grounded, actionable text"),
-				tools.Int("importance", "1–5"), tools.Str("new_info", "only when repeating a topic the user dismissed: what changed since")),
+				tools.Int("importance", "1–5"), tools.Str("new_info", "only when repeating a topic the user dismissed: what changed since"),
+				tools.QuestionsProp("optional: 1–4 questions you need the user to answer (single / multi choice with a few options, or free text); they answer by picking, and you get the answers as a task")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
 					Title, Body string
 					Importance  int
-					NewInfo     string `json:"new_info"`
+					NewInfo     string       `json:"new_info"`
+					Questions   []tools.QRaw `json:"questions"`
 				}](raw)
 				if err != nil {
 					return "", err
@@ -315,7 +317,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					}
 					a.Body = strings.TrimSpace(a.Body) + "\n\n(New since the dismissed briefing #" + fmt.Sprint(d.ID) + ": " + strings.TrimSpace(a.NewInfo) + ")"
 				}
-				id, err := s.AddBriefing(ctx, env.Agent, a.Title, a.Body, a.Importance)
+				id, err := s.AddBriefingAsking(ctx, env.Agent, a.Title, a.Body, a.Importance, tools.QItems(a.Questions))
 				return fmt.Sprintf("Briefing #%d added.", id), err
 			},
 		},

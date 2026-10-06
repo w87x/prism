@@ -215,3 +215,65 @@ func Confirm(ctx context.Context, env *Env, tool, what, text string) error {
 	}
 	return nil
 }
+
+// QRaw is one question as an agent writes it in a tool call (ask_user, briefing_add).
+type QRaw struct {
+	Question string   `json:"question"`
+	Header   string   `json:"header"`
+	Type     string   `json:"type"`
+	Options  []string `json:"options"`
+}
+
+// QuestionsProp is the schema of a "questions" argument: a form of up to 4 questions.
+func QuestionsProp(desc string) Prop {
+	return ObjList("questions", desc, "question",
+		Str("question", "the question"), Str("header", "a one or two word label"),
+		Enum("type", "single (default when options are given), multi, or text", "single", "multi", "text"),
+		StrList("options", "short choices; an entry may carry a one-line explanation after \" — \""))
+}
+
+// QKind normalises a question type: single | multi | text. Without options a question can only be free text.
+func QKind(t string, opts []string, multi bool) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "multi", "multiple":
+		return "multi"
+	case "text", "free", "freeform":
+		return "text"
+	case "single":
+		if len(opts) > 0 {
+			return "single"
+		}
+		return "text"
+	}
+	switch {
+	case len(opts) == 0:
+		return "text"
+	case multi:
+		return "multi"
+	}
+	return "single"
+}
+
+// QOptions trims a list of choices: blanks dropped, at most 8.
+func QOptions(in []string) []string {
+	var out []string
+	for _, o := range in {
+		if o = strings.TrimSpace(o); o != "" && len(out) < 8 {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// QItems turns what an agent wrote into form items (at most 4, blank questions skipped).
+func QItems(in []QRaw) []QItem {
+	var items []QItem
+	for _, q := range in {
+		if strings.TrimSpace(q.Question) == "" || len(items) >= 4 {
+			continue
+		}
+		o := QOptions(q.Options)
+		items = append(items, QItem{Header: strings.TrimSpace(q.Header), Text: strings.TrimSpace(q.Question), Kind: QKind(q.Type, o, false), Options: o})
+	}
+	return items
+}

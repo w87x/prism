@@ -1,4 +1,5 @@
 <script>
+  import QuestionForm from '../lib/QuestionForm.svelte';
   import { S, call, listen, toast, confirmBox, loadSetting, saveSetting, ago, until, stamp, openProposal, go } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Tabs from '../lib/ui/Tabs.svelte';
@@ -119,12 +120,12 @@
   let replying = $state(false);
   // b.kind === 'question' is the reliable signal (memory analysis explicitly raised it); the old body-sniffing
   // heuristic stays as a fallback for anything else that happens to read as a question (e.g. a dream briefing).
-  const asks = (b) => b.kind === 'question' || (!b.reply && /\?/.test(b.body));
-  async function sendReply() {
+  const asks = (b) => b.kind === 'question' || b.questions?.length > 0 || (!b.reply && /\?/.test(b.body));
+  async function sendReply(text = replyText) {
     replying = true;
-    const ok = await call('briefings.reply', { id: readB.id, text: replyText });
+    const ok = await call('briefings.reply', { id: readB.id, text });
     replying = false;
-    if (ok) { readB.reply = replyText; readB.replied_at = new Date().toISOString(); replyText = ''; toast(`${readB.agent} got your answer`); loadB(); }
+    if (ok) { readB.reply = text; readB.replied_at = new Date().toISOString(); replyText = ''; toast(`${readB.agent} got your answer`); loadB(); }
   }
   function openRead(b) { replyText = ''; readB = b; if (b.status === 'new') dismiss(b, 'delivered'); }
   async function saveToObsidian(b) {
@@ -388,13 +389,17 @@
       <h4>Your answer <span class="mute sm">{ago(readB.replied_at)}</span></h4>
       <div class="pre">{readB.reply}</div>
     {/if}
+    {#if readB.questions?.length && !readB.reply}
+      <h4>Questions</h4>
+      <QuestionForm items={readB.questions} submitLabel="Send answer" onsubmit={(t) => sendReply(t)} />
+    {/if}
     <h4>{readB.reply ? 'Add to your answer' : /\?/.test(readB.body) ? 'Answer' : 'Reply'}</h4>
     <Textarea bind:value={replyText} rows={3} mono={false} placeholder="{readB.agent} reads this, remembers what matters and acts on it" />
   {/if}
   {#snippet footer()}
     <Button variant="ghost" onclick={() => saveToObsidian(readB)}>Save to Obsidian</Button>
     {#if readB?.status !== 'dismissed'}<Button variant="danger" onclick={() => dismiss(readB, 'dismissed')}>Dismiss</Button>{/if}
-    <Button variant="accent" loading={replying} disabled={!replyText.trim()} onclick={sendReply}>Send</Button>
+    <Button variant="accent" loading={replying} disabled={!replyText.trim()} onclick={() => sendReply()}>Send</Button>
     <Button variant="primary" onclick={() => (readB = null)}>Close</Button>
   {/snippet}
 </Modal>

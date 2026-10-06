@@ -22,6 +22,7 @@ import (
 	"prism/internal/settings"
 	"prism/internal/tasks"
 	"prism/internal/textmatch"
+	"prism/internal/tools"
 )
 
 type Cron struct {
@@ -57,15 +58,15 @@ type Intent struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	FiredAt     *time.Time      `json:"fired_at,omitempty"`
 	// Monitor fields (watches with a time budget, see monitor.go)
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Announce   bool       `json:"announce"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Announce  bool       `json:"announce"`
 	// Topic/ProjectBankID: the Telegram topic its notices use (own name, or a shared project's), resolved once
 	// when created. See topics.go.
-	Topic         string `json:"topic,omitempty"`
-	ProjectBankID int64  `json:"project_bank_id,omitempty"`
-	Fraction   *float64   `json:"fraction,omitempty"`    // how far along the last progress text said it was
-	ETASeconds *int       `json:"eta_seconds,omitempty"` // estimated seconds to completion, when it can be told
-	samples    []sample
+	Topic         string   `json:"topic,omitempty"`
+	ProjectBankID int64    `json:"project_bank_id,omitempty"`
+	Fraction      *float64 `json:"fraction,omitempty"`    // how far along the last progress text said it was
+	ETASeconds    *int     `json:"eta_seconds,omitempty"` // estimated seconds to completion, when it can be told
+	samples       []sample
 }
 
 type Briefing struct {
@@ -81,6 +82,8 @@ type Briefing struct {
 	// Kind: "briefing" (a dream/digest, the default) or "question" (something memory analysis needs from the
 	// user to resolve a genuine ambiguity — see AddBriefing) — same table and reply flow, its own Telegram topic.
 	Kind string `json:"kind"`
+	// Questions is an optional form (one or several single / multiple-choice / free-text questions) the briefing asks.
+	Questions []tools.QItem `json:"questions"`
 }
 
 type Service struct {
@@ -563,7 +566,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 // ── briefings ───────────────────────────────────────────────────────────────
 
 func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind FROM briefings WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 200`, status)
+	rows, err := s.DB.Query(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind,questions FROM briefings WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 200`, status)
 	if err != nil {
 		return nil, err
 	}
@@ -571,9 +574,11 @@ func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, err
 	var out []Briefing
 	for rows.Next() {
 		var b Briefing
-		if err := rows.Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind); err != nil {
+		var qraw []byte
+		if err := rows.Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind, &qraw); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal(qraw, &b.Questions)
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -582,8 +587,10 @@ func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, err
 // Briefing fetches a single briefing by id (for the "save to Obsidian" / "read" actions).
 func (s *Service) Briefing(ctx context.Context, id int64) (Briefing, error) {
 	var b Briefing
-	err := s.DB.QueryRow(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind FROM briefings WHERE id=$1`, id).
-		Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind)
+	var qraw []byte
+	err := s.DB.QueryRow(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind,questions FROM briefings WHERE id=$1`, id).
+		Scan(&b.ID, &b.Agent, &b.Title, &b.Body, &b.Importance, &b.Status, &b.CreatedAt, &b.Reply, &b.RepliedAt, &b.Kind, &qraw)
+	_ = json.Unmarshal(qraw, &b.Questions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return b, fmt.Errorf("briefing #%d does not exist", id)
 	}
@@ -591,17 +598,22 @@ func (s *Service) Briefing(ctx context.Context, id int64) (Briefing, error) {
 }
 
 func (s *Service) AddBriefing(ctx context.Context, agentName, title, body string, importance int) (int64, error) {
-	return s.addBriefing(ctx, agentName, title, body, importance, "briefing")
+	return s.addBriefing(ctx, agentName, title, body, importance, "briefing", nil)
+}
+
+// AddBriefingAsking is AddBriefing carrying a form of questions the user answers with choices (see tools.QItem).
+func (s *Service) AddBriefingAsking(ctx context.Context, agentName, title, body string, importance int, items []tools.QItem) (int64, error) {
+	return s.addBriefing(ctx, agentName, title, body, importance, "briefing", items)
 }
 
 // AddQuestion is AddBriefing for a genuine open question memory analysis needs the user to resolve (see
 // internal/memory's AskUser callback, wired in internal/app/ext.go): same table, list and reply flow, but its own
 // Telegram topic ("Questions") so it never gets lost among ordinary dream/digest briefings.
 func (s *Service) AddQuestion(ctx context.Context, agentName, title, body string, importance int) (int64, error) {
-	return s.addBriefing(ctx, agentName, title, body, importance, "question")
+	return s.addBriefing(ctx, agentName, title, body, importance, "question", nil)
 }
 
-func (s *Service) addBriefing(ctx context.Context, agentName, title, body string, importance int, kind string) (int64, error) {
+func (s *Service) addBriefing(ctx context.Context, agentName, title, body string, importance int, kind string, items []tools.QItem) (int64, error) {
 	if importance < 1 {
 		importance = 1
 	}
@@ -609,7 +621,11 @@ func (s *Service) addBriefing(ctx context.Context, agentName, title, body string
 		importance = 5
 	}
 	var id int64
-	err := s.DB.QueryRow(ctx, `INSERT INTO briefings(agent,title,body,importance,kind) VALUES($1,$2,$3,$4,$5) RETURNING id`, agentName, title, body, importance, kind).Scan(&id)
+	qj, _ := json.Marshal(items)
+	if items == nil {
+		qj = []byte("[]")
+	}
+	err := s.DB.QueryRow(ctx, `INSERT INTO briefings(agent,title,body,importance,kind,questions) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, agentName, title, body, importance, kind, qj).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -619,10 +635,26 @@ func (s *Service) addBriefing(ctx context.Context, agentName, title, body string
 		if kind == "question" {
 			topic = "Questions"
 		}
-		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body, Topic: topic})
+		s.Engine.Notify(ctx, agent.Notice{Agent: agentName, Level: "attention", Text: "**" + title + "**\n" + body + questionsText(items), Topic: topic})
 		_, _ = s.DB.Exec(ctx, `UPDATE briefings SET status='delivered' WHERE id=$1`, id)
 	}
 	return id, nil
+}
+
+// questionsText renders a briefing's questions as plain text (for Telegram and for the agent that reads the answers).
+func questionsText(items []tools.QItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\nQuestions:")
+	for i, it := range items {
+		fmt.Fprintf(&sb, "\n%d. %s", i+1, it.Text)
+		if len(it.Options) > 0 {
+			fmt.Fprintf(&sb, " (%s)", strings.Join(it.Options, " / "))
+		}
+	}
+	return sb.String()
 }
 
 // ReplyBriefing records the user's answer to a briefing and hands it to the agent that wrote it as a task, so
@@ -637,7 +669,7 @@ func (s *Service) ReplyBriefing(ctx context.Context, id int64, text string) (*ta
 		return nil, err
 	}
 	t, err := s.Engine.Enqueue(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: b.Agent, Title: "Reply to briefing: " + b.Title,
-		Input: fmt.Sprintf("You wrote this briefing for the user:\n\n%s\n%s\n\nThe user has answered:\n%s\n\nWork out what the answer means. Store anything durable with memory_store (a preference, a decision, a correction — and if the answer contradicts something you believed, say so in the fact). Then, if it changes what should happen next, do it or note it. Finish with one short sentence confirming what you took from the answer.", b.Title, b.Body, text)})
+		Input: fmt.Sprintf("You wrote this briefing for the user:\n\n%s\n%s\n\nThe user has answered:\n%s\n\nWork out what the answer means. Store anything durable with memory_store (a preference, a decision, a correction — and if the answer contradicts something you believed, say so in the fact). Then, if it changes what should happen next, do it or note it. Finish with one short sentence confirming what you took from the answer.", b.Title, b.Body+questionsText(b.Questions), text)})
 	if err != nil {
 		return nil, err
 	}
