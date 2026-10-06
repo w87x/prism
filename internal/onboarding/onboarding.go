@@ -433,8 +433,11 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		var plan struct {
 			Agents []Draft `json:"agents"`
 		}
-		if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
-			return nil, errors.New("the model returned no usable plan")
+		if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil {
+			return nil, fmt.Errorf("the model's reply was not valid plan JSON: %v; reply was %d chars, starting %q, ending %q", err, len(out), snip(out, 120, false), snip(out, 120, true))
+		}
+		if len(plan.Agents) == 0 {
+			return nil, fmt.Errorf("the model's plan had no \"agents\" (reply was %d chars, starting %q)", len(out), snip(out, 200, false))
 		}
 		return plan.Agents, nil
 	}
@@ -635,4 +638,16 @@ func expandTools(in []string, valid map[string]bool) []string {
 		}
 	}
 	return out
+}
+
+// snip returns up to n runes from the start (or, with tail, the end) of s, for error messages.
+func snip(s string, n int, tail bool) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	if tail {
+		return "…" + string(r[len(r)-n:])
+	}
+	return string(r[:n]) + "…"
 }
