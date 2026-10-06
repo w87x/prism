@@ -219,7 +219,9 @@
       ctx.fillStyle = colors.bg2; ctx.strokeStyle = busy ? colors.fg : hb.key === 'staff' ? colors.maint : colors.dim; ctx.lineWidth = 1.2;
       if (busy) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 8; }
       ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
-      if (!compact()) { ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.textAlign = 'center'; ctx.fillText(hb.label.toUpperCase(), hb.x, hb.y - r - 5); }
+      const shown = busy || nodes.some((n) => n.orbit === hb.key && (n.lab || 0) > 0.5 && n.a.role !== 'entry');
+      hb.lab = (hb.lab || 0) + ((shown ? 1 : 0) - (hb.lab || 0)) * 0.14;
+      if (!compact() && hb.lab > 0.03) { ctx.globalAlpha = hb.lab; ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.textAlign = 'center'; ctx.fillText(hb.label.toUpperCase(), hb.x, hb.y - r - 5); ctx.globalAlpha = 1; }
     }
   }
   // the points an Atlas → agent message travels through: via the group's hub in the stars layout
@@ -317,7 +319,13 @@
       ctx.fillStyle = col; ctx.font = `900 ${r * 0.9}px FA`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(iconOf(a.name), 0, 1);
       if (blocked) { ctx.fillStyle = colors.err; ctx.font = '800 13px monospace'; ctx.fillText('!', 0, -r - 8); }
       ctx.textBaseline = 'alphabetic';
-      if (compact() && !(hovered || selected || active || blocked || a.role === 'entry')) { ctx.restore(); continue; }
+      // names stay hidden until they matter: under the pointer, selected, or while the agent is working (given a task by
+      // Atlas, asked by a colleague, blocked on you) — and they linger a few seconds after, fading in and out. Atlas keeps its name.
+      if (active || blocked) n.busyAt = Date.now();
+      const wantLabel = hovered || selected || active || blocked || a.role === 'entry' || Date.now() - (n.busyAt || 0) < 3500;
+      n.lab = (n.lab || 0) + ((wantLabel ? 1 : 0) - (n.lab || 0)) * 0.14;
+      if (n.lab < 0.03) { ctx.restore(); continue; }
+      ctx.globalAlpha *= n.lab;
       ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? colors.disabled : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
       ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.fillText((a.probation ? 'on probation' : a.role === 'entry' ? 'entry' : a.role === 'maint' ? 'staff' : a.group).toUpperCase(), 0, r + 25);
       ctx.restore();
@@ -459,7 +467,7 @@
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
+        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">names show on hover or while an agent works · agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>
