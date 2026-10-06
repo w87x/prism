@@ -119,16 +119,13 @@ func (e *Engine) toolDelegate() *tools.Tool {
 // toolAskColleague lets an agent ask ONE other specialist to do one thing it cannot do itself (fetch a web
 // page, search the web…) and wait for the answer. Unlike delegate it never recurses: the colleague cannot
 // delegate or ask anyone else, so it is allowed at any depth.
-// memoryKeeper is the maintenance agent every agent may ask_colleague about memory housekeeping.
-const memoryKeeper = "Mnemosyne"
-
 func (e *Engine) toolAskColleague() *tools.Tool {
 	return &tools.Tool{
 		Name: "ask_colleague", Category: "agents", Base: true, Risk: tools.RiskRead,
 		Description: "Ask another specialist agent to do one thing you cannot do with your own tools (e.g. fetch a web page, search the web, read a PDF) and wait for the result. " +
 			"Use this instead of improvising with shell commands such as curl. The colleague answers once and cannot pass the request on. Write a complete, self-contained request. " +
 			"Name the agent if you know who (see agent_find), or leave it out and the best-matching specialist is asked. " +
-			"Memory housekeeping — moving a fact to another bank, merging, retiring — is asked of Mnemosyne by name, with the fact ids; she decides and may refuse.",
+			"The maintenance staff can be asked too, each in their own field (Mnemosyne: memory — moving, merging or retiring facts, by id; Forge: designing agents; Metis: improving an agent; Oneiros: reflection and briefings; Daedalus: turning a finished task into a skill; Sentinel: monitors on a page, download, process or file). They review the request and may refuse it.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),
 			tools.Str("agent", "the specialist to ask (optional)"),
 			tools.IntList("refs", "artifact ids with the material the request is about (artifact_save / scratchpad_share first) — pass bulky material by reference, not pasted")),
@@ -254,9 +251,12 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 			return tasks.Task{}, false, fmt.Errorf("%s is not on your team — you lead: %s. Delegate only to them (use ask_colleague for a one-off request outside the team)", p.Name, strings.Join(me.Team, ", "))
 		}
 	}
-	// Mnemosyne is the one staff member any agent may ask (to move, merge or retire memory); she judges the request and may
-	// refuse it. An agent on probation may not touch shared memory this way.
-	if leaf && p.Role != RoleWorker && !(strings.EqualFold(p.Name, memoryKeeper) && !env.Restricted) {
+	// Any agent may ask the maintenance staff (Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel) for help in their own
+	// field; staff review the request and may refuse it. An agent on probation may not.
+	if leaf && p.Role == RoleMaint && env.Restricted {
+		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff: an agent on probation cannot ask them, report to your requester instead", p.Name)
+	}
+	if leaf && p.Role != RoleWorker && p.Role != RoleMaint {
 		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff, not a specialist: ask a specialist instead", p.Name)
 	}
 	depth := env.Depth + 1
