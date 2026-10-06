@@ -57,13 +57,6 @@ func main() {
 	}
 
 	a := app.New(cfg, h)
-	if cfg.DSN != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		if err := a.Connect(ctx, cfg.DSN); err != nil {
-			log.Printf("database not reachable (%v) — starting in setup mode", err)
-		}
-		cancel()
-	}
 	ui, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
 		log.Fatal(err)
@@ -76,6 +69,17 @@ func main() {
 			log.Fatalf("http: %v", err)
 		}
 	}()
+	// Open the database and start the services in the background: the UI is served at once and shows what the start-up
+	// is doing (migrations, vector indexing, …) instead of a browser error until it is all done.
+	if cfg.DSN != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+			if err := a.Connect(ctx, cfg.DSN); err != nil {
+				log.Printf("database not reachable (%v) — starting in setup mode", err)
+			}
+		}()
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig

@@ -8,6 +8,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 
 export const S = $state({
   conn: 'connecting',
+  startup: null, // {state, elapsed_ms, stages:[{name,detail,state,ms}], error} while the backend is starting
   connMeta: {}, // { attempt, nextRetryAt } — see ws.js's onConnState
   lastConn: null, // { addr, at } of the last remote device to connect — see StatusBar's hover tooltip
   status: null,
@@ -198,6 +199,13 @@ function wire() {
   });
   on('llm.busy', (e) => { S.llm.active = e.active || 0; });
   on('status', (st) => { S.status = st; });
+  // start-up progress while PRISM opens its database and starts services (see ConnectingSplash)
+  on('startup', (e) => {
+    S.startup = { ...e, _at: Date.now() };
+    if (e.state === 'starting') { S.status = { ...(S.status || {}), starting: true }; return; }
+    if (S.status?.starting) S.status = { ...S.status, starting: false };
+    refreshAll(); // ready (or failed → the setup wizard)
+  });
   on('run.start', (e) => {
     S.runs[e.run] = newRun(e);
     // a "quick" run (see QuickAsk) is a separate one-off request, not this conversation continuing — it
@@ -318,8 +326,8 @@ export function modelOptions(kind = 'chat') {
 
 export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
-  if (st) S.status = st;
-  if (!st || st.setup) return;
+  if (st) { S.status = st; S.startup = st.startup ? { ...st.startup, _at: Date.now() } : null; }
+  if (!st || st.setup || st.starting) return; // starting: the splash shows progress; a `startup` event brings us back here when ready
   await loadChats();
   const [hist, snap] = await Promise.all([call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }), call('runs.snapshot', {}, { quiet: true })]);
   if (hist) { S.chat = hist; if (hist.length) markRead(S.chatTopic, hist[hist.length - 1].id); }

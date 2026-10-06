@@ -42,8 +42,10 @@ type App struct {
 
 	live liveFeed // tails of in-flight runs, for windows that join mid-run (see livefeed.go)
 
-	mu     sync.RWMutex
-	ready  bool
+	mu      sync.RWMutex
+	ready   atomic.Bool // set once Connect has finished; read by every request, so never behind mu (Connect runs long)
+	connect sync.Mutex  // one Connect at a time
+	startup startupTracker
 	cancel context.CancelFunc
 	ctx    context.Context
 
@@ -80,11 +82,10 @@ func New(cfg *config.Config, h *hub.Hub) *App {
 	return &App{Cfg: cfg, Hub: h, memNudge: make(chan struct{}, 1)}
 }
 
-func (a *App) Ready() bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.ready
-}
+func (a *App) Ready() bool { return a.ready.Load() }
+
+// Starting reports whether Connect is still working — the UI must show progress, not the first-run wizard.
+func (a *App) Starting() bool { return a.Startup().State == "starting" }
 
 // Emit broadcasts an event to all UI clients.
 func (a *App) Emit(typ string, data any) {
@@ -114,29 +115,39 @@ func (a *App) Logf(level, source, format string, args ...any) {
 }
 
 // Connect opens the database (running migrations) and starts every service.
-func (a *App) Connect(ctx context.Context, dsn string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.ready {
+func (a *App) Connect(ctx context.Context, dsn string) (err error) {
+	if !a.connect.TryLock() {
+		return errors.New("already connecting")
+	}
+	defer a.connect.Unlock()
+	if a.Ready() {
 		return errors.New("already connected")
 	}
+	a.startupBegin()
+	db.Progress = a.startupStage
+	defer func() { db.Progress = nil; a.startupFinish(err) }()
 	d, err := db.Open(ctx, dsn)
 	if err != nil {
 		return err
 	}
+	a.mu.Lock()
 	a.DB = d
 	a.ctx, a.cancel = context.WithCancel(context.Background())
+	a.mu.Unlock()
 	if err := a.build(a.ctx); err != nil {
 		a.cancel()
 		d.Close()
+		a.mu.Lock()
 		a.DB = nil
+		a.mu.Unlock()
 		return err
 	}
-	a.ready = true
+	a.ready.Store(true)
 	return nil
 }
 
 func (a *App) build(ctx context.Context) error {
+	a.startupStage("Starting services", "")
 	a.Settings = settings.New(a.DB.Pool)
 	a.LLM = llm.NewRouter(a.DB.Pool, a.Settings)
 	a.Tools = tools.NewRegistry(a.DB.Pool)
@@ -166,6 +177,7 @@ func (a *App) build(ctx context.Context) error {
 	a.Memory.ChatProject = a.Engine.ChatProject
 
 	// tools
+	a.startupStage("Registering tools", "")
 	memory.RegisterTools(a.Tools, a.Memory, a.defaultBanks)
 	tasksum.RegisterTools(a.Tools, a.TaskSum)
 	a.Downloads, a.Processes = builtin.Register(a.Tools, builtin.Deps{DB: a.DB.Pool, Settings: a.Settings, LLM: a.LLM, DataDir: a.Cfg.DataDir, Emit: a.Emit,
@@ -206,12 +218,15 @@ func (a *App) build(ctx context.Context) error {
 			go a.Engine.AssignIcon(context.Background(), id)
 		}
 	}
+	a.startupStage("Loading extensions", "web, MCP servers, skills, scheduler")
 	if err := a.buildExtensions(ctx); err != nil {
 		return err
 	}
+	a.startupStage("Loading tool settings", "")
 	if err := a.Tools.Load(ctx); err != nil {
 		return err
 	}
+	a.startupStage("Checking the agent roster", "")
 	if err := a.Profiles.Seed(ctx); err != nil {
 		return err
 	}
@@ -236,6 +251,7 @@ func (a *App) build(ctx context.Context) error {
 	a.LLM.OnBusy(func(n int, model string) { a.Emit("llm.busy", map[string]any{"active": n, "model": model}) })
 
 	// workers
+	a.startupStage("Recovering interrupted work", "background processes, downloads, queued tasks")
 	if n, err := a.Processes.Reconcile(ctx); err == nil && n > 0 {
 		a.Notify("error", "attention", "Background processes lost on restart", fmt.Sprintf("%d process(es) were still running when PRISM stopped; their status is now unknown.", n))
 	}
@@ -246,11 +262,13 @@ func (a *App) build(ctx context.Context) error {
 	}
 	a.Engine.SetLLMConcurrency(settings.Load(ctx, a.Settings, settings.KeyRuntime, settings.DefaultRuntime()).LLMConcurrency)
 	a.Engine.StartDispatcher(ctx, 6)
+	a.startupStage("Starting background workers", "")
 	go a.memoryLoop(ctx)
 	go a.cleanupLoop(ctx)
 	go a.statusLoop(ctx)
 	go a.keepAwakeLoop(ctx)
 	go a.stallLoop(ctx)
+	a.startupStage("Starting extensions", "")
 	a.startExtensions(ctx)
 	return nil
 }
@@ -714,7 +732,7 @@ func (a *App) Close() {
 	if a.DB != nil {
 		a.DB.Close()
 	}
-	a.ready = false
+	a.ready.Store(false)
 }
 
 func trimText(s string, n int) string {

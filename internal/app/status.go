@@ -28,12 +28,20 @@ type Status struct {
 	Asks       int    `json:"asks"`
 	RawPending int    `json:"raw_pending"`
 	Vector     bool   `json:"pgvector"`
+	// Starting: PRISM is up but still opening its database and starting services; Startup says how far it is.
+	Starting bool         `json:"starting,omitempty"`
+	Startup  *StartupInfo `json:"startup,omitempty"`
 }
 
 // Status computes the current status snapshot for the status bar.
 func (a *App) Status(ctx context.Context) Status {
 	st := Status{Version: Version}
 	if !a.Ready() {
+		if su := a.Startup(); su.State == "starting" { // still opening: the UI shows progress, not the setup wizard
+			st.Starting, st.Startup = true, &su
+			st.LEDs = []LED{{ID: "db", Label: "DB", State: "standby", Detail: "starting"}}
+			return st
+		}
 		st.Setup = true
 		st.LEDs = []LED{{ID: "db", Label: "DB", State: "attention", Detail: "not configured"}}
 		return st

@@ -30,7 +30,18 @@ type DB struct {
 }
 
 // Open connects to the database named in dsn and runs migrations.
+// Progress, when set, is told what Open is doing (connecting, which migration, vector indexing) so the UI's start-up
+// screen can show it. It is called from the opening goroutine only.
+var Progress func(stage, detail string)
+
+func progress(stage, detail string) {
+	if f := Progress; f != nil {
+		f(stage, detail)
+	}
+}
+
 func Open(ctx context.Context, dsn string) (*DB, error) {
+	progress("Connecting to the database", "")
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
@@ -48,12 +59,14 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 		return nil, err
 	}
 	d := &DB{Pool: pool}
+	progress("Checking the database schema", "waiting for the migration lock")
 	if err := d.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	d.Vector = d.detectVector(ctx)
 	if d.Vector {
+		progress("Preparing vector search", "")
 		if err := d.enableVector(ctx); err != nil {
 			log.Printf("pgvector present but could not be enabled (%v) — using in-process similarity", err)
 		} else {
@@ -70,6 +83,7 @@ func (d *DB) enableVector(ctx context.Context) error {
 		return err
 	}
 	for _, t := range []string{"memory_facts", "doc_chunks"} {
+		filled := 0
 		if _, err := d.Exec(ctx, `ALTER TABLE `+t+` ADD COLUMN IF NOT EXISTS vec vector`); err != nil {
 			return err
 		}
@@ -95,6 +109,8 @@ func (d *DB) enableVector(ctx context.Context) error {
 			if len(batch) == 0 {
 				break
 			}
+			filled += len(batch)
+			progress("Preparing vector search", fmt.Sprintf("indexing %s: %d rows so far", t, filled))
 			for _, r := range batch {
 				lit := VectorLiteral(decodeF32(r.emb))
 				if lit == "" { // unreadable embedding: drop it so the loop terminates
@@ -167,6 +183,14 @@ func (d *DB) migrate(ctx context.Context) error {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
+	pending := 0
+	for _, n := range names {
+		var ex bool
+		if conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, n).Scan(&ex) == nil && !ex {
+			pending++
+		}
+	}
+	applied := 0
 	for _, n := range names {
 		var exists bool
 		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, n).Scan(&exists); err != nil {
@@ -175,6 +199,8 @@ func (d *DB) migrate(ctx context.Context) error {
 		if exists {
 			continue
 		}
+		applied++
+		progress("Updating the database schema", fmt.Sprintf("%s (%d of %d)", n, applied, pending))
 		sqlb, err := migrationsFS.ReadFile("migrations/" + n)
 		if err != nil {
 			return err

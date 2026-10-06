@@ -16,7 +16,7 @@ import (
 func TestNotifySeenDoesNotPersistToTheNotificationBell(t *testing.T) {
 	d := testutil.DB(t)
 	a := &App{DB: d, Settings: settings.New(d.Pool), Notifs: &notify.Store{DB: d.Pool}, Hub: hub.New()}
-	a.ready = true
+	a.ready.Store(true)
 
 	a.NotifySeen("connection", map[string]any{"addr": "10.0.0.5:1234"})
 
@@ -34,7 +34,7 @@ func TestNotifySeenDoesNotPersistToTheNotificationBell(t *testing.T) {
 func TestNotifyStillPersists(t *testing.T) {
 	d := testutil.DB(t)
 	a := &App{DB: d, Settings: settings.New(d.Pool), Notifs: &notify.Store{DB: d.Pool}, Hub: hub.New()}
-	a.ready = true
+	a.ready.Store(true)
 
 	a.Notify("connection", "warning", "Blocked connection attempt", "bad token — from 10.0.0.5:1234")
 
