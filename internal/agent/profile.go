@@ -25,18 +25,21 @@ const (
 const MaxDepth = 2
 
 type Profile struct {
-	ID            int64     `json:"id"`
-	Name          string    `json:"name"`
-	Group         string    `json:"group"`
-	Description   string    `json:"description"`
-	Soul          string    `json:"soul"`
-	Traits        []string  `json:"traits"`
-	Tools         []string  `json:"tools"`
-	Skills        []string  `json:"skills"`
-	Banks         []string  `json:"banks"`
-	Model         string    `json:"model"`
-	Role          string    `json:"role"`
-	System        bool      `json:"system"`
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Group       string   `json:"group"`
+	Description string   `json:"description"`
+	Soul        string   `json:"soul"`
+	Traits      []string `json:"traits"`
+	Tools       []string `json:"tools"`
+	Skills      []string `json:"skills"`
+	Banks       []string `json:"banks"`
+	Model       string   `json:"model"`
+	Role        string   `json:"role"`
+	System      bool     `json:"system"`
+	// Builtin marks the agents PRISM ships (see WellKnown): staff, Atlas, and the Coder / Reviewer specialists. Computed from the
+	// name, not stored; a built-in that is deleted comes back at the next start.
+	Builtin       bool      `json:"builtin"`
 	CanDelegate   bool      `json:"can_delegate"`
 	MaxIterations int       `json:"max_iterations"`
 	Enabled       bool      `json:"enabled"`
@@ -99,6 +102,7 @@ func scanProfile(r pgx.Row) (Profile, error) {
 	var p Profile
 	err := r.Scan(&p.ID, &p.Name, &p.Group, &p.Description, &p.Soul, &p.Traits, &p.Tools, &p.Skills, &p.Banks, &p.Model, &p.Role,
 		&p.System, &p.CanDelegate, &p.MaxIterations, &p.Enabled, &p.SoulVersion, &p.CreatedAt, &p.UpdatedAt, &p.Icon, &p.Probation, &p.Team)
+	p.Builtin = IsWellKnown(p.Name)
 	return p, err
 }
 

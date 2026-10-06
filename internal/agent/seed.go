@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// WellKnown are the built-in agents. Atlas has a fixed name; the others are the
-// maintenance staff. Seeding never overwrites a profile the user already edited.
+// WellKnown are the built-in agents: Atlas (the entry agent), the maintenance staff, and the Coder and Reviewer
+// specialists. They are re-created if missing, and onboarding never replaces them. Seeding never overwrites a profile
+// the user already edited.
 func WellKnown() []Profile {
 	return []Profile{
 		{

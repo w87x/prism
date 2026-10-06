@@ -103,7 +103,7 @@
   </Panel>
 {:else}
   <Panel title={d.id ? d.name : 'New agent'} grow>
-    {#snippet right()}{#if d.system}<Badge tone="accent">{d.role === 'entry' ? 'entry' : 'staff'}</Badge>{/if}<span class="sm mute">v{d.soul_version}</span>{/snippet}
+    {#snippet right()}{#if d.system}<Badge tone="accent">{d.role === 'entry' ? 'entry' : 'staff'}</Badge>{:else if d.builtin}<Badge tone="mute" title="ships with PRISM: re-created at start-up if deleted; onboarding never replaces it (disable it to switch it off)">built-in</Badge>{/if}<span class="sm mute">v{d.soul_version}</span>{/snippet}
     <div class="form">
       {#if !d.id}
         <Field label="Existing agents & their tools" hint="check nobody already covers this before hiring — agent_find does the same at runtime">

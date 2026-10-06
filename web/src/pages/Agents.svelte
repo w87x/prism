@@ -540,7 +540,7 @@
           {#each agents.filter(match) as a (a.id)}
             <tr class="click" class:sel={S.selectedAgent === a.id} onclick={() => (S.selectedAgent = a.id)}>
               <td><Led state={!a.enabled ? 'off' : activeNames.has(a.name) ? 'ok' : a.role === 'maint' ? 'standby' : 'ok'} pulse={activeNames.has(a.name)} size={8} /></td>
-              <td class="hi"><span class="gl"><Glyph name={a.name} /></span> {a.name} {#if a.role === 'entry'}<Badge tone="ok">entry</Badge>{:else if a.system}<Badge tone="accent">staff</Badge>{/if}</td>
+              <td class="hi"><span class="gl"><Glyph name={a.name} /></span> {a.name} {#if a.role === 'entry'}<Badge tone="ok">entry</Badge>{:else if a.system}<Badge tone="accent">staff</Badge>{:else if a.builtin}<Badge tone="mute" title="ships with PRISM: re-created at start-up if deleted">built-in</Badge>{/if}</td>
               <td class="dim">{a.group}</td>
               <td class="dim">{a.description}</td>
               <td class="mute">{a.model || 'default'}</td>
