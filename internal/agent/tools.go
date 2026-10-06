@@ -119,12 +119,16 @@ func (e *Engine) toolDelegate() *tools.Tool {
 // toolAskColleague lets an agent ask ONE other specialist to do one thing it cannot do itself (fetch a web
 // page, search the web…) and wait for the answer. Unlike delegate it never recurses: the colleague cannot
 // delegate or ask anyone else, so it is allowed at any depth.
+// memoryKeeper is the maintenance agent every agent may ask_colleague about memory housekeeping.
+const memoryKeeper = "Mnemosyne"
+
 func (e *Engine) toolAskColleague() *tools.Tool {
 	return &tools.Tool{
 		Name: "ask_colleague", Category: "agents", Base: true, Risk: tools.RiskRead,
 		Description: "Ask another specialist agent to do one thing you cannot do with your own tools (e.g. fetch a web page, search the web, read a PDF) and wait for the result. " +
 			"Use this instead of improvising with shell commands such as curl. The colleague answers once and cannot pass the request on. Write a complete, self-contained request. " +
-			"Name the agent if you know who (see agent_find), or leave it out and the best-matching specialist is asked.",
+			"Name the agent if you know who (see agent_find), or leave it out and the best-matching specialist is asked. " +
+			"Memory housekeeping — moving a fact to another bank, merging, retiring — is asked of Mnemosyne by name, with the fact ids; she decides and may refuse.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),
 			tools.Str("agent", "the specialist to ask (optional)"),
 			tools.IntList("refs", "artifact ids with the material the request is about (artifact_save / scratchpad_share first) — pass bulky material by reference, not pasted")),
@@ -250,7 +254,9 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 			return tasks.Task{}, false, fmt.Errorf("%s is not on your team — you lead: %s. Delegate only to them (use ask_colleague for a one-off request outside the team)", p.Name, strings.Join(me.Team, ", "))
 		}
 	}
-	if leaf && p.Role != RoleWorker {
+	// Mnemosyne is the one staff member any agent may ask (to move, merge or retire memory); she judges the request and may
+	// refuse it. An agent on probation may not touch shared memory this way.
+	if leaf && p.Role != RoleWorker && !(strings.EqualFold(p.Name, memoryKeeper) && !env.Restricted) {
 		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff, not a specialist: ask a specialist instead", p.Name)
 	}
 	depth := env.Depth + 1
@@ -520,68 +526,24 @@ func (e *Engine) toolAskUser() *tools.Tool {
 			"The user can always type something else instead. Blocks until answered; the reply lists each answer.",
 		Params: tools.Obj("", tools.Str("question", "a single question (when not using questions)"), tools.StrList("options", "short choices for a single question"),
 			tools.Bool("multiple", "for a single question: the user may pick several options"),
-			tools.ObjList("questions", "a form: 1–4 questions asked together", "question",
-				tools.Str("question", "the question"), tools.Str("header", "a one or two word label"),
-				tools.Enum("type", "single (default when options are given), multi, or text", "single", "multi", "text"),
-				tools.StrList("options", "short choices"))),
+			tools.QuestionsProp("a form: 1–4 questions asked together")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
-				Question  string   `json:"question"`
-				Options   []string `json:"options"`
-				Multiple  bool     `json:"multiple"`
-				Questions []struct {
-					Question string   `json:"question"`
-					Header   string   `json:"header"`
-					Type     string   `json:"type"`
-					Options  []string `json:"options"`
-				} `json:"questions"`
+				Question  string       `json:"question"`
+				Options   []string     `json:"options"`
+				Multiple  bool         `json:"multiple"`
+				Questions []tools.QRaw `json:"questions"`
 			}](raw)
 			if err != nil {
 				return "", err
 			}
-			kindOf := func(t string, opts []string, multi bool) string {
-				switch strings.ToLower(strings.TrimSpace(t)) {
-				case "multi", "multiple":
-					return "multi"
-				case "text", "free", "freeform":
-					return "text"
-				case "single":
-					if len(opts) > 0 {
-						return "single"
-					}
-					return "text"
-				}
-				switch {
-				case len(opts) == 0:
-					return "text"
-				case multi:
-					return "multi"
-				}
-				return "single"
-			}
-			clean := func(in []string) []string {
-				var out []string
-				for _, o := range in {
-					if o = strings.TrimSpace(o); o != "" && len(out) < 8 {
-						out = append(out, o)
-					}
-				}
-				return out
-			}
-			var items []tools.QItem
-			for _, q := range a.Questions {
-				if strings.TrimSpace(q.Question) == "" || len(items) >= 4 {
-					continue
-				}
-				o := clean(q.Options)
-				items = append(items, tools.QItem{Header: strings.TrimSpace(q.Header), Text: strings.TrimSpace(q.Question), Kind: kindOf(q.Type, o, false), Options: o})
-			}
+			items := tools.QItems(a.Questions)
 			if len(items) == 0 {
-				o := clean(a.Options)
+				o := tools.QOptions(a.Options)
 				if strings.TrimSpace(a.Question) == "" {
 					return "", errors.New("ask_user needs a question")
 				}
-				items = []tools.QItem{{Text: strings.TrimSpace(a.Question), Kind: kindOf("", o, a.Multiple), Options: o}}
+				items = []tools.QItem{{Text: strings.TrimSpace(a.Question), Kind: tools.QKind("", o, a.Multiple), Options: o}}
 			}
 			q := tools.Question{Kind: "clarify", Items: items}
 			if len(items) == 1 {
