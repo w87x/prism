@@ -46,8 +46,8 @@ type App struct {
 	ready   atomic.Bool // set once Connect has finished; read by every request, so never behind mu (Connect runs long)
 	connect sync.Mutex  // one Connect at a time
 	startup startupTracker
-	cancel context.CancelFunc
-	ctx    context.Context
+	cancel  context.CancelFunc
+	ctx     context.Context
 
 	DB        *db.DB
 	Settings  *settings.Store
