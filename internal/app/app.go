@@ -239,6 +239,11 @@ func (a *App) build(ctx context.Context) error {
 	if n, err := a.Processes.Reconcile(ctx); err == nil && n > 0 {
 		a.Notify("error", "attention", "Background processes lost on restart", fmt.Sprintf("%d process(es) were still running when PRISM stopped; their status is now unknown.", n))
 	}
+	if a.Downloads != nil {
+		if n, err := a.Downloads.Reconcile(ctx); err == nil && n > 0 {
+			a.Logf("info", "downloads", "%d download(s) were still running when PRISM stopped; marked interrupted", n)
+		}
+	}
 	a.Engine.SetLLMConcurrency(settings.Load(ctx, a.Settings, settings.KeyRuntime, settings.DefaultRuntime()).LLMConcurrency)
 	a.Engine.StartDispatcher(ctx, 6)
 	go a.memoryLoop(ctx)

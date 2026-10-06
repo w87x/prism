@@ -74,6 +74,14 @@ func (dl *Downloader) Get(ctx context.Context, id int64) (Download, error) {
 	return x, err
 }
 
+// Reconcile runs at startup: a download still queued or running in the database has no goroutine any more (it died
+// with the old process), so it is marked failed instead of looking alive forever — and an agent told "running" would
+// wait on it or start it again. The file, if it got that far, is left where it is. Returns how many were marked.
+func (dl *Downloader) Reconcile(ctx context.Context) (int, error) {
+	tag, err := dl.d.DB.Exec(ctx, `UPDATE downloads SET status='failed', error='interrupted by a PRISM restart — check whether the file is already there before downloading again', finished_at=now() WHERE status IN ('queued','running')`)
+	return int(tag.RowsAffected()), err
+}
+
 func (dl *Downloader) Cancel(ctx context.Context, id int64) error {
 	dl.mu.Lock()
 	c := dl.cancels[id]

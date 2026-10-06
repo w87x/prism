@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1198,6 +1200,54 @@ func TestRestartedTaskGetsReconciliationNoticeBeforeRepeatingSideEffects(t *test
 	}
 	if out.Status != tasks.Done {
 		t.Fatalf("expected the run to finish done, got %s (error=%q)", out.Status, out.Error)
+	}
+}
+
+// Bug: after a restart a task asked for a download again that had already completed — the call was cut off before
+// its result was recorded, and nothing told the model the file was already there. The resumed run must be shown
+// the evidence (the unfinished call, the finished download and its file) and a verdict before it acts.
+func TestRestartedTaskIsShownWhatAlreadyHappened(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Fetcher", Soul: "You are Fetcher.", Enabled: true, MaxIterations: 6}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := h.e.Sessions.Create(ctx, p.Name, "task", "", 0)
+	file := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = h.e.Sessions.Append(ctx, sess.ID, Msg{Message: llm.Message{Role: "user", Content: "download the movie"}, Provenance: "agent"})
+	_, _ = h.e.Sessions.Append(ctx, sess.ID, Msg{Message: llm.Message{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "download_start", Arguments: `{"url":"https://example.com/movie.mkv"}`}}}, Provenance: "agent"})
+	task, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: p.Name, Input: "download the movie", SessionID: &sess.ID}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.DB.Exec(ctx, `INSERT INTO downloads(url,dest,status,bytes,total,owner) VALUES('https://example.com/movie.mkv',$1,'done',4,4,$2)`, file, p.Name); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = h.e.Tasks.RequeueRunning(ctx)
+	task, _ = h.e.Tasks.Get(ctx, task.ID)
+
+	var seen string
+	h.fake.Handler = func(req map[string]any, _ int) testutil.Reply {
+		for _, mi := range req["messages"].([]any) {
+			m := mi.(map[string]any)
+			if c, _ := m["content"].(string); strings.Contains(c, "PRISM restarted while you were working") {
+				seen = c
+			}
+			if c, _ := m["content"].(string); strings.Contains(c, "judge from the EVIDENCE") || strings.Contains(c, "EVIDENCE:") {
+				return testutil.Reply{Content: `{"verdict":"finished","why":"download #1 is done and the file exists","remaining":""}`}
+			}
+		}
+		return testutil.Reply{Content: "the movie is already downloaded"}
+	}
+	h.e.RunTask(ctx, task, TaskOpts{})
+	for _, want := range []string{"download_start(", "no result recorded", "file exists, 4 bytes", "verdict: finished"} {
+		if !strings.Contains(seen, want) {
+			t.Fatalf("resumed run was not shown %q:\n%s", want, seen)
+		}
 	}
 }
 

@@ -791,7 +791,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	// rewritten instruction, tells it to reconcile before repeating anything with a real effect.
 	if t.Restarts > 0 {
 		if hist, herr := e.Sessions.Messages(tctx, sess.ID); herr == nil && len(hist) > 0 {
-			note := "[system] PRISM restarted while you were working on this task. Before continuing, check the tool calls and results already above: if something with a real effect (a message sent, a file written, a purchase, a deletion…) already appears to have completed, do NOT repeat it — confirm its outcome first if you can, or say plainly what you are unsure happened. If nothing had actually happened yet, continue normally."
+			note := e.reconcileNote(tctx, t, p.Name, hist)
 			_, _ = e.Sessions.Append(tctx, sess.ID, Msg{Message: llm.Message{Role: "user", Content: note}, Provenance: "system"})
 		}
 	}
