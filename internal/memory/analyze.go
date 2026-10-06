@@ -24,7 +24,7 @@ const (
 	maxHypothesisConf = 0.6
 )
 
-var insightNeeds = map[string]int{"pattern": 3, "deduction": 2, "hypothesis": 2, "trend": 2, "preference": 2, "risk": 2, "question": 1}
+var insightNeeds = map[string]int{"pattern": 3, "deduction": 2, "hypothesis": 2, "trend": 2, "preference": 2, "risk": 2, "question": 1, "connection": 2}
 
 const analyzePrompt = `You are the analytical mind of an assistant's long-term memory. You get FACTS (numbered, dated) from ONE memory bank, the CONCLUSIONS already drawn from them by reflection (read-only), the INSIGHTS you derived earlier (you may change them) and the bank's current profile CARD.
 

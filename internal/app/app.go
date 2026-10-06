@@ -593,6 +593,15 @@ func (a *App) memoryLoop(ctx context.Context) {
 				}
 			}
 			a.memJob("deep analysis", fmt.Sprintf("%d banks due, %d changes", len(rs), ch), ch > 0, err)
+			// per-bank analysis cannot see across banks: this pass compares new facts with the closest ones elsewhere
+			cr, err := a.Memory.AnalyzeAcrossDue(ctx, 0)
+			if err != nil {
+				a.Logf("warn", "memory", "cross-bank analysis failed: %v", err)
+			}
+			if cr.Changes() > 0 {
+				a.Logf("info", "memory", "%s", cr)
+			}
+			a.memJob("cross-bank analysis", fmt.Sprintf("%d pairs, %d changes", cr.Pairs, cr.Changes()), cr.Changes() > 0, err)
 			if cfg.SynthOff {
 				a.memJob("synthesis", off, false, nil)
 			} else {

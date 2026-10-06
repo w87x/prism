@@ -481,6 +481,18 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_analyze_across", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
+			Description: "Cross-bank analysis: bank-by-bank analysis cannot see that two banks disagree or repeat each other. This takes the newest facts, finds the closest facts in OTHER banks and judges each pair — contradictions are flagged for review, duplicates merged (the kept fact becomes visible in both banks), agreement recorded — and names connections that only show across banks. Runs automatically after enough new facts; call it to force a pass.",
+			Params:      tools.Obj(""),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				r, err := s.AnalyzeAcross(ctx, true, 0)
+				if err != nil {
+					return "", err
+				}
+				return r.String(), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_synthesize", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
 			Description: "Higher levels of thinking. level 2 reads the conclusions and insights of every bank together and derives cross-domain syntheses (themes, causes, implications, tensions); level 3 distils standing principles, open tensions and gaps from level 2. Each cites the level below, so chains end in real facts. Runs automatically after enough new material; call it to force a pass. level omitted = both.",
 			Params:      tools.Obj("", tools.Int("level", "2 or 3 (default both)")),

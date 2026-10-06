@@ -6,6 +6,8 @@
   // else). Dragging pins a node under the pointer; on release the simulation takes it from wherever it was
   // dropped. Active agents glow and their delegation lines light up; requests between colleagues arc with a
   // travelling dot.
+  // Two layouts: 'rings' (groups as loose bands round Atlas) and 'stars' (each group is its own little star: a hub
+  // marked with the group's name, members clustered round it, Atlas → hub → member lines that light up in turn).
   import { S, activeRuns, reopenOnboarding, iconOf, call, listen, toast } from '../lib/store.svelte.js';
   import Button from '../lib/ui/Button.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
@@ -52,6 +54,11 @@
   // ── scene (plain state, read by the draw loop) ──
   let nodes = []; // {id, a, x, y, vx, vy, orbit, pinned}
   let orbits = []; // {key, label, k (0..1 of the available radius) — the group's target distance from Atlas}
+  let hubs = []; // stars layout: {key, label, x, y, ang, k, n (members)} — one virtual node per group
+  let layout = $state('stars'); // 'stars' | 'rings'
+  try { layout = localStorage.getItem('prism.graphLayout') === 'rings' ? 'rings' : 'stars'; } catch {}
+  const setLayout = (v) => { layout = v; try { localStorage.setItem('prism.graphLayout', v); } catch {} };
+  let rot = 0; // stars turn as a whole when shuffled
   let hoverId = null, gesture = null, colors = {};
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -66,6 +73,11 @@
     groups.forEach((g, i) => orbits.push({ key: 'g:' + g, label: g, k: groups.length === 1 ? 0.78 : 0.58 + (0.36 * i) / (groups.length - 1) }));
     const byOrbit = {};
     const { cx, cy, ex, ey } = spec();
+    const oldHubs = new Map(hubs.map((x) => [x.key, x]));
+    hubs = orbits.map((o, i) => {
+      const h = oldHubs.get(o.key) || { x: cx, y: cy };
+      return Object.assign(h, { key: o.key, label: o.label, ang: (i / Math.max(1, orbits.length)) * Math.PI * 2 - Math.PI / 2, k: orbits.length > 5 ? 0.5 + 0.28 * (i % 2) : 0.62, n: list.filter((a) => (a.role === 'maint' ? 'staff' : a.role === 'entry' ? null : 'g:' + a.group) === o.key).length });
+    });
     nodes = list.map((a) => {
       const key = a.role === 'entry' ? null : a.role === 'maint' ? 'staff' : 'g:' + a.group;
       const n = old.get(a.id) || { id: a.id, x: cx, y: cy, vx: 0, vy: 0, pinned: false, isNew: true };
@@ -89,6 +101,8 @@
 
   const spec = () => { const cx = w / 2, cy = h / 2, mx = w < 560 ? 26 : 70, my = w < 560 ? 30 : 92; return { cx, cy, ex: Math.max(80, w / 2 - mx), ey: Math.max(80, h / 2 - my) }; };
   const orbitOf = (key) => orbits.find((o) => o.key === key);
+  const hubOf = (key) => hubs.find((x) => x.key === key);
+  const clusterR = (hb) => 44 + 15 * Math.sqrt(hb.n); // how far members sit from their hub
   // small by default so the orbits stay readable; the hovered agent swells (eased per node in draw())
   // phone-sized canvas: smaller nodes, and names only for the agent you touch (see draw)
   const compact = () => w < 560;
@@ -127,19 +141,36 @@
     const atlas = nodes.find((n) => n.a.role === 'entry');
     if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
     if (reduced && !force) return; // prefers-reduced-motion: no continuous simulation (a shuffle settles in one go, see shuffle())
+    if (layout === 'stars') for (const hb of hubs) {
+      // far enough out that the whole cluster clears Atlas, whatever its size
+      const a = hb.ang + rot, sc = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))), tx = cx + Math.cos(a) * sc * ex, ty = cy + Math.sin(a) * sc * ey;
+      const wob = drift && !reduced && !force ? wander({ ph: hb.ph ||= Array.from({ length: 6 }, () => Math.random() * Math.PI * 2) }, t) : [0, 0];
+      hb.x += (tx - hb.x) * 0.06 + wob[0] * 2; hb.y += (ty - hb.y) * 0.06 + wob[1] * 2;
+    }
     for (const n of nodes) {
       if (n.a.role === 'entry' || n.pinned) { n.vx = 0; n.vy = 0; continue; }
       let fx = 0, fy = 0;
       for (const m of nodes) {
         if (m === n) continue;
         let dx = n.x - m.x, dy = n.y - m.y, d = Math.hypot(dx, dy);
-        const minD = R(n) + R(m) + 22;
+        const minD = R(n) + R(m) + (layout === 'stars' ? 34 : 22); // stars: room for the names too
         if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
         if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
       }
-      const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
-      const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
-      fx += (sx / sd) * err * ex * RADIAL; fy += (sy / sd) * err * ey * RADIAL;
+      const hb = layout === 'stars' ? hubOf(n.orbit) : null;
+      if (hb) { // a member stays at a comfortable distance from its hub: clusters read as stars
+        const dx = n.x - hb.x, dy = n.y - hb.y, d = Math.hypot(dx, dy) || 0.0001, want = clusterR(hb), err = want - d;
+        fx += (dx / d) * err * 0.035; fy += (dy / d) * err * 0.035;
+      } else {
+        const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
+        const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
+        fx += (sx / sd) * err * ex * RADIAL; fy += (sy / sd) * err * ey * RADIAL;
+      }
+      if (layout === 'stars') for (const hb of hubs) { // keep clear of the hubs of other groups
+        if (hb.key === n.orbit) continue;
+        const dx = n.x - hb.x, dy = n.y - hb.y, d = Math.hypot(dx, dy) || 0.0001, minD = R(n) + 30;
+        if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
+      }
       if (drift && !reduced && !force) { const [wx, wy] = wander(n, t); fx += wx; fy += wy; }
       n.vx = (n.vx + fx) * DAMP; n.vy = (n.vy + fy) * DAMP;
       const sp = Math.hypot(n.vx, n.vy);
@@ -152,6 +183,12 @@
   // layout — so the result still respects the bands and never overlaps.
   function shuffle() {
     const { cx, cy, ex, ey } = spec();
+    if (layout === 'stars') { // the stars swap places and turn as a whole
+      const angs = hubs.map((x) => x.ang);
+      for (let i = angs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [angs[i], angs[j]] = [angs[j], angs[i]]; }
+      hubs.forEach((x, i) => (x.ang = angs[i]));
+      rot = Math.random() * Math.PI * 2;
+    }
     const bands = orbits.filter((o) => o.key !== 'staff');
     const ks = bands.map((o) => o.k);
     for (let i = ks.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ks[i], ks[j]] = [ks[j], ks[i]]; }
@@ -173,6 +210,32 @@
   };
   const bez = (a, q, b, u) => ({ x: (1 - u) * (1 - u) * a.x + 2 * (1 - u) * u * q.qx + u * u * b.x, y: (1 - u) * (1 - u) * a.y + 2 * (1 - u) * u * q.qy + u * u * b.y });
 
+  // the group's hub in the stars layout: a small diamond with the group's name; it glows while a member works
+  function drawHubs(ctx, t) {
+    for (const hb of hubs) {
+      const busy = nodes.some((n) => n.orbit === hb.key && activeNames.has(n.a.name));
+      const r = 6 + (busy ? 1.5 * Math.sin(t / 260) : 0);
+      ctx.beginPath(); ctx.moveTo(hb.x, hb.y - r); ctx.lineTo(hb.x + r, hb.y); ctx.lineTo(hb.x, hb.y + r); ctx.lineTo(hb.x - r, hb.y); ctx.closePath();
+      ctx.fillStyle = colors.bg2; ctx.strokeStyle = busy ? colors.fg : hb.key === 'staff' ? colors.maint : colors.dim; ctx.lineWidth = 1.2;
+      if (busy) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 8; }
+      ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
+      if (!compact()) { ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.textAlign = 'center'; ctx.fillText(hb.label.toUpperCase(), hb.x, hb.y - r - 5); }
+    }
+  }
+  // the points an Atlas → agent message travels through: via the group's hub in the stars layout
+  const routeTo = (atlas, n) => {
+    const hb = layout === 'stars' ? hubOf(n.orbit) : null;
+    return hb ? [atlas, hb, n] : [atlas, n];
+  };
+  const along = (pts, u) => {
+    const lens = [];
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); lens.push(l); total += l; }
+    let d = u * total;
+    for (let i = 0; i < lens.length; i++) { if (d <= lens[i] || i === lens.length - 1) { const k = lens[i] ? Math.min(1, d / lens[i]) : 0; return { x: pts[i].x + (pts[i + 1].x - pts[i].x) * k, y: pts[i].y + (pts[i + 1].y - pts[i].y) * k }; } d -= lens[i]; }
+    return pts[pts.length - 1];
+  };
+
   let raf;
   function draw(t) {
     raf = requestAnimationFrame(draw);
@@ -185,19 +248,30 @@
     const atlas = nodes.find((n) => n.a.role === 'entry');
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
-    // spokes from Atlas; live ones (delegation in progress) run bright and dashed
-    if (atlas) for (const n of nodes) {
-      if (n === atlas) continue;
-      const live = runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
-      // a spoke this agent is actually delegated to a lot reads thicker and more solid even when quiet —
-      // "how much does Atlas actually route here" instead of every spoke looking equally important.
-      const spokeHeat = n.a.role === 'maint' ? 0 : heatOf(n.a.name);
-      ctx.beginPath(); ctx.moveTo(atlas.x, atlas.y); ctx.lineTo(n.x, n.y);
-      ctx.lineWidth = live ? 2 : 1 + spokeHeat * 0.8; ctx.strokeStyle = live ? colors.fg : n.a.role === 'maint' ? colors.maint : colors.line;
-      ctx.globalAlpha = live ? 1 : 0.4 + spokeHeat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
+    // spokes from Atlas; live ones (delegation in progress) run bright and dashed. In the stars layout they go
+    // Atlas → group hub → member instead, and the trunk to a hub lights up when any member is being delegated to.
+    const isLive = (n) => runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
+    const stroke = (x1, y1, x2, y2, live, heat, tone) => {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.lineWidth = live ? 2 : 1 + heat * 0.8; ctx.strokeStyle = live ? colors.fg : tone;
+      ctx.globalAlpha = live ? 1 : 0.4 + heat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
       ctx.stroke(); ctx.shadowBlur = 0;
+    };
+    if (atlas && layout === 'stars') {
+      for (const hb of hubs) {
+        const members = nodes.filter((n) => n.orbit === hb.key);
+        const live = members.some(isLive), heat = Math.min(1, members.reduce((a, n) => a + (n.a.role === 'maint' ? 0 : heatOf(n.a.name)), 0) / 2);
+        stroke(atlas.x, atlas.y, hb.x, hb.y, live, heat, hb.key === 'staff' ? colors.maint : colors.line);
+        for (const n of members) stroke(hb.x, hb.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line);
+      }
+    } else if (atlas) for (const n of nodes) {
+      if (n === atlas) continue;
+      // a spoke this agent is actually delegated to a lot reads thicker and more solid even when quiet —
+      // "how much does Atlas actually route here" instead of every spoke looking equally important.
+      stroke(atlas.x, atlas.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line);
     }
+    if (layout === 'stars') drawHubs(ctx, t);
     ctx.setLineDash([]); ctx.globalAlpha = 1;
 
     // agents blocked on the user: steady red arc to Atlas
@@ -217,7 +291,9 @@
 
     // the freshest live run of each agent, for the thinking overlay
     const byAgent = new Map();
-    for (const r of runs) { if (!r.done && (!byAgent.has(r.agent) || r.started > byAgent.get(r.agent).started)) byAgent.set(r.agent, r); }
+    // every live run of an agent, oldest first — one agent can think in several runs at once (parallel tasks, delegates)
+    for (const r of runs) { if (r.done) continue; if (!byAgent.has(r.agent)) byAgent.set(r.agent, []); byAgent.get(r.agent).push(r); }
+    for (const l of byAgent.values()) l.sort((x, y) => x.started - y.started);
 
     // agents
     for (const n of nodes) {
@@ -256,10 +332,11 @@
   function drawThinking(ctx, t, byAgent, atlas) {
     let bubbles = 0;
     for (const n of nodes) {
-      const r = byAgent.get(n.a.name);
-      if (!r) continue;
-      const rad = R(n), fresh = Date.now() - (r.lastDeltaAt || 0) < 700;
-      const thinking = r.phase === 'thinking';
+      const rs = byAgent.get(n.a.name);
+      if (!rs?.length) continue;
+      const rad = R(n), now = Date.now();
+      const fresh = rs.some((x) => now - (x.lastDeltaAt || 0) < 700);
+      const thinking = rs.some((x) => x.phase === 'thinking');
       if (reduced) { ctx.beginPath(); ctx.arc(n.x, n.y, rad + 7, 0, Math.PI * 2); ctx.strokeStyle = thinking ? colors.accent : colors.fg; ctx.globalAlpha = 0.5; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1; continue; }
       if (thinking) {
         const spin = t / (fresh ? 520 : 1100);
@@ -269,34 +346,44 @@
           ctx.fillStyle = colors.accentHi; ctx.globalAlpha = 0.55 + 0.4 * Math.sin(t / 300 + i * 2); ctx.shadowColor = colors.accent; ctx.shadowBlur = 5; ctx.fill(); ctx.shadowBlur = 0;
         }
         ctx.globalAlpha = 1;
-        const words = (r.buf || '').replace(/\s+/g, ' ').trim();
-        if (words && bubbles < 3 && !compact()) {
+      }
+      if (!thinking || rs.some((x) => x.phase !== 'thinking')) { // some run of this agent is acting: a pulse ring
+        const k = (t / 700) % 1;
+        ctx.beginPath(); ctx.arc(n.x, n.y, rad + 4 + k * 12, 0, Math.PI * 2);
+        ctx.strokeStyle = colors.fg; ctx.globalAlpha = (1 - k) * 0.55; ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      // a thought bubble per run that is reasoning (newest on top), stacked so several parallel runs are all visible
+      if (!compact()) {
+        let row = 0;
+        for (let j = rs.length - 1; j >= 0 && row < 3 && bubbles < 8; j--) {
+          const r = rs[j];
+          const words = (r.buf || '').replace(/\s+/g, ' ').trim();
+          if (r.phase !== 'thinking' || !words) continue;
           bubbles++;
-          const text = '… ' + words.slice(-34);
+          const text = (rs.length > 1 ? `#${j + 1} ` : '') + '… ' + words.slice(-30);
           ctx.font = 'italic 10px monospace';
-          const tw = ctx.measureText(text).width, pad = 5, bw = tw + pad * 2, by = Math.max(16, n.y - rad - 20);
+          const tw = ctx.measureText(text).width, pad = 5, bw = tw + pad * 2, by = Math.max(16, n.y - rad - 20) + row * 19;
           const flip = n.x + rad + 10 + bw > w - 6; // not enough room on the right: the bubble goes to the left of the node
           const bx = flip ? n.x - rad - 10 - bw : n.x + rad + 10;
           ctx.globalAlpha = 0.9; ctx.fillStyle = colors.bg2; ctx.strokeStyle = colors.accent; ctx.lineWidth = 0.8;
           ctx.beginPath(); ctx.roundRect?.(bx, by - 11, bw, 16, 6); if (!ctx.roundRect) ctx.rect(bx, by - 11, bw, 16);
           ctx.fill(); ctx.stroke();
           ctx.fillStyle = colors.accentHi; ctx.textAlign = 'left'; ctx.fillText(text, bx + pad, by); ctx.textAlign = 'center'; ctx.globalAlpha = 1;
-          // two little circles leading from the node to the bubble, like a thought
-          ctx.fillStyle = colors.accent; ctx.globalAlpha = 0.7;
-          const sx = flip ? -1 : 1;
-          ctx.beginPath(); ctx.arc(n.x + sx * rad * 0.75, n.y - rad * 0.75, 1.6, 0, Math.PI * 2); ctx.fill();
-          ctx.beginPath(); ctx.arc(n.x + sx * (rad + 5), n.y - rad - 6, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+          if (row === 0) { // two little circles leading from the node to the first bubble, like a thought
+            ctx.fillStyle = colors.accent; ctx.globalAlpha = 0.7;
+            const sx = flip ? -1 : 1;
+            ctx.beginPath(); ctx.arc(n.x + sx * rad * 0.75, n.y - rad * 0.75, 1.6, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(n.x + sx * (rad + 5), n.y - rad - 6, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+          }
+          row++;
         }
-      } else {
-        const k = (t / 700) % 1;
-        ctx.beginPath(); ctx.arc(n.x, n.y, rad + 4 + k * 12, 0, Math.PI * 2);
-        ctx.strokeStyle = colors.fg; ctx.globalAlpha = (1 - k) * 0.55; ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
       }
       // tokens flowing out along the line from Atlas while this agent is streaming
       if (atlas && n !== atlas && fresh) {
         for (let i = 0; i < 2; i++) {
           const u = ((t / 650) + i * 0.5) % 1;
-          ctx.beginPath(); ctx.arc(atlas.x + (n.x - atlas.x) * u, atlas.y + (n.y - atlas.y) * u, 2.2, 0, Math.PI * 2);
+          const pt = along(routeTo(atlas, n), u);
+          ctx.beginPath(); ctx.arc(pt.x, pt.y, 2.2, 0, Math.PI * 2);
           ctx.fillStyle = thinking ? colors.accentHi : colors.hi; ctx.globalAlpha = 0.5 + 0.4 * (1 - Math.abs(u - 0.5) * 2); ctx.fill(); ctx.globalAlpha = 1;
         }
       }
@@ -341,6 +428,7 @@
     <div class="f"><Input bind:value={filter} size="sm" placeholder="filter agents / traits…" /></div>
     <span class="grow"></span>
     {#if view === 'graph'}
+      <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }]} />
       <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
       <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a little slow, chaotic wandering of the agents (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
     {/if}
