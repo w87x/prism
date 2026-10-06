@@ -83,7 +83,7 @@ body::after {
     var(--bg);
   background-attachment: fixed;
 }
-/* the light playing inside the stone: two slow, faint colour flashes drifting behind the content */
+/* the light inside the stone: two faint colour flashes behind the content (static: moving full-screen gradients were too slow to repaint) */
 :root[data-theme='tanzanite'] body::before {
   content: '';
   position: fixed;
@@ -93,9 +93,7 @@ body::after {
   background:
     conic-gradient(from 210deg at 30% 40%, transparent 0 18%, rgb(120 80 255 / 0.10) 26%, transparent 36% 62%, rgb(255 70 190 / 0.07) 72%, transparent 82%),
     conic-gradient(from 20deg at 72% 62%, transparent 0 22%, rgb(60 150 255 / 0.09) 31%, transparent 42% 70%, rgb(160 60 255 / 0.08) 80%, transparent 90%);
-  animation: tanzanite-flash 90s linear infinite;
 }
-@keyframes tanzanite-flash { to { transform: rotate(360deg); } }
 
 /* ── Cobaltite ─ blue, silver and cobalt, with an orange accent ── */
 :root[data-theme='cobaltite'] {
@@ -276,9 +274,7 @@ body::after {
   pointer-events: none;
   background:
     conic-gradient(from 0deg at 35% 45%, rgb(80 230 210 / 0.10), rgb(255 150 225 / 0.09) 25%, rgb(255 215 120 / 0.08) 50%, rgb(130 150 255 / 0.10) 75%, rgb(80 230 210 / 0.10));
-  animation: opal-shift 140s linear infinite;
 }
-@keyframes opal-shift { to { transform: rotate(360deg); } }
 
 /* ── Obsidian ─ volcanic glass: near-black, neutral greys, a cool cyan accent and a faint sheen ── */
 :root[data-theme='obsidian'] {
@@ -357,7 +353,7 @@ body::after {
     var(--bg);
   background-attachment: fixed;
 }
-/* light through water: wide soft patches drifting across the page */
+/* light through water: wide soft patches across the page */
 :root[data-theme='aquamarine'] body::before {
   content: '';
   position: fixed;
@@ -369,11 +365,9 @@ body::after {
     radial-gradient(ellipse 26% 16% at 68% 22%, rgb(120 235 255 / 0.07), transparent 70%),
     radial-gradient(ellipse 20% 13% at 45% 70%, rgb(150 255 235 / 0.07), transparent 70%),
     radial-gradient(ellipse 24% 15% at 85% 78%, rgb(110 200 255 / 0.07), transparent 70%);
-  animation: aqua-drift 70s ease-in-out infinite alternate;
 }
-@keyframes aqua-drift { from { transform: translate(-3%, -2%) scale(1); } to { transform: translate(3%, 2.5%) scale(1.08); } }
 
-/* ── Moonstone ─ milky blue-white on blue-slate; the stone's floating sheen sweeps across slowly ── */
+/* ── Moonstone ─ milky blue-white on blue-slate ── */
 :root[data-theme='moonstone'] {
   --rgb-fg: 214 222 245;
   --rgb-accent: 143 168 255;
@@ -416,13 +410,4 @@ body::after {
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(105deg, transparent 38%, rgb(185 205 255 / 0.055) 47%, rgb(225 235 255 / 0.08) 50%, rgb(185 205 255 / 0.055) 53%, transparent 62%);
-  animation: moon-sheen 48s ease-in-out infinite alternate;
-}
-@keyframes moon-sheen { from { transform: translateX(-12%); } to { transform: translateX(22%); } }
-
-@media (prefers-reduced-motion: reduce) {
-  :root[data-theme='tanzanite'] body::before,
-  :root[data-theme='opal'] body::before,
-  :root[data-theme='aquamarine'] body::before,
-  :root[data-theme='moonstone'] body::before { animation: none; }
 }
