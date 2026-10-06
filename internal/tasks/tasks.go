@@ -269,8 +269,46 @@ func (s *Store) Finish(ctx context.Context, id int64, status, result, errMsg, qu
 	for _, w := range ws {
 		close(w)
 	}
+	if fin != nil {
+		s.closeWaitingChildren(ctx, id) // a requester that is done will never answer its colleagues' questions
+	}
 	return nil
 }
+
+// closeWaitingChildren cancels the sub-tasks of parent that are still waiting for input. Their question went to the parent
+// as its tool result; once the parent has finished nobody is left to answer, and they would sit in "Waiting for your answer"
+// for ever. parent < 0 means every task whose parent is already finished (a start-up sweep).
+func (s *Store) closeWaitingChildren(ctx context.Context, parent int64) {
+	q := `UPDATE tasks c SET status='cancelled', error='the requester finished without answering', finished_at=now()
+	      WHERE c.status='waiting_input' AND c.parent_id IS NOT NULL AND `
+	var args []any
+	if parent >= 0 {
+		q += `c.parent_id=$1`
+		args = append(args, parent)
+	} else {
+		q += `EXISTS (SELECT 1 FROM tasks p WHERE p.id=c.parent_id AND p.status IN ('done','failed','cancelled'))`
+	}
+	rows, err := s.db.Query(ctx, q+` RETURNING c.id`, args...)
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		if t, err := s.Get(ctx, id); err == nil {
+			s.notify(t)
+		}
+	}
+}
+
+// CloseOrphans runs at start-up: waiting_input sub-tasks whose requester already finished are cancelled.
+func (s *Store) CloseOrphans(ctx context.Context) { s.closeWaitingChildren(ctx, -1) }
 
 // Cancel marks a queued/running/waiting task cancelled (a running one also gets its context cancelled by the orchestrator).
 func (s *Store) Cancel(ctx context.Context, id int64) error {

@@ -80,8 +80,10 @@ func TestAgentsCannotUseToolsOutsideTheirToolset(t *testing.T) {
 			child = &all[i]
 		}
 	}
-	if child == nil || child.Status != tasks.WaitingInput {
-		t.Fatalf("the blocked task must wait for its requester, not finish or fail: %+v", child)
+	// the blocked task waited for its requester (which saw the report above). Atlas then ended its turn without continuing
+	// it, so nobody is left to answer: it is closed as cancelled, with the question kept — never finished or failed.
+	if child == nil || child.Status != tasks.Cancelled || !strings.Contains(child.Error, "requester finished") || !strings.Contains(child.Question, "MISSING CAPABILITY") {
+		t.Fatalf("a blocked task whose requester finished without answering must be closed as cancelled, keeping its question: %+v", child)
 	}
 }
 

@@ -182,8 +182,34 @@ func (e *Engine) bestSpecialist(ctx context.Context, request, caller string) (st
 	if err != nil {
 		return "", err
 	}
+	ok := func(p Profile) bool { return p.Role == RoleWorker && p.Enabled && !strings.EqualFold(p.Name, caller) }
+	// Who actually HOLDS a tool for this job beats who merely sounds right: an agent whose description fits but who has no
+	// tool for it can only decline or ask back. The tools that match the request are ranked, and each specialist scores by
+	// the best-ranked matching tool it holds (agents' text-match order breaks ties).
+	if e.Tools != nil {
+		holders := e.toolHolders(ctx)
+		score := map[string]float64{}
+		for i, t := range e.Tools.Search(request, 8) {
+			if t.Base {
+				continue // everyone has it: it says nothing about who is suited
+			}
+			w := 1 / float64(i+1)
+			for _, who := range holders[t.Name] {
+				score[strings.ToLower(who)] += w
+			}
+		}
+		best, bestScore := "", 0.0
+		for _, p := range ps { // ps is in text-match order, so the first of equals wins
+			if ok(p) && score[strings.ToLower(p.Name)] > bestScore {
+				best, bestScore = p.Name, score[strings.ToLower(p.Name)]
+			}
+		}
+		if best != "" {
+			return best, nil
+		}
+	}
 	for _, p := range ps {
-		if p.Role == RoleWorker && p.Enabled && !strings.EqualFold(p.Name, caller) {
+		if ok(p) {
 			return p.Name, nil
 		}
 	}

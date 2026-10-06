@@ -706,6 +706,7 @@ func (e *Engine) StartDispatcher(ctx context.Context, maxRuns int) {
 	}
 	_, _ = e.ReconcilePendingAsks(ctx)
 	_, _ = e.Tasks.RequeueRunning(ctx)
+	e.Tasks.CloseOrphans(ctx)
 	sem := make(chan struct{}, maxRuns)
 	go func() {
 		tick := time.NewTicker(2 * time.Second)

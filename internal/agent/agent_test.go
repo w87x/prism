@@ -770,7 +770,7 @@ func TestAskColleagueIsOneNonRecursiveRequest(t *testing.T) {
 		t.Fatalf("asking at max depth: %v", err)
 	}
 
-	// staff, oneself and a missing specialist are refused with a reason
+	// staff are reachable (they review and may refuse) except for an agent on probation; oneself and a missing specialist are refused with a reason
 	ask := func(args map[string]any) string {
 		tool, _ := h.e.Tools.Get("ask_colleague")
 		b, _ := json.Marshal(args)
@@ -780,8 +780,14 @@ func TestAskColleagueIsOneNonRecursiveRequest(t *testing.T) {
 		}
 		return out
 	}
-	if out := ask(map[string]any{"request": "x", "agent": "Forge"}); !strings.Contains(out, "staff") {
-		t.Fatalf("staff: %q", out)
+	if out := ask(map[string]any{"request": "x", "agent": "Forge"}); strings.Contains(out, "not a specialist") || strings.HasPrefix(out, "ERR") {
+		t.Fatalf("staff should be reachable: %q", out)
+	}
+	if tool, _ := h.e.Tools.Get("ask_colleague"); tool != nil {
+		b, _ := json.Marshal(map[string]any{"request": "x", "agent": "Forge"})
+		if _, err := tool.Run(ctx, &tools.Env{Agent: "Cipher", Depth: 1, Restricted: true, Taint: func() {}}, b); err == nil || !strings.Contains(err.Error(), "probation") {
+			t.Fatalf("an agent on probation must not reach staff, got %v", err)
+		}
 	}
 	if out := ask(map[string]any{"request": "x", "agent": "Cipher"}); !strings.Contains(out, "yourself") {
 		t.Fatalf("self: %q", out)
@@ -2451,5 +2457,49 @@ func TestNotCapable(t *testing.T) {
 	out := formatTaskResult(tasks.Task{ID: 7, ToAgent: "Chrono", Status: tasks.Done, Result: "NOT_CAPABLE: not a calendar job"})
 	if !strings.Contains(out, "[NOT CAPABLE]") || !strings.Contains(out, "not a calendar job") {
 		t.Errorf("unexpected rendering: %s", out)
+	}
+}
+
+func TestBestSpecialistPrefersWhoHoldsTheTool(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.Tools.Register(&tools.Tool{Name: "tree_listing", Description: "list files and folders recursively with sizes and dates", Risk: tools.RiskRead, Params: tools.Obj(""),
+		Run: func(context.Context, *tools.Env, json.RawMessage) (string, error) { return "", nil }})
+	// Niko sounds right ("files", "media") but holds nothing for listing; Katia holds the tool
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Niko", Group: "Media", Description: "finds media files and manages downloads of files", Soul: "x", Role: RoleWorker, Enabled: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Katia", Group: "Files", Description: "organizes shares", Soul: "x", Tools: []string{"tree_listing"}, Role: RoleWorker, Enabled: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.e.bestSpecialist(ctx, "list all media files and folders recursively with sizes and dates", "Someone")
+	if err != nil || got != "Katia" {
+		t.Fatalf("bestSpecialist = %q, %v; want Katia (she holds the tool)", got, err)
+	}
+}
+
+func TestFinishingARequesterClosesItsWaitingChildren(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	parent, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "p"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := parent.ID
+	child, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", ToAgent: "Atlas", Input: "c", ParentID: &pid}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Tasks.Finish(ctx, child.ID, tasks.WaitingInput, "", "", "which agent?"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.e.Tasks.Get(ctx, child.ID); got.Status != tasks.WaitingInput {
+		t.Fatalf("child should wait while its requester is alive, got %s", got.Status)
+	}
+	if err := h.e.Tasks.Finish(ctx, pid, tasks.Done, "ok", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.e.Tasks.Get(ctx, child.ID); got.Status != tasks.Cancelled {
+		t.Fatalf("child should be closed once its requester finished, got %s", got.Status)
 	}
 }
