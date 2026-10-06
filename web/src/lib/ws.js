@@ -96,6 +96,17 @@ export function reconnectNow() {
   backoff = 400;
   connect();
 }
+// Throw the current socket away and dial again at once — for a socket that looks open but is dead (the server
+// process behind it exited without the close reaching us).
+export function forceReconnect() {
+  if (closedByUs) return;
+  const old = ws;
+  if (old) { try { old.close(); } catch {} }
+  pending.forEach((p) => p.reject(new Error('connection lost')));
+  pending.clear();
+  backoff = 400;
+  connect();
+}
 if (typeof window !== 'undefined') {
   window.addEventListener('online', reconnectNow);
   window.addEventListener('pageshow', reconnectNow);

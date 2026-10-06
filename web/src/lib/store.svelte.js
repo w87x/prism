@@ -1,7 +1,7 @@
 // Global reactive state. One WebSocket feeds this; pages read it and call `call()` for RPC.
 import { untrack } from 'svelte';
 import { FA } from './icons.js';
-import { connect, on, onOpen, onConnState, rpc, setRpcGuard } from './ws.js';
+import { connect, on, onOpen, onConnState, rpc, setRpcGuard, forceReconnect } from './ws.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -381,6 +381,17 @@ export function init() {
     if (s === 'open' && S.startup?.state === 'stopping') S.startup = null; // that was the previous process; refreshAll fetches the real state
   });
   onOpen(refreshAll);
+  // The shutting-down splash can outlive its process: if the old server exits without its close reaching this tab, the
+  // socket looks open and nothing would ever clear the splash. While "stopping" shows, probe the server; a probe that
+  // gets no answer means the socket is dead, so dial again (the new process answers, and open clears the stale state).
+  setInterval(async () => {
+    if (S.conn !== 'open' || S.startup?.state !== 'stopping') return;
+    if (Date.now() - (S.startup._at || 0) < 3000) return; // still hearing progress from it
+    try {
+      const st = await Promise.race([rpc('app.state', {}), new Promise((_, no) => setTimeout(() => no(new Error('no answer')), 3000))]);
+      if (st && st.startup?.state !== 'stopping') refreshAll(); // a different process is answering
+    } catch { forceReconnect(); }
+  }, 3000);
   wire();
   connect();
 }
