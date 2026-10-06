@@ -12,6 +12,7 @@
   import Transcript from '../lib/Transcript.svelte';
   import Modal from '../lib/ui/Modal.svelte';
   import TaskReview from '../lib/TaskReview.svelte';
+  import TaskAnswer from '../lib/TaskAnswer.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Field from '../lib/ui/Field.svelte';
   import Empty from '../lib/ui/Empty.svelte';
@@ -65,6 +66,7 @@
     if (await call('tasks.cancel', { id: t.id })) toast(`Task #${t.id} cancelled`);
   }
   let reviewId = $state(0);
+  let answerId = $state(0);
   const rerunnable = (t) => t.status === 'cancelled' && t.from_kind === 'user' && t.to_agent === 'Atlas';
   async function rerun(t, e) {
     e?.stopPropagation();
@@ -110,7 +112,8 @@
           <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'} style="font-size:var(--fs-sm)">{t.status.replace('_', ' ')}</span>
           <span class="mute sm">{fmtTokens(t.tokens_in)}↑ {fmtTokens(t.tokens_out)}↓</span><span class="grow"></span>
           {#if t.status === 'queued' || t.status === 'running' || t.status === 'waiting_input'}<Button size="sm" variant="danger" onclick={(e) => cancel(t, e)}>Stop</Button>
-          {:else if rerunnable(t)}<Button size="sm" variant="ghost" onclick={(e) => rerun(t, e)}>Rerun</Button>{/if}
+          {:else if t.status === 'waiting_input'}<span class="grow"></span><Button size="sm" variant="accent" onclick={() => (answerId = t.id)}>Answer…</Button>
+      {:else if rerunnable(t)}<Button size="sm" variant="ghost" onclick={(e) => rerun(t, e)}>Rerun</Button>{/if}
         </div>
       </div>
     {:else}<Empty>the queue is empty</Empty>{/each}
@@ -194,6 +197,7 @@
   {/if}
 </Modal>
 
+<TaskAnswer taskId={answerId} onclose={() => (answerId = 0)} ondone={() => { detailOpen = false; load(); }} />
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={() => { detailOpen = false; load(); }} />
 
 <style>

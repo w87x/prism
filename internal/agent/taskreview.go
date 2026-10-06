@@ -165,3 +165,26 @@ func (e *Engine) ResolveTask(ctx context.Context, id int64, action, note string)
 	}
 	return next, nil
 }
+
+// AnswerTask lets the user answer a task that stopped asking for input (waiting_input). Only the delegating agent could
+// continue such a task before, which is no help once that agent has finished, so the answer now goes straight to the
+// task: it resumes in its own session with the answer as the next message and runs in the background.
+func (e *Engine) AnswerTask(ctx context.Context, id int64, answer string) (*tasks.Task, error) {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return nil, errors.New("an answer is required")
+	}
+	t, err := e.Tasks.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Status != tasks.WaitingInput {
+		return nil, fmt.Errorf("task #%d is %s, not waiting for input", t.ID, t.Status)
+	}
+	t, err = e.Tasks.Resume(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	go e.RunTask(context.WithoutCancel(ctx), t, TaskOpts{Input: "The user answered your question: " + answer + "\n\nContinue the task with this answer."})
+	return &t, nil
+}

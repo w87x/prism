@@ -338,6 +338,12 @@ func (s *Server) registerCore() {
 	}) (*agent.TaskReview, error) {
 		return a.Engine.ReviewTask(ctx, r.ID)
 	})
+	rpc(s, "tasks.answer", func(ctx context.Context, r struct {
+		ID     int64  `json:"id"`
+		Answer string `json:"answer"`
+	}) (*tasks.Task, error) {
+		return a.Engine.AnswerTask(ctx, r.ID, r.Answer)
+	})
 	rpc(s, "tasks.resolve", func(ctx context.Context, r struct {
 		ID     int64  `json:"id"`
 		Action string `json:"action"`

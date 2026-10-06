@@ -8,6 +8,7 @@
   import Glyph from '../lib/ui/Glyph.svelte';
   import Segmented from '../lib/ui/Segmented.svelte';
   import TaskReview from '../lib/TaskReview.svelte';
+  import TaskAnswer from '../lib/TaskAnswer.svelte';
 
   let d = $state(null);
   let busy = $state(false);
@@ -48,6 +49,7 @@
   let prodOpen = $state({});
   const PROD_SHOW = 4;
   let reviewId = $state(0);
+  let answerId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
   const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 
@@ -75,6 +77,9 @@
       <li class="row click" onclick={() => openRef(it.ref)}>
         <span class="ic attn"><Icon name={kindIcon[it.kind] || 'warn'} size={13} /></span>
         <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.sub}</span>{/if}</div>
+        {#if it.kind === 'waiting_input'}
+          <Button size="sm" variant="accent" onclick={(e) => { e.stopPropagation(); answerId = Number(it.ref.slice(5)); }}>Answer</Button>
+        {/if}
         {#if it.kind === 'partial' || it.kind === 'failed'}
           <Button size="sm" variant="accent" onclick={(e) => { e.stopPropagation(); reviewId = Number(it.ref.slice(5)); }}>Review</Button>
           <Button size="sm" variant="ghost" title="I've seen it — remove from this list" onclick={(e) => dismissTask(it, e)}>Dismiss</Button>
@@ -181,6 +186,7 @@
 </div>
 
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={load} />
+<TaskAnswer taskId={answerId} onclose={() => (answerId = 0)} ondone={load} />
 
 <style>
   .quiet { font-size: 10px; color: var(--attn); border: 1px solid var(--attn-dim); padding: 0 5px; white-space: nowrap; }
