@@ -9,6 +9,9 @@ let attempt = 0; // reconnect attempts since the last successful open
 let nextRetryAt = 0; // Date.now() timestamp of the next scheduled retry, while waiting to reconnect
 let stateCb = () => {};
 let closedByUs = false;
+let retryTimer = 0, connectTimer = 0;
+let downSince = 0; // when the connection was last lost (0 while open) — shown on the splash
+const CONNECT_TIMEOUT = 6000; // a handshake that has not finished by now is stuck (half-open socket after a restart, a sleeping phone)
 
 function url() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -37,15 +40,22 @@ export function on(event, fn) {
 
 export function connect() {
   closedByUs = false;
-  stateCb('connecting', { attempt, nextRetryAt: 0 });
-  ws = new WebSocket(url());
-  ws.onopen = () => {
+  clearTimeout(retryTimer); clearTimeout(connectTimer);
+  if (!downSince) downSince = Date.now();
+  stateCb('connecting', { attempt, nextRetryAt: 0, since: downSince });
+  const sock = new WebSocket(url());
+  ws = sock;
+  // no answer in time: give up on this socket (its close triggers the next attempt) instead of "connecting…" forever
+  connectTimer = setTimeout(() => { if (sock.readyState === 0) { try { sock.close(); } catch {} } }, CONNECT_TIMEOUT);
+  sock.onopen = () => {
+    clearTimeout(connectTimer);
     backoff = 400;
     attempt = 0;
+    downSince = 0;
     stateCb('open', {});
     openHooks.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
   };
-  ws.onmessage = (m) => {
+  sock.onmessage = (m) => {
     let d;
     try { d = JSON.parse(m.data); } catch { return; }
     if (d.id) {
@@ -59,18 +69,37 @@ export function connect() {
     handlers.get(d.event)?.forEach((f) => { try { f(d.data); } catch (e) { console.error(d.event, e); } });
     handlers.get('*')?.forEach((f) => { try { f(d.event, d.data); } catch (e) { console.error(e); } });
   };
-  ws.onclose = () => {
+  sock.onclose = () => {
+    if (sock !== ws) return; // a socket we already replaced
+    clearTimeout(connectTimer);
+    if (!downSince) downSince = Date.now();
     if (!closedByUs) {
       attempt++;
       backoff = Math.min(backoff * 1.6, 5000);
       nextRetryAt = Date.now() + backoff;
-      setTimeout(connect, backoff);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(connect, backoff);
     }
-    stateCb('closed', { attempt, nextRetryAt });
+    stateCb('closed', { attempt, nextRetryAt, since: downSince });
     pending.forEach((p) => p.reject(new Error('connection lost')));
     pending.clear();
   };
-  ws.onerror = () => {};
+  sock.onerror = () => {};
+}
+
+// Coming back to the tab, or the network returning, is the moment to retry at once rather than wait out the backoff
+// (a phone that slept, a laptop that changed networks): reconnect now unless a fresh attempt is already under way.
+export function reconnectNow() {
+  if (closedByUs) return;
+  if (ws && ws.readyState === 1) return;
+  if (ws && ws.readyState === 0) { try { ws.close(); } catch {} } // stale attempt
+  backoff = 400;
+  connect();
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', reconnectNow);
+  window.addEventListener('pageshow', reconnectNow);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) reconnectNow(); });
 }
 
 // Pages restored from localStorage mount (and fire their first RPCs) before the socket is open:

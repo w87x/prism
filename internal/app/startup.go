@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -18,7 +19,7 @@ type StartupStage struct {
 }
 
 type StartupInfo struct {
-	State     string         `json:"state"` // idle | starting | ready | failed
+	State     string         `json:"state"` // idle | starting | ready | failed | stopping
 	ElapsedMS int64          `json:"elapsed_ms"`
 	Stages    []StartupStage `json:"stages"`
 	Error     string         `json:"error,omitempty"`
@@ -69,7 +70,7 @@ func (a *App) startupBegin() {
 func (a *App) startupStage(name, detail string) {
 	t := &a.startup
 	t.mu.Lock()
-	if t.state != "starting" {
+	if t.state != "starting" && t.state != "stopping" {
 		t.mu.Unlock()
 		return
 	}
@@ -86,6 +87,7 @@ func (a *App) startupStage(name, detail string) {
 		}
 		t.stages = append(t.stages, StartupStage{Name: name, Detail: detail, State: "running"})
 		t.stageAt = now
+		log.Printf("[%s] %s%s", map[string]string{"starting": "start", "stopping": "stop"}[t.state], name, map[bool]string{true: " — " + detail}[detail != ""])
 	}
 	t.lastEmit = now
 	info := t.snapshotLocked()
@@ -104,7 +106,28 @@ func (a *App) startupFinish(err error) {
 	if err != nil {
 		t.state, t.err = "failed", err.Error()
 	}
+	log.Printf("[start] %s after %s%s", t.state, now.Sub(t.began).Round(time.Millisecond), map[bool]string{true: ": " + t.err}[t.err != ""])
 	info := t.snapshotLocked()
 	t.mu.Unlock()
 	a.Hub.Broadcast("startup", info)
+}
+
+// BeginShutdown tells every open page that PRISM is going down (and which step it is on), so a restart reads as
+// "shutting down…" with details instead of a dead connection.
+func (a *App) BeginShutdown() {
+	t := &a.startup
+	t.mu.Lock()
+	t.state, t.began, t.stageAt, t.stages, t.err = "stopping", time.Now(), time.Now(), nil, ""
+	info := t.snapshotLocked()
+	t.mu.Unlock()
+	a.Hub.Broadcast("startup", info)
+}
+
+// CurrentStage names the step start-up or shutdown is on right now ("" when idle).
+func (a *App) CurrentStage() string {
+	info := a.Startup()
+	if n := len(info.Stages); n > 0 {
+		return info.Stages[n-1].Name
+	}
+	return ""
 }

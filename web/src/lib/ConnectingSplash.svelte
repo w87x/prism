@@ -8,7 +8,8 @@
   import Bar from './ui/Bar.svelte';
 
   let now = $state(new Date());
-  const starting = $derived(S.conn === 'open' && !!S.status?.starting);
+  const stopping = $derived(S.startup?.state === 'stopping');
+  const starting = $derived((S.conn === 'open' && !!S.status?.starting) || stopping);
   $effect(() => {
     if (S.conn === 'open' && !starting) return;
     const i = setInterval(() => (now = new Date()), 1000);
@@ -28,7 +29,7 @@
     <Logo size={72} />
     <div class="wm">PRISM</div>
     {#if starting}
-      <div class="status">starting… {secs(elapsed)}</div>
+      <div class="status">{stopping ? 'shutting down…' : 'starting…'} {secs(elapsed)}</div>
       <div class="barwrap"><Bar equalize height={4} tone="accent" /></div>
       <div class="steps" aria-label="start-up progress">
         {#each doneStages as x (x.name)}<div class="st done"><span>✓ {x.name}</span><span class="t">{secs(x.ms)}</span></div>{/each}
@@ -37,9 +38,13 @@
           {#if current.detail}<div class="det">{current.detail}</div>{/if}
         {/if}
       </div>
+      {#if stopping && S.conn !== 'open'}<div class="det">PRISM stopped — reconnecting: {text}</div>{/if}
     {:else}
       <div class="status">{text}</div>
       <div class="barwrap"><Bar equalize height={4} tone="accent" /></div>
+      {#if S.connMeta?.since && now.getTime() - S.connMeta.since > 8000}
+        <div class="det hint">The server is not answering at {location.host}. If PRISM is restarting this is normal — it comes back by itself; otherwise check that it is running.</div>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -60,5 +65,6 @@
   .st { display: flex; justify-content: space-between; gap: 12px; color: var(--fg-mute); }
   .st.now { color: var(--fg-hi); }
   .st .t { color: var(--fg-faint); }
+  .hint { max-width: min(360px, 86vw); text-align: center; padding: 0; margin-top: 4px; }
   .det { color: var(--fg-dim); font-size: 11px; padding-left: 14px; overflow-wrap: anywhere; }
 </style>

@@ -721,15 +721,18 @@ func (a *App) memoryLoop(ctx context.Context) {
 	}
 }
 
-// Close stops workers and closes the database.
+// Close stops workers and closes the database, reporting each step (see BeginShutdown).
 func (a *App) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.startupStage("Stopping workers", "")
 	if a.cancel != nil {
 		a.cancel()
 	}
+	a.startupStage("Stopping extensions", "browser, MCP servers")
 	a.stopExtensions()
 	if a.DB != nil {
+		a.startupStage("Closing the database", "waiting for running queries to finish")
 		a.DB.Close()
 	}
 	a.ready.Store(false)

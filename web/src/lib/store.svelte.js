@@ -75,7 +75,7 @@ export async function openProposal(id) {
 }
 // Methods a view-only tab may still call: everything that only reads. Unknown methods are refused, so a
 // newly added writing RPC is safe by default.
-const READ_ONLY_OK = new Set(`agents.activity agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
+const READ_ONLY_OK = new Set(`app.state agents.activity agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
 browser.status chat.commands chat.history chats.list crons.list docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
 foldermap.list fs.browse intents.list kb.page_get kb.tree lists.list logs.list mail.accounts mail.himalaya mcp.list memory.banks memory.entity_facts
 memory.entity_graph memory.export memory.fact memory.facts memory.find memory.full_graph memory.graph memory.links memory.ops memory.review
@@ -202,6 +202,7 @@ function wire() {
   // start-up progress while PRISM opens its database and starts services (see ConnectingSplash)
   on('startup', (e) => {
     S.startup = { ...e, _at: Date.now() };
+    if (e.state === 'stopping') return; // PRISM is shutting down: the splash shows the steps (and keeps them if the connection drops)
     if (e.state === 'starting') { S.status = { ...(S.status || {}), starting: true }; return; }
     if (S.status?.starting) S.status = { ...S.status, starting: false };
     refreshAll(); // ready (or failed → the setup wizard)
@@ -374,7 +375,11 @@ export async function answerAsk(id, answer) {
 }
 
 export function init() {
-  onConnState((s, meta) => { S.conn = s; S.connMeta = meta || {}; });
+  onConnState((s, meta) => {
+    S.conn = s;
+    S.connMeta = meta || {};
+    if (s === 'open' && S.startup?.state === 'stopping') S.startup = null; // that was the previous process; refreshAll fetches the real state
+  });
   onOpen(refreshAll);
   wire();
   connect();
@@ -386,10 +391,12 @@ export function init() {
 // can't drift apart. `now` is the caller's own ticking clock (each keeps a lightweight 1s interval).
 export function connStatusText(now) {
   if (S.conn === 'open') return 'online';
-  const { attempt = 0, nextRetryAt = 0 } = S.connMeta || {};
-  if (S.conn === 'connecting') return attempt > 0 ? `connecting… (#${attempt})` : 'connecting…';
+  const { attempt = 0, nextRetryAt = 0, since = 0 } = S.connMeta || {};
+  const down = since ? Math.max(0, Math.round((now.getTime() - since) / 1000)) : 0;
+  const tail = down >= 3 ? ` · ${down}s` : '';
+  if (S.conn === 'connecting') return attempt > 0 ? `connecting… (#${attempt}${tail})` : `connecting…${tail}`;
   const s = Math.max(0, Math.ceil((nextRetryAt - now.getTime()) / 1000));
-  return nextRetryAt ? `retrying in ${s}s (#${attempt})` : S.conn;
+  return nextRetryAt ? `retrying in ${s}s (#${attempt}${tail})` : S.conn;
 }
 
 // ── formatting helpers ──────────────────────────────────────────────────────

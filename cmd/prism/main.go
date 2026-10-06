@@ -84,8 +84,18 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
 	log.Print("shutting down…")
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// Keep serving while we stop, so an open page can show what is happening; but never hang: a stuck step (a
+	// subprocess that will not exit, a query that will not finish) must not keep the port, or the restart, waiting.
+	a.BeginShutdown()
+	closed := make(chan struct{})
+	go func() { a.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(15 * time.Second):
+		log.Printf("shutdown took longer than 15s (stuck at: %s) — exiting anyway", a.CurrentStage())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
-	a.Close()
+	log.Print("stopped")
 }
