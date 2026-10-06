@@ -79,7 +79,7 @@ func (e *Engine) ask(ctx context.Context, info RunInfo, q tools.Question) (strin
 	e.asks[pa.ID] = pa
 	e.mu.Unlock()
 	e.Emit("ask.request", map[string]any{"id": pa.ID, "run": info.ID, "agent": info.Agent, "kind": q.Kind, "text": q.Text,
-		"options": q.Options, "tool": q.Tool, "args": q.Args, "since": pa.Since.UnixMilli()})
+		"options": q.Options, "items": q.Items, "tool": q.Tool, "args": q.Args, "since": pa.Since.UnixMilli()})
 	// persisted so a restart while this is outstanding is reconciled on the next start instead of silently
 	// vanishing (see ReconcilePendingAsks); best-effort — losing this row only means a worse restart
 	// experience, never a lost answer channel, so a DB hiccup here must not fail the ask itself.
@@ -183,7 +183,7 @@ func (e *Engine) PendingAsks() []map[string]any {
 	var out []map[string]any
 	for _, pa := range e.asks {
 		out = append(out, map[string]any{"id": pa.ID, "run": pa.Run.ID, "agent": pa.Run.Agent, "kind": pa.Q.Kind, "text": pa.Q.Text,
-			"options": pa.Q.Options, "tool": pa.Q.Tool, "args": pa.Q.Args, "since": pa.Since.UnixMilli()})
+			"options": pa.Q.Options, "items": pa.Q.Items, "tool": pa.Q.Tool, "args": pa.Q.Args, "since": pa.Since.UnixMilli()})
 	}
 	return out
 }

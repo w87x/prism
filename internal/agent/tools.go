@@ -514,17 +514,95 @@ func (e *Engine) toolAgentUpdate() *tools.Tool {
 func (e *Engine) toolAskUser() *tools.Tool {
 	return &tools.Tool{
 		Name: "ask_user", Category: "agents", Base: true, Risk: tools.RiskRead,
-		Description: "Ask the user a clarifying question when you are genuinely blocked (never for things you can decide or look up). Optionally offer choices. Blocks until answered.",
-		Params:      tools.Obj("question", tools.Str("question", "precise question"), tools.StrList("options", "optional short choices")),
+		Description: "Ask the user when you are genuinely blocked or a real choice is theirs (never for things you can decide or look up). " +
+			"Either one question (question + optional options), or a form of up to 4 questions in one go (questions): each is type single (pick one), multi (pick several) or text (free answer). " +
+			"Offer 2–6 short options where the answers are predictable — put the recommended one first and add \" (Recommended)\"; an options entry may carry a one-line explanation after \" — \". " +
+			"The user can always type something else instead. Blocks until answered; the reply lists each answer.",
+		Params: tools.Obj("", tools.Str("question", "a single question (when not using questions)"), tools.StrList("options", "short choices for a single question"),
+			tools.Bool("multiple", "for a single question: the user may pick several options"),
+			tools.ObjList("questions", "a form: 1–4 questions asked together", "question",
+				tools.Str("question", "the question"), tools.Str("header", "a one or two word label"),
+				tools.Enum("type", "single (default when options are given), multi, or text", "single", "multi", "text"),
+				tools.StrList("options", "short choices"))),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
-				Question string   `json:"question"`
-				Options  []string `json:"options"`
+				Question  string   `json:"question"`
+				Options   []string `json:"options"`
+				Multiple  bool     `json:"multiple"`
+				Questions []struct {
+					Question string   `json:"question"`
+					Header   string   `json:"header"`
+					Type     string   `json:"type"`
+					Options  []string `json:"options"`
+				} `json:"questions"`
 			}](raw)
 			if err != nil {
 				return "", err
 			}
-			ans, err := env.Ask(ctx, tools.Question{Kind: "clarify", Text: a.Question, Options: a.Options})
+			kindOf := func(t string, opts []string, multi bool) string {
+				switch strings.ToLower(strings.TrimSpace(t)) {
+				case "multi", "multiple":
+					return "multi"
+				case "text", "free", "freeform":
+					return "text"
+				case "single":
+					if len(opts) > 0 {
+						return "single"
+					}
+					return "text"
+				}
+				switch {
+				case len(opts) == 0:
+					return "text"
+				case multi:
+					return "multi"
+				}
+				return "single"
+			}
+			clean := func(in []string) []string {
+				var out []string
+				for _, o := range in {
+					if o = strings.TrimSpace(o); o != "" && len(out) < 8 {
+						out = append(out, o)
+					}
+				}
+				return out
+			}
+			var items []tools.QItem
+			for _, q := range a.Questions {
+				if strings.TrimSpace(q.Question) == "" || len(items) >= 4 {
+					continue
+				}
+				o := clean(q.Options)
+				items = append(items, tools.QItem{Header: strings.TrimSpace(q.Header), Text: strings.TrimSpace(q.Question), Kind: kindOf(q.Type, o, false), Options: o})
+			}
+			if len(items) == 0 {
+				o := clean(a.Options)
+				if strings.TrimSpace(a.Question) == "" {
+					return "", errors.New("ask_user needs a question")
+				}
+				items = []tools.QItem{{Text: strings.TrimSpace(a.Question), Kind: kindOf("", o, a.Multiple), Options: o}}
+			}
+			q := tools.Question{Kind: "clarify", Items: items}
+			if len(items) == 1 {
+				q.Text = items[0].Text
+				if items[0].Kind == "single" { // plain channels (Telegram) show these as buttons
+					for _, o := range items[0].Options {
+						q.Options = append(q.Options, strings.TrimSpace(strings.SplitN(o, " — ", 2)[0]))
+					}
+				}
+			} else {
+				var sb strings.Builder
+				for i, it := range items {
+					fmt.Fprintf(&sb, "%d. %s", i+1, it.Text)
+					if len(it.Options) > 0 {
+						fmt.Fprintf(&sb, " (%s)", strings.Join(it.Options, " / "))
+					}
+					sb.WriteString("\n")
+				}
+				q.Text = strings.TrimSpace(sb.String()) + "\n(answer each, one per line)"
+			}
+			ans, err := env.Ask(ctx, q)
 			if err != nil {
 				return "", err
 			}

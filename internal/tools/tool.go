@@ -73,6 +73,19 @@ type Question struct {
 	Options []string `json:"options,omitempty"`
 	Tool    string   `json:"tool,omitempty"`
 	Args    string   `json:"args,omitempty"`
+	// Items is a structured form: several questions at once, each single-choice, multiple-choice or free text.
+	// Text (and Options, when there is just one single-choice item) still carry a plain rendering for channels
+	// that cannot show a form (Telegram).
+	Items []QItem `json:"items,omitempty"`
+}
+
+// QItem is one question of a form. Kind is single | multi | text; choices may carry an explanation after " — ".
+// For single and multi the UI always adds an "Other…" free-text answer.
+type QItem struct {
+	Header  string   `json:"header,omitempty"` // a one-or-two-word label
+	Text    string   `json:"text"`
+	Kind    string   `json:"kind"`
+	Options []string `json:"options,omitempty"`
 }
 
 // Env carries per-call context. Tools treat it as read-only except via callbacks.
