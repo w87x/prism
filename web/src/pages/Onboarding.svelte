@@ -152,6 +152,19 @@
   let allowDelegate = $state(saved.allow_delegate ?? false);
   let coverAll = $state(saved.cover_all ?? false);
   let genModel = $state('');
+  // Optional: let an outside, stronger model (Codex CLI / a chat website on the user's own subscription, see Settings → Consult)
+  // PLAN the team; every agent is still written on this machine.
+  let planWith = $state('');
+  let planOpts = $state([{ value: '', label: 'this machine (default)' }]);
+  $effect(() => {
+    call('consult.status', {}, { quiet: true }).then((c) => {
+      if (!c) return;
+      const o = [{ value: '', label: 'this machine (default)' }];
+      if (c.codex?.found) o.push({ value: 'codex', label: 'Codex (your ChatGPT subscription)' });
+      for (const st of c.sites || []) if (!st.disabled) o.push({ value: st.name, label: `${st.name} (website, in PRISM's browser)` });
+      planOpts = o;
+    });
+  });
   let drafts = $state([]);
   let pick = $state({});
   let note = $state('');
@@ -216,7 +229,7 @@
     gBusy = true; note = ''; drafts = []; pick = {}; job = 0; stageNote = 'Starting…';
     const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate, cover_all: coverAll };
     try { localStorage.setItem(LIMITS_KEY, JSON.stringify(limits)); } catch {}
-    const r = await call('onboarding.propose', { hints, ...limits, model: genModel });
+    const r = await call('onboarding.propose', { hints, ...limits, model: genModel, plan_with: planWith });
     if (!r) { gBusy = false; return; }
     if (!job) job = r.job;
   }
@@ -353,6 +366,7 @@
           <Checkbox bind:checked={coverAll} label="use every available tool — spread across agents, within the limit above (the common tools every agent gets are not counted)" />
           <div class="sm mute" style="flex-basis:100%">Limits are written into the planner's prompt and enforced afterwards: a plan that breaks one is sent back once with the exact violations, and whatever still breaks is trimmed. Agents cannot load tools later, so keep the limit generous enough for the job.</div>
           <div class="gm"><Field label="Model (fast = finishes sooner)"><Select bind:value={genModel} options={[{ value: '', label: 'chat model (default)' }, { value: 'role:fast', label: 'fast model' }, ...modelOptions('chat')]} /></Field></div>
+          {#if planOpts.length > 1}<div class="gm"><Field label="Plan the team with" hint="an outside model plans who is on the team (slow — minutes; your hints and the tool list leave this machine, no secrets); each agent is still written here"><Select bind:value={planWith} options={planOpts} /></Field></div>{/if}
           <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>
           <Button onclick={templates}>Use built-in templates</Button>
         </div>

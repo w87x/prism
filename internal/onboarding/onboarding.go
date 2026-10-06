@@ -343,13 +343,18 @@ var SoulParallelism = 4
 // (so its thinking shows in the UI); without it Propose uses the router directly.
 type Completer func(ctx context.Context, title, system, user string, jsonOut bool) (string, error)
 
-type proposeOpts struct{ complete Completer }
+type proposeOpts struct{ complete, plan Completer }
 
 // Option tunes Propose.
 type Option func(*proposeOpts)
 
 // WithCompleter makes Propose route its model calls through c.
 func WithCompleter(c Completer) Option { return func(o *proposeOpts) { o.complete = c } }
+
+// WithPlanner sends only the team-planning call (the one that decides who is on the team) to c — typically a stronger
+// outside model via consult. Writing every agent's soul stays on the regular model. If c fails, planning falls back to
+// the regular model.
+func WithPlanner(c Completer) Option { return func(o *proposeOpts) { o.plan = c } }
 
 // Propose plans a team with the chat model, then writes each agent's soul in its own
 // call so slow local models make visible progress instead of one huge request. On
@@ -424,9 +429,21 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	progress(Progress{Stage: "planning", Note: "Planning the team…", Total: cons.agentCap()})
 	system := cons.render(strings.Join(existing, ", "), strings.Join(tl, "\n"))
 	askPlan := func(user string) ([]Draft, error) {
-		pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		out, err := complete(pctx, "Onboarding: planning the team", system, user, true)
-		cancel()
+		var out string
+		var err error
+		if po.plan != nil {
+			xctx, xcancel := context.WithTimeout(ctx, 35*time.Minute)
+			out, err = po.plan(xctx, "Onboarding: planning the team (outside model)", system, user, true)
+			xcancel()
+			if err != nil {
+				progress(Progress{Stage: "planning", Note: "The outside planner failed (" + err.Error() + ") — planning on this machine instead…", Total: cons.agentCap()})
+			}
+		}
+		if po.plan == nil || err != nil {
+			pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			out, err = complete(pctx, "Onboarding: planning the team", system, user, true)
+			cancel()
+		}
 		if err != nil {
 			return nil, err
 		}

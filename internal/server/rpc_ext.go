@@ -798,7 +798,8 @@ func (s *Server) registerOnboarding() {
 	rpc(s, "onboarding.propose", func(ctx context.Context, r struct {
 		Hints string `json:"hints"`
 		onboarding.Constraints
-		Model string `json:"model"`
+		Model    string `json:"model"`
+		PlanWith string `json:"plan_with"` // "" = plan on this machine; else a consult provider (codex, chatgpt, …) plans the team
 	}) (map[string]any, error) {
 		ps, _ := a.Profiles.List(ctx)
 		var names []string
@@ -812,7 +813,7 @@ func (s *Server) registerOnboarding() {
 			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Constraints, r.Model, func(p onboarding.Progress) {
 				st.progress(p)
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
-			}, onboarding.WithCompleter(s.onboardingCompleter(job, st, r.Model)))
+			}, planOptions(s, st, r.Model, job, r.PlanWith)...)
 			note := ""
 			if err != nil {
 				note = err.Error()

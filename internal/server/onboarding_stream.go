@@ -2,8 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
+	"prism/internal/consult"
 	"prism/internal/llm"
 	"prism/internal/onboarding"
 )
@@ -53,4 +57,48 @@ func (s *Server) onboardingCompleter(job int64, j *obJob, model string) onboardi
 		}
 		return resp.Content, nil
 	}
+}
+
+// consultPlanner sends one planning call to an outside model through the consult service (Codex CLI or a chat website on
+// the user's own subscription). It is slow — minutes — and the prompt leaves this machine, so it is opt-in. The answer is
+// parsed like any model reply (the reply may carry prose around the JSON; llm.ExtractJSON copes).
+func (s *Server) consultPlanner(j *obJob, provider string) onboarding.Completer {
+	return func(ctx context.Context, title, system, user string, _ bool) (string, error) {
+		svc := s.App.Ext.Consult
+		if svc == nil {
+			return "", errors.New("consult is not available")
+		}
+		if provider == "" || provider == "default" {
+			provider = svc.DefaultProvider(ctx)
+		}
+		j.addThought("\n▸ " + title + " — asking " + provider + " (this can take several minutes)…\n")
+		prompt := system + "\n\n--- the user's request ---\n" + user + "\n\nReply with the JSON object only, no commentary."
+		job, err := svc.Start(ctx, provider, onboardingHirer, prompt, 30*time.Minute, consult.Options{})
+		if err != nil {
+			return "", err
+		}
+		snap, err := svc.Wait(ctx, job.ID, 30*time.Minute)
+		if err != nil {
+			return "", err
+		}
+		if snap.Status == "running" {
+			_ = svc.Cancel(job.ID)
+			return "", errors.New("no answer in time")
+		}
+		if snap.Status != "done" || strings.TrimSpace(snap.Answer) == "" {
+			return "", fmt.Errorf("%s: %s", provider, strings.TrimSpace(snap.Error+" "+snap.Status))
+		}
+		j.addThought(snap.Answer + "\n")
+		return snap.Answer, nil
+	}
+}
+
+// planOptions are the Propose options for one onboarding job: the streaming completer for every call, plus an outside
+// planner for the team-planning call when the user picked one.
+func planOptions(s *Server, j *obJob, model string, job int64, planWith string) []onboarding.Option {
+	opts := []onboarding.Option{onboarding.WithCompleter(s.onboardingCompleter(job, j, model))}
+	if planWith != "" && s.App.Ext.Consult != nil {
+		opts = append(opts, onboarding.WithPlanner(s.consultPlanner(j, planWith)))
+	}
+	return opts
 }
