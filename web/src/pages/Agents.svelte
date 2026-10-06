@@ -76,12 +76,12 @@
     const oldHubs = new Map(hubs.map((x) => [x.key, x]));
     hubs = orbits.map((o, i) => {
       const h = oldHubs.get(o.key) || { x: cx, y: cy };
-      return Object.assign(h, { key: o.key, label: o.label, ang: (i / Math.max(1, orbits.length)) * Math.PI * 2 - Math.PI / 2, k: orbits.length > 5 ? 0.5 + 0.28 * (i % 2) : 0.62, n: list.filter((a) => (a.role === 'maint' ? 'staff' : a.role === 'entry' ? null : 'g:' + a.group) === o.key).length });
+      return Object.assign(h, { key: o.key, label: o.label, ang: (i / Math.max(1, orbits.length)) * Math.PI * 2 - Math.PI / 2, k: orbits.length > 5 ? 0.5 + 0.28 * (i % 2) : orbits.length > 2 ? 0.68 : 0.58, n: list.filter((a) => (a.role === 'maint' ? 'staff' : a.role === 'entry' ? null : 'g:' + a.group) === o.key).length });
     });
-    nodes = list.map((a) => {
+    nodes = list.map((a, i) => {
       const key = a.role === 'entry' ? null : a.role === 'maint' ? 'staff' : 'g:' + a.group;
       const n = old.get(a.id) || { id: a.id, x: cx, y: cy, vx: 0, vy: 0, pinned: false, isNew: true };
-      n.a = a; n.orbit = key;
+      n.a = a; n.orbit = key; n.ord ??= i;
       if (key) (byOrbit[key] ||= []).push(n);
       return n;
     });
@@ -136,8 +136,15 @@
     return [DRIFT * (Math.sin(s * 0.61 + p[0]) + 0.7 * Math.sin(s * 0.23 + p[1]) + 0.4 * Math.sin(s * 1.37 + p[2])),
             DRIFT * (Math.sin(s * 0.53 + p[3]) + 0.7 * Math.sin(s * 0.29 + p[4]) + 0.4 * Math.sin(s * 1.19 + p[5]))];
   };
+  // Even spacing: the members of a group take equally spaced slots round their hub (6 members → 60° apart; the first
+  // slot is offset so none sits on the trunk line to Atlas), and in the rings layout equally spaced slots round the band.
+  // The order they take the slots in (n.ord) is what a shuffle changes.
+  const offs = {}; // rings: each band's starting angle
+  const offOf = (key) => (offs[key] ??= [...key].reduce((a, c) => a + c.charCodeAt(0), 0) * 0.9);
   function place(t = 0, force = false) {
     const { cx, cy, ex, ey } = spec();
+    const cnt = {};
+    for (const n of [...nodes].sort((p, q) => p.ord - q.ord)) if (n.orbit) n.si = cnt[n.orbit] = (cnt[n.orbit] ?? -1) + 1;
     const atlas = nodes.find((n) => n.a.role === 'entry');
     if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
     if (reduced && !force) return; // prefers-reduced-motion: no continuous simulation (a shuffle settles in one go, see shuffle())
@@ -159,12 +166,11 @@
       }
       const hb = layout === 'stars' ? hubOf(n.orbit) : null;
       if (hb) { // a member stays at a comfortable distance from its hub: clusters read as stars
-        const dx = n.x - hb.x, dy = n.y - hb.y, d = Math.hypot(dx, dy) || 0.0001, want = clusterR(hb), err = want - d;
-        fx += (dx / d) * err * 0.035; fy += (dy / d) * err * 0.035;
+        const m = cnt[n.orbit] + 1, want = clusterR(hb), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m;
+        fx += (hb.x + Math.cos(ang) * want - n.x) * 0.05; fy += (hb.y + Math.sin(ang) * want - n.y) * 0.05;
       } else {
-        const o = orbitOf(n.orbit), k = o ? o.k : 0.6;
-        const sx = (n.x - cx) / ex, sy = (n.y - cy) / ey, sd = Math.hypot(sx, sy) || 0.0001, err = k - sd;
-        fx += (sx / sd) * err * ex * RADIAL; fy += (sy / sd) * err * ey * RADIAL;
+        const o = orbitOf(n.orbit), k = o ? o.k : 0.6, m = (cnt[n.orbit] ?? 0) + 1, ang = offOf(n.orbit || '') + ((n.si || 0) * Math.PI * 2) / m;
+        fx += (cx + Math.cos(ang) * k * ex - n.x) * (RADIAL + 0.01); fy += (cy + Math.sin(ang) * k * ey - n.y) * (RADIAL + 0.01);
       }
       if (layout === 'stars') for (const hb of hubs) { // keep clear of the hubs of other groups
         if (hb.key === n.orbit) continue;
@@ -193,9 +199,10 @@
     const ks = bands.map((o) => o.k);
     for (let i = ks.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ks[i], ks[j]] = [ks[j], ks[i]]; }
     bands.forEach((o, i) => (o.k = ks[i]));
+    for (const key of Object.keys(offs)) offs[key] = Math.random() * Math.PI * 2;
     for (const n of nodes) {
       if (n.a.role === 'entry') continue;
-      n.pinned = false;
+      n.pinned = false; n.ord = Math.random();
       const k = (orbitOf(n.orbit)?.k ?? 0.6) * (0.5 + Math.random() * 0.9), ang = Math.random() * Math.PI * 2;
       n.x = cx + Math.cos(ang) * k * ex; n.y = cy + Math.sin(ang) * k * ey;
       n.vx = (Math.random() - 0.5) * 7; n.vy = (Math.random() - 0.5) * 7;
@@ -247,6 +254,7 @@
     place(t);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(dpr * zoom.s, 0, 0, dpr * zoom.s, dpr * zoom.x, dpr * zoom.y);
     const atlas = nodes.find((n) => n.a.role === 'entry');
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
@@ -371,7 +379,7 @@
           const text = (rs.length > 1 ? `#${j + 1} ` : '') + '…' + words.slice(-12);
           ctx.font = 'italic 8px monospace';
           const tw = ctx.measureText(text).width, pad = 4, bw = tw + pad * 2, by = Math.max(14, n.y - rad - 18) + row * 15;
-          const flip = n.x + rad + 10 + bw > w - 6; // not enough room on the right: the bubble goes to the left of the node
+          const flip = n.x + rad + 10 + bw > (w - zoom.x) / zoom.s - 6; // not enough room on the right: the bubble goes to the left of the node
           const bx = flip ? n.x - rad - 10 - bw : n.x + rad + 10;
           ctx.globalAlpha = 0.9; ctx.fillStyle = colors.bg2; ctx.strokeStyle = colors.accent; ctx.lineWidth = 0.8;
           ctx.beginPath(); ctx.roundRect?.(bx, by - 9, bw, 13, 5); if (!ctx.roundRect) ctx.rect(bx, by - 9, bw, 13);
@@ -399,19 +407,60 @@
   }
 
   // ── interaction ──
+  // zoom/pan: a transform over the whole scene (wheel / pinch / buttons to zoom, drag the background to pan); the layout
+  // itself never changes, so zooming out shows the same graph smaller and zooming in is a magnifier.
+  const zoom = { s: 1, x: 0, y: 0 };
+  const ZMIN = 0.4, ZMAX = 4;
+  function zoomAt(f, px, py) {
+    const s2 = Math.min(ZMAX, Math.max(ZMIN, zoom.s * f)), wx = (px - zoom.x) / zoom.s, wy = (py - zoom.y) / zoom.s;
+    zoom.s = s2; zoom.x = px - wx * s2; zoom.y = py - wy * s2;
+  }
+  const zoomReset = () => { zoom.s = 1; zoom.x = 0; zoom.y = 0; };
   const local = (e) => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+  const toWorld = (p) => ({ x: (p.x - zoom.x) / zoom.s, y: (p.y - zoom.y) / zoom.s });
   const hit = (x, y) => { for (let i = nodes.length - 1; i >= 0; i--) { const n = nodes[i]; if (Math.hypot(n.x - x, n.y - y) <= Math.max(R(n), BASE(n.a) * 1.4) + 4) return n; } return null; };
-  function onDown(e) { const p = local(e), n = hit(p.x, p.y); if (!n) { S.selectedAgent = null; return; } hoverId = n.id; gesture = { n, sx: p.x, sy: p.y, moved: false }; canvas.setPointerCapture?.(e.pointerId); }
+  const ptrs = new Map(); // pointerId → screen point, for pinch
+  let pan = null, pinch = null;
+  const pinchState = () => { const [a, b] = [...ptrs.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
+  function onDown(e) {
+    const p = local(e);
+    ptrs.set(e.pointerId, p);
+    canvas.setPointerCapture?.(e.pointerId);
+    if (ptrs.size === 2) { // a second finger: pinch, and drop whatever the first one was doing
+      if (gesture) { gesture.n.pinned = false; gesture = null; }
+      pan = null; hoverId = null;
+      const c = pinchState();
+      pinch = { d: c.d, s: zoom.s, wx: (c.mx - zoom.x) / zoom.s, wy: (c.my - zoom.y) / zoom.s };
+      return;
+    }
+    if (ptrs.size > 2) return;
+    const q = toWorld(p), n = hit(q.x, q.y);
+    if (!n) { pan = { sx: p.x, sy: p.y, zx: zoom.x, zy: zoom.y, moved: false }; return; }
+    hoverId = n.id; gesture = { n, sx: p.x, sy: p.y, moved: false };
+  }
   function onMove(e) {
     const p = local(e);
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, p);
+    if (pinch && ptrs.size >= 2) {
+      const c = pinchState(), s2 = Math.min(ZMAX, Math.max(ZMIN, pinch.s * (c.d / pinch.d)));
+      zoom.s = s2; zoom.x = c.mx - pinch.wx * s2; zoom.y = c.my - pinch.wy * s2; tip = null; return;
+    }
+    if (pan) {
+      if (!pan.moved && Math.hypot(p.x - pan.sx, p.y - pan.sy) < 5) return;
+      pan.moved = true; zoom.x = pan.zx + (p.x - pan.sx); zoom.y = pan.zy + (p.y - pan.sy); tip = null; return;
+    }
+    const q = toWorld(p);
     if (gesture) {
       if (!gesture.moved && Math.hypot(p.x - gesture.sx, p.y - gesture.sy) < 5) return;
-      gesture.moved = true; gesture.n.pinned = true; gesture.n.x = p.x; gesture.n.y = p.y; tip = null; return;
+      gesture.moved = true; gesture.n.pinned = true; gesture.n.x = q.x; gesture.n.y = q.y; tip = null; return;
     }
-    const n = hit(p.x, p.y); hoverId = n?.id ?? null; canvas.style.cursor = n ? 'grab' : 'default';
+    const n = hit(q.x, q.y); hoverId = n?.id ?? null; canvas.style.cursor = n ? 'grab' : 'default';
     tip = n ? { text: `${n.a.name} — ${n.a.description} (${n.a.tools.length} tools)`, x: p.x, y: p.y } : null;
   }
-  function onUp() {
+  function onUp(e) {
+    if (e?.pointerId != null) ptrs.delete(e.pointerId);
+    if (ptrs.size < 2) pinch = null;
+    if (pan) { const moved = pan.moved; pan = null; if (!moved) S.selectedAgent = null; }
     if (!gesture) return;
     const { n, moved } = gesture; gesture = null; hoverId = null;
     if (!moved) { S.selectedAgent = n.a.id; return; }
@@ -419,16 +468,18 @@
     // if it landed close to any of them rather than a hard reset back onto a ring
     n.pinned = false;
   }
+  const onWheel = (e) => { e.preventDefault(); const p = local(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016)), p.x, p.y); };
 
   $effect(() => {
     if (!canvas) return;
     resolveColors();
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    canvas.addEventListener('wheel', onWheel, { passive: false }); // Svelte's onwheel is passive, which cannot stop the page scrolling
+    return () => { cancelAnimationFrame(raf); canvas.removeEventListener('wheel', onWheel); };
   });
 </script>
 
-<svelte:window onpointermove={(e) => gesture && onMove(e)} onpointerup={onUp} />
+<svelte:window onpointermove={(e) => (gesture || pan || pinch) && onMove(e)} onpointerup={onUp} onpointercancel={onUp} />
 
 <div class="pg">
   <div class="bar">
@@ -461,13 +512,18 @@
 
   {#if view === 'graph'}
     <div class="graph" bind:clientWidth={w} bind:clientHeight={h}>
-      <canvas bind:this={canvas} style="width:{w}px;height:{h}px" onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp} onpointerleave={() => { hoverId = null; tip = null; }} aria-label="agent orbits"></canvas>
+      <canvas bind:this={canvas} style="width:{w}px;height:{h}px" onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp} onpointercancel={onUp} onpointerleave={() => { hoverId = null; tip = null; }} aria-label="agent orbits"></canvas>
+      <div class="zoom">
+        <button type="button" aria-label="zoom in" onclick={() => zoomAt(1.4, w / 2, h / 2)}>+</button>
+        <button type="button" aria-label="zoom out" onclick={() => zoomAt(1 / 1.4, w / 2, h / 2)}>−</button>
+        <button type="button" aria-label="reset zoom" title="reset zoom" onclick={zoomReset}>⤢</button>
+      </div>
       {#if tip}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
       <div class="legend">
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">names show on hover or while an agent works · agents settle apart to avoid overlap · shuffle for a new layout · drag to move · click to edit · a steady glow at rest = used a lot in the last 24h</span>
+        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">names show on hover or while an agent works · agents settle apart to avoid overlap · shuffle for a new layout · drag to move · drag the background or pinch / scroll to pan and zoom · click to edit · a steady glow at rest = used a lot in the last 24h</span>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>
@@ -502,6 +558,9 @@
   .srow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--accent-dim); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .graph { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line-2); overflow: hidden; background: radial-gradient(circle at 50% 50%, var(--bg-2) 0%, var(--bg) 100%); }
   canvas { position: absolute; inset: 0; display: block; touch-action: none; }
+  .zoom { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 4; }
+  .zoom button { width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
+  .zoom button:hover { background: var(--bg-4); }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   .lg { vertical-align: middle; }
   .legend { position: absolute; left: 8px; bottom: 6px; display: flex; gap: 12px; font-size: 10px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.07em; }
