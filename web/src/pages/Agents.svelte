@@ -126,7 +126,11 @@
   // drift: every agent wanders a little, on slow overlapping sine "currents" of its own phase — but only within a tolerance
   // of its place: an angle of at most DRIFT_ANGLE of the gap between neighbours (so equal spacing stays recognisable) and a
   // distance of at most DRIFT_DIST. Never a straight line or a pattern you can read; a few seconds per turn.
-  const DRIFT_ANGLE = 0.08, DRIFT_DIST = 0.08;
+  // The longer the line, the less it drifts (about 1/length): an angle that is fine on a short spoke would swing the far end of
+  // a long one by dozens of pixels, so the sideways and in/out swing is also capped at DRIFT_PX whatever the length.
+  const DRIFT_ANGLE = 0.08, DRIFT_DIST = 0.08, DRIFT_PX = 9;
+  const angAmp = (gap, len) => Math.min(DRIFT_ANGLE * gap, DRIFT_PX / Math.max(len, 1)); // radians
+  const distAmp = (len) => Math.min(DRIFT_DIST, DRIFT_PX / Math.max(len, 1)); // fraction of the length
   let drift = $state(true);
   try { drift = localStorage.getItem('prism.graphDrift') !== '0'; } catch {}
   const toggleDrift = () => { drift = !drift; try { localStorage.setItem('prism.graphDrift', drift ? '1' : '0'); } catch {} };
@@ -150,8 +154,8 @@
     const live = drift && !reduced && !force; // wobbling around the places, within the tolerance
     if (layout === 'stars') for (const hb of hubs) {
       // far enough out that the whole cluster clears Atlas, whatever its size
-      const gap = (Math.PI * 2) / Math.max(1, hubs.length), a = hb.ang + rot + (live ? DRIFT_ANGLE * gap * wob(hb, t, 0) : 0);
-      const sc = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))) * (1 + (live ? DRIFT_DIST * 0.6 * wob(hb, t, 1) : 0));
+      const gap = (Math.PI * 2) / Math.max(1, hubs.length), base = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))), len = base * Math.min(ex, ey);
+      const a = hb.ang + rot + (live ? angAmp(gap, len) * wob(hb, t, 0) : 0), sc = base * (1 + (live ? distAmp(len) * wob(hb, t, 1) : 0));
       const tx = cx + Math.cos(a) * sc * ex, ty = cy + Math.sin(a) * sc * ey;
       hb.x += (tx - hb.x) * 0.06; hb.y += (ty - hb.y) * 0.06;
     }
@@ -167,11 +171,11 @@
       }
       const hb = layout === 'stars' ? hubOf(n.orbit) : null;
       if (hb) { // a member stays at a comfortable distance from its hub: clusters read as stars
-        const m = cnt[n.orbit] + 1, want = clusterR(hb) * (1 + (live ? DRIFT_DIST * wob(n, t, 1) : 0)), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m + (live ? DRIFT_ANGLE * ((Math.PI * 2) / m) * wob(n, t, 0) : 0);
+        const m = cnt[n.orbit] + 1, len = clusterR(hb), want = len * (1 + (live ? distAmp(len) * wob(n, t, 1) : 0)), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m + (live ? angAmp((Math.PI * 2) / m, len) * wob(n, t, 0) : 0);
         fx += (hb.x + Math.cos(ang) * want - n.x) * 0.05; fy += (hb.y + Math.sin(ang) * want - n.y) * 0.05;
       } else {
-        const o = orbitOf(n.orbit), k = o ? o.k : 0.6, m = (cnt[n.orbit] ?? 0) + 1, ang = offOf(n.orbit || '') + ((n.si || 0) * Math.PI * 2) / m + (live ? DRIFT_ANGLE * ((Math.PI * 2) / m) * wob(n, t, 0) : 0);
-        const kk = k * (1 + (live ? DRIFT_DIST * 0.5 * wob(n, t, 1) : 0));
+        const o = orbitOf(n.orbit), k = o ? o.k : 0.6, m = (cnt[n.orbit] ?? 0) + 1, len = k * Math.min(ex, ey), ang = offOf(n.orbit || '') + ((n.si || 0) * Math.PI * 2) / m + (live ? angAmp((Math.PI * 2) / m, len) * wob(n, t, 0) : 0);
+        const kk = k * (1 + (live ? distAmp(len) * wob(n, t, 1) : 0));
         fx += (cx + Math.cos(ang) * kk * ex - n.x) * (RADIAL + 0.01); fy += (cy + Math.sin(ang) * kk * ey - n.y) * (RADIAL + 0.01);
       }
       if (layout === 'stars') for (const hb of hubs) { // keep clear of the hubs of other groups
@@ -490,7 +494,7 @@
     {#if view === 'graph'}
       <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }]} />
       <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
-      <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a slow wobble of the agents around their places — equal spacing stays within about 8% (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
+      <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a slow wobble of the agents around their places — within about 8% of the spacing, and less on longer lines (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
     {/if}
     <span class="sm dim">{agents.length} agents · {activeNames.size} active</span>
     <Button size="sm" onclick={newAgent}><Icon name="plus" size={11} /> New agent</Button>
