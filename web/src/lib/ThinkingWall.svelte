@@ -55,7 +55,9 @@
 {/if}
 
 <style>
-  .wall { position: fixed; inset: 0; z-index: 150; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%); }
+  .wall { position: fixed; inset: 0; z-index: 150; display: flex; flex-direction: column; gap: 8px;
+    /* keep clear of the clock / notch / home indicator (iOS): the safe-area insets, plus the floor App.svelte sets for a plain Safari tab */
+    padding: calc(10px + max(env(safe-area-inset-top), var(--ios-safari-top-floor, 0px))) calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%); }
   .top { display: flex; align-items: center; gap: 12px; flex: none; }
   .ttl { color: var(--accent); letter-spacing: 0.25em; font-size: 12px; text-shadow: var(--glow-accent); display: inline-flex; gap: 8px; align-items: center; }
   .x { background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 2px 9px; }

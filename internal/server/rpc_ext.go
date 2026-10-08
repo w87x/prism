@@ -800,6 +800,7 @@ func (s *Server) registerOnboarding() {
 		onboarding.Constraints
 		Model    string `json:"model"`
 		PlanWith string `json:"plan_with"` // "" = plan on this machine; else a consult provider (codex, chatgpt, …) plans the team
+		AutoSave bool   `json:"autosave"`  // create each agent as soon as its draft is written, without waiting for the review
 	}) (map[string]any, error) {
 		ps, _ := a.Profiles.List(ctx)
 		var names []string
@@ -810,10 +811,25 @@ func (s *Server) registerOnboarding() {
 		st := s.startOnboardingJob(job)
 		go func() {
 			bg := context.Background()
+			saved := map[string]bool{} // names created on the spot (autosave); progress events arrive one at a time
 			drafts, used, err := onboarding.Propose(bg, a.LLM, a.Tools, names, r.Hints, r.Constraints, r.Model, func(p onboarding.Progress) {
+				if r.AutoSave && p.Draft != nil && !p.Draft.Exists {
+					if n, aerr := onboarding.Apply(bg, a.Profiles, []onboarding.Draft{*p.Draft}, false); aerr == nil && n > 0 {
+						d := *p.Draft
+						d.Exists = true
+						p.Draft = &d
+						saved[strings.ToLower(d.Name)] = true
+						p.Note = "Created " + d.Name
+					}
+				}
 				st.progress(p)
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
 			}, planOptions(s, st, r.Model, job, r.PlanWith)...)
+			for i := range drafts {
+				if saved[strings.ToLower(drafts[i].Name)] {
+					drafts[i].Exists = true
+				}
+			}
 			note := ""
 			if err != nil {
 				note = err.Error()
@@ -826,7 +842,7 @@ func (s *Server) registerOnboarding() {
 			a.Emit("onboarding.progress", ev)
 			// the window may have been closed while the model worked: say it is ready
 			a.Engine.Notify(bg, agent.Notice{Agent: "Onboarding", Level: "info",
-				Text: fmt.Sprintf("Your team draft is ready: %d agents. Open Settings → Run onboarding again to review and create them.", len(drafts))})
+				Text: map[bool]string{true: fmt.Sprintf("Your team is ready: %d agents were created as they were written. Open the Agents page to look them over.", len(saved)), false: fmt.Sprintf("Your team draft is ready: %d agents. Open Settings → Run onboarding again to review and create them.", len(drafts))}[r.AutoSave && len(saved) > 0]})
 		}()
 		return map[string]any{"job": job}, nil
 	})

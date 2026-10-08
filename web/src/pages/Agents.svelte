@@ -14,6 +14,7 @@
   import Icon from '../lib/ui/Icon.svelte';
   import Input from '../lib/ui/Input.svelte';
   import Segmented from '../lib/ui/Segmented.svelte';
+  import FullscreenToggle from '../lib/FullscreenToggle.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
@@ -22,6 +23,7 @@
   let filter = $state('');
   let w = $state(700), h = $state(480);
   let canvas = $state();
+  let graphEl = $state();
   let tip = $state(null); // {text, x, y}
 
   const agents = $derived(S.agents);
@@ -55,8 +57,10 @@
   let nodes = []; // {id, a, x, y, vx, vy, orbit, pinned}
   let orbits = []; // {key, label, k (0..1 of the available radius) — the group's target distance from Atlas}
   let hubs = []; // stars layout: {key, label, x, y, ang, k, n (members)} — one virtual node per group
-  let layout = $state('stars'); // 'stars' | 'rings'
-  try { layout = localStorage.getItem('prism.graphLayout') === 'rings' ? 'rings' : 'stars'; } catch {}
+  let layout = $state('stars'); // 'stars' | 'rings' | 'board' (stars placement, drawn as a printed circuit board)
+  try { const l = localStorage.getItem('prism.graphLayout'); layout = l === 'rings' || l === 'board' ? l : 'stars'; } catch {}
+  const hubbed = () => layout !== 'rings'; // groups have hubs (stars and board)
+  const board = () => layout === 'board';
   const setLayout = (v) => { layout = v; try { localStorage.setItem('prism.graphLayout', v); } catch {} };
   let rot = 0; // stars turn as a whole when shuffled
   let hoverId = null, gesture = null, colors = {};
@@ -152,7 +156,7 @@
     if (atlas && !atlas.pinned) { atlas.x = cx; atlas.y = cy; atlas.vx = 0; atlas.vy = 0; }
     if (reduced && !force) return; // prefers-reduced-motion: no continuous simulation (a shuffle settles in one go, see shuffle())
     const live = drift && !reduced && !force; // wobbling around the places, within the tolerance
-    if (layout === 'stars') for (const hb of hubs) {
+    if (hubbed()) for (const hb of hubs) {
       // far enough out that the whole cluster clears Atlas, whatever its size
       const gap = (Math.PI * 2) / Math.max(1, hubs.length), base = Math.min(0.92, Math.max(hb.k, (clusterR(hb) + 80) / Math.min(ex, ey))), len = base * Math.min(ex, ey);
       const a = hb.ang + rot + (live ? angAmp(gap, len) * wob(hb, t, 0) : 0), sc = base * (1 + (live ? distAmp(len) * wob(hb, t, 1) : 0));
@@ -165,11 +169,11 @@
       for (const m of nodes) {
         if (m === n) continue;
         let dx = n.x - m.x, dy = n.y - m.y, d = Math.hypot(dx, dy);
-        const minD = R(n) + R(m) + (layout === 'stars' ? 34 : 22); // stars: room for the names too
+        const minD = R(n) + R(m) + (hubbed() ? 34 : 22); // stars: room for the names too
         if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
         if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
       }
-      const hb = layout === 'stars' ? hubOf(n.orbit) : null;
+      const hb = hubbed() ? hubOf(n.orbit) : null;
       if (hb) { // a member stays at a comfortable distance from its hub: clusters read as stars
         const m = cnt[n.orbit] + 1, len = clusterR(hb), want = len * (1 + (live ? distAmp(len) * wob(n, t, 1) : 0)), ang = Math.atan2(cy - hb.y, cx - hb.x) + Math.PI / m + (n.si * Math.PI * 2) / m + (live ? angAmp((Math.PI * 2) / m, len) * wob(n, t, 0) : 0);
         fx += (hb.x + Math.cos(ang) * want - n.x) * 0.05; fy += (hb.y + Math.sin(ang) * want - n.y) * 0.05;
@@ -178,7 +182,7 @@
         const kk = k * (1 + (live ? distAmp(len) * wob(n, t, 1) : 0));
         fx += (cx + Math.cos(ang) * kk * ex - n.x) * (RADIAL + 0.01); fy += (cy + Math.sin(ang) * kk * ey - n.y) * (RADIAL + 0.01);
       }
-      if (layout === 'stars') for (const hb of hubs) { // keep clear of the hubs of other groups
+      if (hubbed()) for (const hb of hubs) { // keep clear of the hubs of other groups
         if (hb.key === n.orbit) continue;
         const dx = n.x - hb.x, dy = n.y - hb.y, d = Math.hypot(dx, dy) || 0.0001, minD = R(n) + 30;
         if (d < minD) { const f = ((minD - d) / minD) * REPEL; fx += (dx / d) * f; fy += (dy / d) * f; }
@@ -194,7 +198,7 @@
   // layout — so the result still respects the bands and never overlaps.
   function shuffle() {
     const { cx, cy, ex, ey } = spec();
-    if (layout === 'stars') { // the stars swap places and turn as a whole
+    if (hubbed()) { // the stars swap places and turn as a whole
       const angs = hubs.map((x) => x.ang);
       for (let i = angs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [angs[i], angs[j]] = [angs[j], angs[i]]; }
       hubs.forEach((x, i) => (x.ang = angs[i]));
@@ -220,6 +224,20 @@
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(qx, qy, b.x, b.y);
     return { qx, qy };
   };
+  // the other way round from tracePts (a 45° run first, then straight), so a colleague link beside a spoke does not lie on it
+  const traceAlt = (a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y, adx = Math.abs(dx), ady = Math.abs(dy);
+    const m = adx >= ady ? { x: a.x + Math.sign(dx) * ady, y: b.y } : { x: b.x, y: a.y + Math.sign(dy) * adx };
+    return [a, m, b];
+  };
+  // a link between two agents (asks, blocked-on-you): a curve, or on the board a routed trace; q carries what linkAt needs
+  function linkPath(ctx, a, b) {
+    if (!board()) return arcPath(ctx, a, b);
+    const pts = traceAlt(a, b);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineJoin = 'round';
+    return { pts };
+  }
+  const linkAt = (a, q, b, u) => (q.pts ? along(q.pts, u) : bez(a, q, b, u));
   const bez = (a, q, b, u) => ({ x: (1 - u) * (1 - u) * a.x + 2 * (1 - u) * u * q.qx + u * u * b.x, y: (1 - u) * (1 - u) * a.y + 2 * (1 - u) * u * q.qy + u * u * b.y });
 
   // the group's hub in the stars layout: a small diamond with the group's name; it glows while a member works
@@ -227,20 +245,55 @@
     for (const hb of hubs) {
       const busy = nodes.some((n) => n.orbit === hb.key && activeNames.has(n.a.name));
       const r = 6 + (busy ? 1.5 * Math.sin(t / 260) : 0);
-      ctx.beginPath(); ctx.moveTo(hb.x, hb.y - r); ctx.lineTo(hb.x + r, hb.y); ctx.lineTo(hb.x, hb.y + r); ctx.lineTo(hb.x - r, hb.y); ctx.closePath();
+      ctx.beginPath();
+      if (board()) ctx.arc(hb.x, hb.y, r, 0, Math.PI * 2); // a via: a ring pad with a hole
+      else { ctx.moveTo(hb.x, hb.y - r); ctx.lineTo(hb.x + r, hb.y); ctx.lineTo(hb.x, hb.y + r); ctx.lineTo(hb.x - r, hb.y); ctx.closePath(); }
       ctx.fillStyle = colors.bg2; ctx.strokeStyle = busy ? colors.fg : hb.key === 'staff' ? colors.maint : colors.dim; ctx.lineWidth = 1.2;
       if (busy) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 8; }
       ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
+      if (board()) { ctx.beginPath(); ctx.arc(hb.x, hb.y, r * 0.38, 0, Math.PI * 2); ctx.fillStyle = colors.bg; ctx.fill(); ctx.stroke(); }
       const shown = busy || nodes.some((n) => n.orbit === hb.key && (n.lab || 0) > 0.5 && n.a.role !== 'entry');
       hb.lab = (hb.lab || 0) + ((shown ? 1 : 0) - (hb.lab || 0)) * 0.14;
       if (!compact() && hb.lab > 0.03) { ctx.globalAlpha = hb.lab; ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.textAlign = 'center'; ctx.fillText(hb.label.toUpperCase(), hb.x, hb.y - r - 5); ctx.globalAlpha = 1; }
     }
   }
   // the points an Atlas → agent message travels through: via the group's hub in the stars layout
+  // PCB traces run straight and then at 45°, like a routed board: a horizontal (or vertical) run, then one diagonal into the end
+  const tracePts = (a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y, adx = Math.abs(dx), ady = Math.abs(dy);
+    const m = adx >= ady ? { x: a.x + Math.sign(dx) * (adx - ady), y: a.y } : { x: a.x, y: a.y + Math.sign(dy) * (ady - adx) };
+    return [a, m, b];
+  };
   const routeTo = (atlas, n) => {
-    const hb = layout === 'stars' ? hubOf(n.orbit) : null;
+    const hb = hubbed() ? hubOf(n.orbit) : null;
+    if (board()) return hb ? [atlas, ...tracePts(atlas, hb).slice(1, -1), hb, ...tracePts(hb, n).slice(1, -1), n] : [atlas, ...tracePts(atlas, n).slice(1, -1), n];
     return hb ? [atlas, hb, n] : [atlas, n];
   };
+  // the bare board: a dotted grid, the board edge and four mounting holes (drawn in scene coordinates, so it pans and zooms)
+  function drawBoard(ctx) {
+    const step = zoom.s < 0.7 ? 48 : 24, x0 = -zoom.x / zoom.s, y0 = -zoom.y / zoom.s, x1 = (w - zoom.x) / zoom.s, y1 = (h - zoom.y) / zoom.s;
+    ctx.fillStyle = colors.line; ctx.globalAlpha = 0.55;
+    for (let x = Math.floor(x0 / step) * step; x <= x1; x += step) for (let y = Math.floor(y0 / step) * step; y <= y1; y += step) ctx.fillRect(x - 0.7, y - 0.7, 1.4, 1.4);
+    ctx.globalAlpha = 1; ctx.strokeStyle = colors.dim; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(5, 5, w - 10, h - 10, 10) : ctx.rect(5, 5, w - 10, h - 10); ctx.stroke();
+    for (const [hx, hy] of [[20, 20], [w - 20, 20], [20, h - 20], [w - 20, h - 20]]) {
+      ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2); ctx.strokeStyle = colors.dim; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(hx, hy, 3.5, 0, Math.PI * 2); ctx.fillStyle = colors.bg; ctx.fill(); ctx.stroke();
+    }
+  }
+  // a chip body: a rounded square with pins on every side (the board layout) in place of a round node
+  const bodyPath = (ctx, r) => {
+    ctx.beginPath();
+    if (board()) { if (ctx.roundRect) ctx.roundRect(-r, -r, 2 * r, 2 * r, r * 0.2); else ctx.rect(-r, -r, 2 * r, 2 * r); } else ctx.arc(0, 0, r, 0, Math.PI * 2);
+  };
+  function drawPins(ctx, r) {
+    const n = r > 14 ? 4 : 3, gap = (2 * r) / (n + 1);
+    for (let i = 1; i <= n; i++) {
+      const o = -r + i * gap;
+      ctx.fillRect(o - 1, -r - 3.5, 2, 3.5); ctx.fillRect(o - 1, r, 2, 3.5); ctx.fillRect(-r - 3.5, o - 1, 3.5, 2); ctx.fillRect(r, o - 1, 3.5, 2);
+    }
+    ctx.beginPath(); ctx.arc(-r * 0.62, -r * 0.62, Math.max(1.2, r * 0.1), 0, Math.PI * 2); ctx.fill(); // pin-1 mark
+  }
   const along = (pts, u) => {
     const lens = [];
     let total = 0;
@@ -261,19 +314,22 @@
     ctx.clearRect(0, 0, w, h);
     ctx.setTransform(dpr * zoom.s, 0, 0, dpr * zoom.s, dpr * zoom.x, dpr * zoom.y);
     const atlas = nodes.find((n) => n.a.role === 'entry');
+    if (board()) drawBoard(ctx);
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
     // spokes from Atlas; live ones (delegation in progress) run bright and dashed. In the stars layout they go
     // Atlas → group hub → member instead, and the trunk to a hub lights up when any member is being delegated to.
     const isLive = (n) => runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
     const stroke = (x1, y1, x2, y2, live, heat, tone) => {
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-      ctx.lineWidth = live ? 2 : 1 + heat * 0.8; ctx.strokeStyle = live ? colors.fg : tone;
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      if (board()) { const [, m] = tracePts({ x: x1, y: y1 }, { x: x2, y: y2 }); ctx.lineTo(m.x, m.y); }
+      ctx.lineTo(x2, y2);
+      ctx.lineJoin = 'round'; ctx.lineWidth = live ? 2.4 : (board() ? 1.6 : 1) + heat * 0.8; ctx.strokeStyle = live ? colors.fg : tone;
       ctx.globalAlpha = live ? 1 : 0.4 + heat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
       ctx.stroke(); ctx.shadowBlur = 0;
     };
-    if (atlas && layout === 'stars') {
+    if (atlas && hubbed()) {
       for (const hb of hubs) {
         const members = nodes.filter((n) => n.orbit === hb.key);
         const live = members.some(isLive), heat = Math.min(1, members.reduce((a, n) => a + (n.a.role === 'maint' ? 0 : heatOf(n.a.name)), 0) / 2);
@@ -286,22 +342,22 @@
       // "how much does Atlas actually route here" instead of every spoke looking equally important.
       stroke(atlas.x, atlas.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line);
     }
-    if (layout === 'stars') drawHubs(ctx, t);
+    if (hubbed()) drawHubs(ctx, t);
     ctx.setLineDash([]); ctx.globalAlpha = 1;
 
     // agents blocked on the user: steady red arc to Atlas
     for (const x of S.asks) { const n = nodeByName(x.agent); if (!n || !atlas || n === atlas) continue;
-      arcPath(ctx, n, atlas); ctx.strokeStyle = colors.err; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t / 220); ctx.shadowColor = colors.err; ctx.shadowBlur = 5; ctx.stroke(); ctx.shadowBlur = 0; ctx.globalAlpha = 1; }
+      linkPath(ctx, n, atlas); ctx.strokeStyle = colors.err; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t / 220); ctx.shadowColor = colors.err; ctx.shadowBlur = 5; ctx.stroke(); ctx.shadowBlur = 0; ctx.globalAlpha = 1; }
 
     // requests between colleagues: amber arcs, dot travelling toward the one asked; lingering ones fade
     const asks = [];
     for (const r of runs) { if (r.kind !== 'ask' || r.done || !byRun[r.parent_run]) continue; const a = nodeByName(byRun[r.parent_run]), b = nodeByName(r.agent); if (a && b) asks.push({ a, b, live: true, ok: true }); }
     for (const tr of S.askTrail) { const a = nodeByName(tr.from), b = nodeByName(tr.to); if (a && b) asks.push({ a, b, live: false, ok: tr.ok }); }
     for (const k of asks) {
-      const q = arcPath(ctx, k.a, k.b);
+      const q = linkPath(ctx, k.a, k.b);
       ctx.strokeStyle = k.live || k.ok ? colors.attn : colors.err; ctx.lineWidth = 1.6; ctx.setLineDash(k.live ? [2, 5] : []); ctx.lineDashOffset = -t / 50; ctx.globalAlpha = k.live ? 0.95 : 0.6;
       ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 4; ctx.stroke(); ctx.shadowBlur = 0; ctx.setLineDash([]); ctx.globalAlpha = 1;
-      if (k.live) { const p = bez(k.a, q, k.b, (t / 1500) % 1); ctx.fillStyle = colors.attn; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill(); }
+      if (k.live) { const p = linkAt(k.a, q, k.b, (t / 1500) % 1); ctx.fillStyle = colors.attn; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill(); }
     }
 
     // the freshest live run of each agent, for the thinking overlay
@@ -319,8 +375,8 @@
       n.k = (n.k || 1) + (goal - (n.k || 1)) * 0.2;
       const r = R(n);
       ctx.save(); ctx.translate(n.x, n.y); ctx.globalAlpha = match(a) ? 1 : 0.2;
-      if (selected || hovered) { ctx.beginPath(); ctx.arc(0, 0, r + 5, 0, Math.PI * 2); ctx.strokeStyle = col; ctx.lineWidth = 0.6; ctx.globalAlpha *= 0.55; ctx.stroke(); ctx.globalAlpha = match(a) ? 1 : 0.2; }
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+      if (selected || hovered) { bodyPath(ctx, r + 5); ctx.strokeStyle = col; ctx.lineWidth = 0.6; ctx.globalAlpha *= 0.55; ctx.stroke(); ctx.globalAlpha = match(a) ? 1 : 0.2; }
+      bodyPath(ctx, r);
       ctx.fillStyle = active ? `color-mix(in srgb, ${col} ${20 + 10 * Math.sin(t / 160)}%, ${colors.bg})`
         : selected || hovered ? colors.bg4
         : heat > 0.08 ? `color-mix(in srgb, ${col} ${Math.round(heat * 16)}%, ${colors.bg2})`
@@ -329,6 +385,7 @@
       else if (heat > 0.15) { ctx.shadowColor = col; ctx.shadowBlur = heat * 7; } // a quiet, steady glow — not pulsing like "active" — for an agent that's been busy lately but isn't this instant
       ctx.fill(); ctx.shadowBlur = 0;
       ctx.strokeStyle = blocked ? colors.err : col; ctx.lineWidth = blocked ? 1.6 + 1.4 * (0.5 + 0.5 * Math.sin(t / 220)) : selected ? 2.6 : 1.6; ctx.stroke();
+      if (board()) { ctx.fillStyle = blocked ? colors.err : col; drawPins(ctx, r); }
       ctx.fillStyle = col; ctx.font = `900 ${r * 0.9}px FA`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(iconOf(a.name), 0, 1);
       if (blocked) { ctx.fillStyle = colors.err; ctx.font = '800 13px monospace'; ctx.fillText('!', 0, -r - 8); }
       ctx.textBaseline = 'alphabetic';
@@ -492,7 +549,7 @@
     <div class="f"><Input bind:value={filter} size="sm" placeholder="filter agents / traits…" /></div>
     <span class="grow"></span>
     {#if view === 'graph'}
-      <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }]} />
+      <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }, { value: 'board', label: 'Board' }]} />
       <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
       <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a slow wobble of the agents around their places — within about 8% of the spacing, and less on longer lines (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
     {/if}
@@ -516,12 +573,13 @@
   {/if}
 
   {#if view === 'graph'}
-    <div class="graph" bind:clientWidth={w} bind:clientHeight={h}>
+    <div class="graph" bind:this={graphEl} bind:clientWidth={w} bind:clientHeight={h}>
       <canvas bind:this={canvas} style="width:{w}px;height:{h}px" onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp} onpointercancel={onUp} onpointerleave={() => { hoverId = null; tip = null; }} aria-label="agent orbits"></canvas>
       <div class="zoom">
         <button type="button" aria-label="zoom in" onclick={() => zoomAt(1.4, w / 2, h / 2)}>+</button>
         <button type="button" aria-label="zoom out" onclick={() => zoomAt(1 / 1.4, w / 2, h / 2)}>−</button>
         <button type="button" aria-label="reset zoom" title="reset zoom" onclick={zoomReset}>⤢</button>
+        <FullscreenToggle target={() => graphEl} title="Full screen" class="zfs" />
       </div>
       {#if tip}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
       <div class="legend">
@@ -566,6 +624,7 @@
   .zoom { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 4; }
   .zoom button { width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
   .zoom button:hover { background: var(--bg-4); }
+  .zoom :global(.zfs) { width: 32px; height: 32px; }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   .lg { vertical-align: middle; }
   .legend { position: absolute; left: 8px; bottom: 6px; display: flex; gap: 12px; font-size: 10px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.07em; }

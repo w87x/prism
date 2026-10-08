@@ -381,7 +381,7 @@
   {#snippet footer()}<Button variant="ghost" onclick={() => (cOpen = false)}>Cancel</Button><Button variant="primary" disabled={!nc?.name?.trim() || !nc?.prompt?.trim()} onclick={saveCron}>Save</Button>{/snippet}
 </Modal>
 
-<Modal open={!!readB} title={readB?.title || ''} width={640} onclose={() => (readB = null)}>
+<Modal open={!!readB} title={readB?.title || ''} width={640} expandable onclose={() => (readB = null)}>
   {#if readB}
     <div class="sm mute">{readB.agent} · {stamp(readB.created_at)} · P{readB.importance}</div>
     <div class="pre">{readB.body}</div>

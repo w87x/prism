@@ -3,6 +3,8 @@
   // mark read and dismiss. The queue is fixed when it opens (so acting on one does not shuffle the rest), and briefings
   // that arrive while it is open are appended and shown as they come.
   import QuestionForm from './QuestionForm.svelte';
+  import FullscreenToggle from './FullscreenToggle.svelte';
+  let rdEl = $state();
   import { S, call, listen, toast, ago, stamp } from './store.svelte.js';
   import RichMessage from './rich/RichMessage.svelte';
   import Button from './ui/Button.svelte';
@@ -94,7 +96,7 @@
 <svelte:window onkeydown={key} />
 
 {#if S.reader.open}
-  <div class="rd" role="dialog" aria-label="Briefing reader">
+  <div class="rd" bind:this={rdEl} role="dialog" aria-label="Briefing reader">
     <header>
       <button type="button" class="x" aria-label="close" onclick={close}>✕</button>
       <span class="pos">{queue.length ? pos + 1 : 0} / {queue.length}</span>
@@ -103,6 +105,7 @@
         <button type="button" class:on={mode === 'all'} onclick={() => switchMode('all')}>All</button>
       </div>
       <span class="grow"></span>
+      <FullscreenToggle target={() => rdEl} class="sm" />
       {#if fresh}<button type="button" class="pill" onclick={() => { pos = queue.length - 1; fresh = 0; seen(); }}>{fresh} new ›</button>{/if}
     </header>
 
@@ -147,7 +150,7 @@
 {/if}
 
 <style>
-  .rd { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; background: var(--bg); padding: env(safe-area-inset-top) max(0px, env(safe-area-inset-right)) 0 max(0px, env(safe-area-inset-left)); }
+  .rd { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; background: var(--bg); padding: max(env(safe-area-inset-top), var(--ios-safari-top-floor, 0px)) max(0px, env(safe-area-inset-right)) 0 max(0px, env(safe-area-inset-left)); }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); flex: none; }
   .x { background: none; border: 0; color: var(--fg-dim); font-size: 20px; min-width: 44px; min-height: 44px; }
   .pos { color: var(--fg-dim); font-variant-numeric: tabular-nums; font-size: 15px; }

@@ -1,5 +1,7 @@
 <script>
-  let { open = $bindable(false), title = '', width = 560, onclose, children, footer, tone = '' } = $props();
+  import FullscreenToggle from '../FullscreenToggle.svelte';
+  let { open = $bindable(false), title = '', width = 560, onclose, children, footer, tone = '', expandable = false } = $props();
+  let dlg = $state();
   function close() { open = false; onclose?.(); }
 </script>
 
@@ -7,10 +9,10 @@
 
 {#if open}
   <div class="ov" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && close()}>
-    <div class="dlg {tone}" style="width:min({width}px,96vw)" role="dialog" aria-modal="true" aria-label={title}>
+    <div class="dlg {tone}" bind:this={dlg} style="width:min({width}px,96vw)" role="dialog" aria-modal="true" aria-label={title}>
       <header>
         <span class="t">{title}</span>
-        <button type="button" class="x" onclick={close} aria-label="close">×</button>
+        <span class="hr">{#if expandable}<FullscreenToggle target={() => dlg} class="sm" />{/if}<button type="button" class="x" onclick={close} aria-label="close">×</button></span>
       </header>
       <div class="bd">{@render children?.()}</div>
       {#if footer}<footer>{@render footer()}</footer>{/if}
@@ -32,6 +34,8 @@
   .dlg.err footer :global(.btn.ghost) { color: #9a9a9a; }
   .dlg.err footer :global(.btn.ghost:hover:not(:disabled)) { color: #d4d4d4; background: rgba(255, 255, 255, 0.07); border-color: #6a6a6a; box-shadow: none; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; border-bottom: 1px solid var(--c); background: var(--bg-2); flex: none; }
+  .hr { display: inline-flex; align-items: center; gap: 8px; }
+  .dlg:global(.is-fs) { display: flex; height: 100%; }
   .t { text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--fs-sm); font-weight: 700; color: var(--fg-hi); }
   .x { background: none; border: 0; font-size: 18px; line-height: 1; color: var(--fg-mute); padding: 0 2px; } .x:hover { color: var(--err); }
   .bd { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }

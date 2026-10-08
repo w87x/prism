@@ -8,6 +8,8 @@
   import Button from '../lib/ui/Button.svelte';
   import Icon from '../lib/ui/Icon.svelte';
   import Empty from '../lib/ui/Empty.svelte';
+  import FullscreenToggle from '../lib/FullscreenToggle.svelte';
+  let pgEl = $state();
 
   const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
   let days = $state(lsGet('prism.usageDays', 7));
@@ -50,13 +52,14 @@
   });
 </script>
 
-<div class="pg usage">
+<div class="pg usage" bind:this={pgEl}>
   <div class="filters">
     <Segmented size="sm" value={days} options={[{ value: 1, label: 'last 24 h' }, { value: 7, label: '7 days' }, { value: 30, label: '30 days' }]} onchange={(v) => (days = v)} />
     <Switch bind:checked={tables} label="tables instead of charts" />
     <span class="grow"></span>
     {#if t?.recording_since}<span class="sm mute">recording since {new Date(t.recording_since).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>{/if}
     <Button size="sm" variant="ghost" onclick={load} loading={busy} title="Refresh"><Icon name="refresh" size={11} /></Button>
+    <FullscreenToggle target={() => pgEl} class="sm" />
   </div>
 
   <div class="body scroll">
@@ -150,6 +153,7 @@
 </div>
 
 <style>
+  .usage:global(.is-fs) { display: flex; flex-direction: column; padding: 12px; box-sizing: border-box; }
   /* categorical slots 1–3, dark-mode steps (validated ΔE ≥ 8 for colour-vision deficiency); errors reuse the status red */
   .usage { --c-in: #3987e5; --c-out: #d95926; --c-ok: #199e70; --c-bad: var(--err); }
   .pg { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
