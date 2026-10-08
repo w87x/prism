@@ -15,6 +15,7 @@
   import Input from '../lib/ui/Input.svelte';
   import Segmented from '../lib/ui/Segmented.svelte';
   import FullscreenToggle from '../lib/FullscreenToggle.svelte';
+  import Graph3D from '../lib/Graph3D.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Empty from '../lib/ui/Empty.svelte';
@@ -29,6 +30,13 @@
   const agents = $derived(S.agents);
   const runs = $derived(activeRuns());
   const activeNames = $derived(new Set(runs.map((r) => r.agent)));
+  // for the 3D view: agents Atlas is delegating to right now, and the ones blocked on the user
+  const liveNames = $derived.by(() => {
+    const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
+    return new Set(runs.filter((r) => (r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)).map((r) => r.agent));
+  });
+  const blockedNames = $derived(new Set(S.asks.map((x) => x.agent)));
+  let shuffleN = $state(0);
   const match = (a) => !filter || `${a.name} ${a.group} ${a.description} ${(a.traits || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase());
   function newAgent() { S.selectedAgent = 'new'; }
 
@@ -58,7 +66,7 @@
   let orbits = []; // {key, label, k (0..1 of the available radius) — the group's target distance from Atlas}
   let hubs = []; // stars layout: {key, label, x, y, ang, k, n (members)} — one virtual node per group
   let layout = $state('stars'); // 'stars' | 'rings' | 'board' (stars placement, drawn as a printed circuit board)
-  try { const l = localStorage.getItem('prism.graphLayout'); layout = l === 'rings' || l === 'board' ? l : 'stars'; } catch {}
+  try { const l = localStorage.getItem('prism.graphLayout'); layout = l === 'rings' || l === 'board' || l === '3d' ? l : 'stars'; } catch {}
   const hubbed = () => layout !== 'rings'; // groups have hubs (stars and board)
   const board = () => layout === 'board';
   const setLayout = (v) => { layout = v; try { localStorage.setItem('prism.graphLayout', v); } catch {} };
@@ -549,8 +557,8 @@
     <div class="f"><Input bind:value={filter} size="sm" placeholder="filter agents / traits…" /></div>
     <span class="grow"></span>
     {#if view === 'graph'}
-      <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }, { value: 'board', label: 'Board' }]} />
-      <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={shuffle}><Icon name="shuffle" size={11} /> Shuffle</Button>
+      <Segmented size="sm" bind:value={layout} onchange={setLayout} options={[{ value: 'stars', label: 'Stars' }, { value: 'rings', label: 'Rings' }, { value: 'board', label: 'Board' }, { value: '3d', label: '3D' }]} />
+      <Button size="sm" title="a fresh arrangement: groups swap bands and every agent is thrown to a new spot, then settles" onclick={() => (layout === '3d' ? shuffleN++ : shuffle())}><Icon name="shuffle" size={11} /> Shuffle</Button>
       <Button size="sm" variant={drift ? 'accent' : 'ghost'} title="a slow wobble of the agents around their places — within about 8% of the spacing, and less on longer lines (off when your system asks for reduced motion)" onclick={toggleDrift}>Drift {drift ? 'on' : 'off'}</Button>
     {/if}
     <span class="sm dim">{agents.length} agents · {activeNames.size} active</span>
@@ -574,14 +582,20 @@
 
   {#if view === 'graph'}
     <div class="graph" bind:this={graphEl} bind:clientWidth={w} bind:clientHeight={h}>
+      {#if layout === '3d'}
+        <Graph3D {agents} {activeNames} {liveNames} {blockedNames} {heatOf} {match} {iconOf} {drift} nonce={shuffleN} selectedId={S.selectedAgent} onselect={(id) => (S.selectedAgent = id)} />
+      {:else}
       <canvas bind:this={canvas} style="width:{w}px;height:{h}px" onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp} onpointercancel={onUp} onpointerleave={() => { hoverId = null; tip = null; }} aria-label="agent orbits"></canvas>
+      {/if}
       <div class="zoom">
+        {#if layout !== '3d'}
         <button type="button" aria-label="zoom in" onclick={() => zoomAt(1.4, w / 2, h / 2)}>+</button>
         <button type="button" aria-label="zoom out" onclick={() => zoomAt(1 / 1.4, w / 2, h / 2)}>−</button>
         <button type="button" aria-label="reset zoom" title="reset zoom" onclick={zoomReset}>⤢</button>
+        {/if}
         <FullscreenToggle target={() => graphEl} title="Full screen" class="zfs" />
       </div>
-      {#if tip}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
+      {#if tip && layout !== '3d'}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
       <div class="legend">
         <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
         <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
