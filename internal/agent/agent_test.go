@@ -2503,3 +2503,32 @@ func TestFinishingARequesterClosesItsWaitingChildren(t *testing.T) {
 		t.Fatalf("child should be closed once its requester finished, got %s", got.Status)
 	}
 }
+
+func TestRestartCancelsRunningSubtasksWhoseRequesterIsGone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	mk := func(parent *int64, from, status string) tasks.Task {
+		x, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: from, ToAgent: "Atlas", Input: "x", ParentID: parent}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.e.DB.Exec(ctx, `UPDATE tasks SET status=$2 WHERE id=$1`, x.ID, status); err != nil {
+			t.Fatal(err)
+		}
+		return x
+	}
+	done := mk(nil, "user", "done")
+	live := mk(nil, "user", "running")
+	dp, lp := done.ID, live.ID
+	orphan := mk(&dp, "agent", "running") // its requester already finished
+	child := mk(&lp, "agent", "running")  // its requester was running too: left to the usual requeue
+	top := mk(nil, "user", "running")     // a top-level task is never an orphan
+	if n, err := h.e.Tasks.CancelOrphanedRunning(ctx); err != nil || n != 1 {
+		t.Fatalf("cancelled %d, %v; want exactly the orphan", n, err)
+	}
+	for id, want := range map[int64]string{orphan.ID: tasks.Cancelled, child.ID: tasks.Running, top.ID: tasks.Running} {
+		if got, _ := h.e.Tasks.Get(ctx, id); got.Status != want {
+			t.Errorf("task %d is %s, want %s", id, got.Status, want)
+		}
+	}
+}

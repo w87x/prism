@@ -348,6 +348,16 @@ func (s *Store) RequeueRunning(ctx context.Context) (int, error) {
 	return int(tag.RowsAffected()), err
 }
 
+// CancelOrphanedRunning runs at start-up, before RequeueRunning: a sub-task that was running when the process died, whose
+// requester is not running either, has nobody waiting for its result (the requester's tool call died with the process), so
+// re-running it would only burn model calls — and, for colleagues asking each other, restart their ping-pong.
+func (s *Store) CancelOrphanedRunning(ctx context.Context) (int, error) {
+	tag, err := s.db.Exec(ctx, `UPDATE tasks c SET status='cancelled', error='interrupted by a restart; its requester is no longer waiting', finished_at=now()
+		WHERE c.status IN ('running','queued') AND c.parent_id IS NOT NULL AND c.from_kind='agent'
+		AND NOT EXISTS (SELECT 1 FROM tasks p WHERE p.id=c.parent_id AND p.status IN ('running','queued'))`)
+	return int(tag.RowsAffected()), err
+}
+
 // maxSummaryAttempts caps retries of the task-summary pipeline (see internal/tasksum and Engine.SummarizeTask)
 // so a task whose transcript permanently fails to summarize (an unparsable model output, say) cannot block
 // the queue forever — the same discipline memory's raw-fact pipeline applies (see maxRawAttempts).

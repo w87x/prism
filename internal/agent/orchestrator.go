@@ -705,6 +705,7 @@ func (e *Engine) StartDispatcher(ctx context.Context, maxRuns int) {
 		maxRuns = 6
 	}
 	_, _ = e.ReconcilePendingAsks(ctx)
+	_, _ = e.Tasks.CancelOrphanedRunning(ctx)
 	_, _ = e.Tasks.RequeueRunning(ctx)
 	e.Tasks.CloseOrphans(ctx)
 	sem := make(chan struct{}, maxRuns)
@@ -842,6 +843,11 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: p.Name, To: t.FromName, Text: res.Text, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
 	}
 	switch {
+	case res.NeedsInput != "" && o.Leaf:
+		// A colleague's one-off help cannot be paused for an answer — nobody can give one: the user does not see it and the
+		// asker has already moved on. The question goes back as the answer, and the asker decides (ask again with the missing
+		// information, or pick another agent). It never becomes a "waiting for your answer" task.
+		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, "I could not do this without more information: "+strings.TrimSpace(res.NeedsInput)+"\n(A one-off request cannot wait for an answer: ask again with the missing information, or choose another agent.)", "", "")
 	case res.NeedsInput != "":
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.WaitingInput, res.Text, "", res.NeedsInput)
 	case res.Aborted != "": // budget exhausted or stopped by the loop guard: a partial result, not a real answer
