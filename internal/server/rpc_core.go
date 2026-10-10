@@ -344,6 +344,22 @@ func (s *Server) registerCore() {
 	}) (*tasks.Task, error) {
 		return a.Engine.AnswerTask(ctx, r.ID, r.Answer)
 	})
+	// promise review: agent runs that said they did / would do something nothing carried out
+	rpc(s, "promises.list", func(ctx context.Context, r struct {
+		Status string `json:"status"`
+	}) ([]agent.PromiseReviewRow, error) {
+		return a.Engine.PromiseReviews(ctx, r.Status)
+	})
+	rpc(s, "promises.fix", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (*tasks.Task, error) {
+		return a.Engine.FixPromise(ctx, r.ID)
+	})
+	rpc(s, "promises.dismiss", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.DismissPromise(ctx, r.ID)
+	})
 	// end a sleeping task's sleep early: it is due at once
 	rpc(s, "tasks.wake", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`

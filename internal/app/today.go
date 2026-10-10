@@ -25,7 +25,7 @@ type Today struct {
 // awaiting a decision, or a finished piece of work. Ref matches the existing notification-ref convention
 // (see internal/app/notify.go) so the UI can reuse its page-opening logic.
 type TodayItem struct {
-	Kind  string    `json:"kind"` // waiting_input | briefing | hire | plugin | proposal | task
+	Kind  string    `json:"kind"` // waiting_input | briefing | hire | plugin | proposal | promise | task
 	Title string    `json:"title"`
 	Sub   string    `json:"sub,omitempty"`
 	Ref   string    `json:"ref"`
@@ -97,6 +97,18 @@ func (a *App) GetToday(ctx context.Context) Today {
 				continue
 			}
 			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "failed", Title: w.Title, Sub: "failed: " + trim(w.Error, 120), Ref: fmt.Sprintf("task:%d", w.ID), At: *w.FinishedAt})
+		}
+	}
+	if rs, err := a.Engine.PromiseReviews(ctx, "open"); err == nil {
+		for _, r := range rs {
+			sub := ""
+			if len(r.Promises) > 0 {
+				sub = trim(r.Promises[0].Text, 140)
+				if len(r.Promises) > 1 {
+					sub += fmt.Sprintf(" (+%d more)", len(r.Promises)-1)
+				}
+			}
+			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "promise", Title: "Promised, not done: " + trim(r.Title, 70), Sub: sub, Ref: fmt.Sprintf("promise:%d", r.ID), Agent: r.Agent, At: r.CreatedAt})
 		}
 	}
 	if a.Ext.Ingest != nil {

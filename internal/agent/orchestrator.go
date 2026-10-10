@@ -878,6 +878,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
 	}
 	out, _ := e.Tasks.Get(ctx, t.ID)
+	if out.Status == tasks.Done && reviewsPromises(out) { // did the agent do what it said it did (or would do)?
+		go e.ReviewPromises(context.WithoutCancel(ctx), out)
+	}
 	if e.OnTaskDone != nil && out.Status == tasks.Done {
 		e.OnTaskDone(ctx, out)
 	}

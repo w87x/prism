@@ -2593,3 +2593,71 @@ func TestAgentSleepsAndIsResumedInTheSameSession(t *testing.T) {
 		t.Fatalf("short sleep: %q %v", r, err)
 	}
 }
+
+// After a cron run, a reviewer compares the report with what the agent really did: a promise nothing carried out is recorded, and
+// (default mode "fix") the agent is asked once to make it real; the follow-up's own review only reports; kept promises are quiet.
+func TestPromiseReviewFlagsUnkeptPromisesAndAsksTheAgentOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Cinephile", Soul: "You are Cinephile.", Enabled: true, MaxIterations: 6}, ""); err != nil {
+		t.Fatal(err)
+	}
+	verdict := `{"commitments":[{"text":"download the movie once it is released","status":"needs_trigger","evidence":"no watch, cron or download call","fix":"start the download or create a watch"}]}`
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		if strings.Contains(sys, "You audit one run") {
+			return testutil.Reply{Content: verdict}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	mkTask := func(fromName string) tasks.Task {
+		sess, _ := h.e.Sessions.Create(ctx, "Cinephile", "task", "", 0)
+		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: map[bool]string{true: "system", false: "cron"}[fromName == promiseReviewName], FromName: fromName, ToAgent: "Cinephile", Title: "movie watch", Input: "check whether the movie is released; if so download it", SessionID: &sess.ID}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.e.Tasks.Finish(ctx, tk.ID, tasks.Done, "I looked for the movie. It is not out yet, but if it is released I will download it.", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		tk, _ = h.e.Tasks.Get(ctx, tk.ID)
+		return tk
+	}
+	first := mkTask("movies")
+	h.e.ReviewPromises(ctx, first)
+	rows, _ := h.e.PromiseReviews(ctx, "")
+	if len(rows) != 1 || rows[0].Status != "fixing" || rows[0].FixTaskID == nil || len(rows[0].Promises) != 1 {
+		t.Fatalf("the unkept promise must be recorded and sent for fixing: %+v", rows)
+	}
+	fix, _ := h.e.Tasks.Get(ctx, *rows[0].FixTaskID)
+	if fix.FromName != promiseReviewName || fix.ToAgent != "Cinephile" || !strings.Contains(fix.Input, "download the movie once it is released") || !strings.Contains(fix.Input, "check whether the movie is released") {
+		t.Fatalf("the follow-up must carry the task, the report and what is missing: %+v", fix)
+	}
+	// the follow-up run broke the same kind of promise: only reported, no second correction
+	h.e.ReviewPromises(ctx, mkTask(promiseReviewName))
+	rows, _ = h.e.PromiseReviews(ctx, "")
+	open, _ := h.e.PromiseReviews(ctx, "open")
+	if len(rows) != 2 || len(open) != 1 {
+		t.Fatalf("a follow-up that broke it again is only reported (rows=%d open=%d)", len(rows), len(open))
+	}
+	if err := h.e.DismissPromise(ctx, open[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	// a kept promise (or nothing to flag) leaves no review
+	verdict = `{"commitments":[{"text":"started the download","status":"done","evidence":"download_start call","fix":""}]}`
+	h.e.ReviewPromises(ctx, mkTask("movies"))
+	if all, _ := h.e.PromiseReviews(ctx, ""); len(all) != 2 {
+		t.Fatalf("a kept promise must not create a review: %d", len(all))
+	}
+	// a user's own task is never reviewed; "off" turns the review off
+	userTask := mkTask("movies")
+	userTask.FromKind = "user"
+	h.e.ReviewPromises(ctx, userTask)
+	if err := h.e.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{PromiseReview: "off"}); err != nil {
+		t.Fatal(err)
+	}
+	verdict = `{"commitments":[{"text":"x","status":"not_done"}]}`
+	h.e.ReviewPromises(ctx, mkTask("movies"))
+	if all, _ := h.e.PromiseReviews(ctx, ""); len(all) != 2 {
+		t.Fatalf("off means off: %d", len(all))
+	}
+}

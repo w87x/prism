@@ -111,9 +111,22 @@ type Autonomy struct {
 	AutoEvolve   bool `json:"auto_evolve"` // apply soul proposals without review
 	// HireLimit is how many agents other agents may hire per week (each starts on probation); 0 forbids it.
 	HireLimit int `json:"hire_limit"`
+	// PromiseReview: after an autonomous run (cron, standing intent) a reviewer checks that what the agent said it did, or would
+	// do, really happened. "" or "fix" (the default): tell the user and ask the agent once to make it real; "report": only tell
+	// the user (and list it in Today); "off": no review.
+	PromiseReview string `json:"promise_review"`
 }
 
 func DefaultAutonomy() Autonomy { return Autonomy{HireLimit: 3} }
+
+// PromiseReviewMode is the effective promise-review setting: fix | report | off.
+func (a Autonomy) PromiseReviewMode() string {
+	switch a.PromiseReview {
+	case "off", "report":
+		return a.PromiseReview
+	}
+	return "fix"
+}
 
 type Memory struct {
 	ProcessEvery int `json:"process_every_s"` // raw → facts cadence

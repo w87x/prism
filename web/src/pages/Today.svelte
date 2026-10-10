@@ -1,6 +1,6 @@
 <script>
   import { masonry } from '../lib/masonry.js';
-  import { S, call, listen, go, ago, until, openProposal, openRef } from '../lib/store.svelte.js';
+  import { S, call, listen, go, ago, until, openProposal, openRef, toast } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Icon from '../lib/ui/Icon.svelte';
@@ -22,7 +22,7 @@
   $effect(() => {
     load();
     // any of these changing likely means this page is stale — cheap to just refetch rather than patch in place
-    return listen('task.update', load), listen('briefing.new', load), listen('agents.update', load);
+    return listen('task.update', load), listen('briefing.new', load), listen('agents.update', load), listen('promise.update', load);
   });
   $effect(() => {
     const i = setInterval(load, 20000);
@@ -32,7 +32,7 @@
   // whole-page layout: the panels ("cards") or one list with a header per section — remembered per browser
   let layout = $state((() => { try { return localStorage.getItem('prism.todayLayout') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } })());
   $effect(() => { try { localStorage.setItem('prism.todayLayout', layout); } catch {} });
-  const kindLabel = { waiting_input: 'Waiting for your answer', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', plugin: 'New tools to review', ingest: 'Documents to learn' };
+  const kindLabel = { waiting_input: 'Waiting for your answer', promise: 'Promised, not done', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', plugin: 'New tools to review', ingest: 'Documents to learn' };
   const attnGroups = $derived.by(() => {
     const m = new Map();
     for (const it of d?.needs_attention || []) { if (!m.has(it.kind)) m.set(it.kind, []); m.get(it.kind).push(it); }
@@ -51,7 +51,7 @@
   let reviewId = $state(0);
   let answerId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
-  const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
+  const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 
   function openProject(p) { S.memoryBank = p.bank_id; go('memory'); }
 
@@ -77,6 +77,10 @@
       <li class="row click" onclick={() => openRef(it.ref)}>
         <span class="ic attn"><Icon name={kindIcon[it.kind] || 'warn'} size={13} /></span>
         <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.sub}</span>{/if}</div>
+        {#if it.kind === 'promise'}
+          <Button size="sm" variant="accent" title="Ask the agent to do it now, or to set up what will do it later" onclick={async (e) => { e.stopPropagation(); const id = Number(it.ref.slice(8)); if (await call('promises.fix', { id })) { toast(`${it.agent} was asked to make it happen`); load(); } }}>Make it happen</Button>
+          <Button size="sm" variant="ghost" title="Not needed — drop it from this list" onclick={async (e) => { e.stopPropagation(); if (await call('promises.dismiss', { id: Number(it.ref.slice(8)) })) load(); }}>Dismiss</Button>
+        {/if}
         {#if it.kind === 'waiting_input'}
           <Button size="sm" variant="accent" onclick={(e) => { e.stopPropagation(); answerId = Number(it.ref.slice(5)); }}>Answer</Button>
         {/if}
