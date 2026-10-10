@@ -640,7 +640,9 @@ func TestRejectedFactSurvivesPruneAndMigration042Upgrades(t *testing.T) {
 	if err := s.Retract(ctx, "user", old, "moved"); err != nil {
 		t.Fatal(err)
 	}
-	keepFor := 100 * time.Millisecond // history window; a rejected fact lasts four times as long
+	keepFor := 100 * time.Millisecond // history window; a rejected fact has its own, longer one
+	defer func(old time.Duration) { rejectedKeep = old }(rejectedKeep)
+	rejectedKeep = 300 * time.Millisecond
 	time.Sleep(130 * time.Millisecond)
 	if _, purged, err := s.Prune(ctx, keepFor); err != nil || purged != 1 {
 		t.Fatalf("prune must purge the plain retirement only: purged=%d %v", purged, err)

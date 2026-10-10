@@ -433,8 +433,11 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 
 // ── consolidation ──────────────────────────────────────────────────────────
 
+// rejectedKeep is how long a rejected fact is kept after the last time something tried to learn it again.
+var rejectedKeep = 30 * 24 * time.Hour
+
 // Prune archives long-unused, low-rank facts into history (valid_to set) and
-// removes stale superseded facts older than keepHistory (a fact the user rejected as false lasts four times as long, counted from the last time something tried to learn it again). Returns (archived, purged).
+// removes stale superseded facts older than keepHistory (a fact the user rejected as false is forgotten once nothing has tried to learn it again for rejectedKeep). Returns (archived, purged).
 func (s *Service) Prune(ctx context.Context, keepHistory time.Duration) (int, int, error) {
 	t1, err := s.db.Exec(ctx, `WITH x AS (UPDATE memory_facts SET valid_to=now(), status='expired'
 		WHERE valid_to IS NULL AND NOT pinned AND rank<0.25 AND COALESCE(last_used,created_at) < now()-interval '90 days' RETURNING id)
@@ -442,13 +445,13 @@ func (s *Service) Prune(ctx context.Context, keepHistory time.Duration) (int, in
 	if err != nil {
 		return 0, 0, err
 	}
-	// A fact the user rejected as false dissolves too, only much slower than other history (four times as long), and the
-	// clock restarts whenever something tries to learn it again (Store notes that in last_used): a claim that keeps coming
-	// back stays rejected, one nobody mentions any more is forgotten, and may then be learned afresh.
+	// A fact the user rejected as false dissolves too: once nothing has tried to learn it again for rejectedKeep (a month).
+	// The clock restarts whenever something does (Store notes that in last_used): a claim that keeps coming back stays
+	// rejected, one nobody mentions any more is forgotten, and may then be learned afresh.
 	t2, err := s.db.Exec(ctx, `DELETE FROM memory_facts WHERE valid_to IS NOT NULL AND (
 			(status<>'rejected' AND valid_to < $1) OR
 			(status='rejected' AND GREATEST(valid_to, COALESCE(last_used, valid_to)) < $2))`,
-		time.Now().Add(-keepHistory), time.Now().Add(-4*keepHistory))
+		time.Now().Add(-keepHistory), time.Now().Add(-rejectedKeep))
 	if err != nil {
 		return int(t1.RowsAffected()), 0, err
 	}

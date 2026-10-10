@@ -129,7 +129,7 @@ func (s *Service) Retract(ctx context.Context, actor string, id int64, reason st
 
 // RejectFact is the user saying "no, this is false": the fact is retired like any other, but marked rejected, so it shows
 // as such in history and is not learned again — Store refuses the same sentence afterwards (see rejectedMatch) — until it has
-// dissolved: Prune forgets it four times slower than other history, counted from the last time something tried to learn it again. A plain
+// dissolved: Prune forgets it once nothing has tried to learn it again for a month (see rejectedKeep). A plain
 // retirement only says "no longer true / relevant" and the fact may come back from the web or an extraction.
 func (s *Service) RejectFact(ctx context.Context, actor string, id int64, reason string) error {
 	tag, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), status='rejected' WHERE id=$1 AND valid_to IS NULL`, id)
