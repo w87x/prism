@@ -115,7 +115,14 @@ type Autonomy struct {
 	// do, really happened. "" or "fix" (the default): tell the user and ask the agent once to make it real; "report": only tell
 	// the user (and list it in Today); "off": no review.
 	PromiseReview string `json:"promise_review"`
+	// NoticeFilter: what an autonomous run (cron, standing intent) may tell the user. "smart" (the default): the agent is asked to
+	// stay silent (NO_REPLY) when its condition is not met, a stray NO_REPLY anywhere in a message silences it, and a cheap
+	// check drops messages that merely say nothing was found or nothing changed. "all": every reply is delivered as before.
+	NoticeFilter string `json:"notice_filter"`
 }
+
+// QuietNotices reports whether autonomous replies are filtered (the default).
+func (a Autonomy) QuietNotices() bool { return a.NoticeFilter != "all" }
 
 func DefaultAutonomy() Autonomy { return Autonomy{HireLimit: 3} }
 

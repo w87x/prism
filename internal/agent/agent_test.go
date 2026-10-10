@@ -2661,3 +2661,58 @@ func TestPromiseReviewFlagsUnkeptPromisesAndAsksTheAgentOnce(t *testing.T) {
 		t.Fatalf("off means off: %d", len(all))
 	}
 }
+
+// A watch that finds nothing must not message the user: NO_REPLY anywhere silences a reply, a reply that only says nothing was
+// found is dropped by the check, real news is delivered, and "everything" mode restores the old behaviour.
+func TestAutonomousRepliesOnlyDeliverNews(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Shopper", Soul: "You are Shopper.", Enabled: true, MaxIterations: 6}, ""); err != nil {
+		t.Fatal(err)
+	}
+	var reply string
+	var sawRule bool
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		role, content, _ := msgAt(req, -1)
+		if strings.Contains(sys, "deserves to interrupt them") {
+			if strings.Contains(content, "no ads under") {
+				return testutil.Reply{Content: `{"tell":false}`}
+			}
+			return testutil.Reply{Content: `{"tell":true}`}
+		}
+		if role == "user" && strings.Contains(content, "[Reporting rule]") {
+			sawRule = true
+		}
+		return testutil.Reply{Content: reply}
+	}
+	notices := func() int { return h.events.count("notice") }
+	run := func(text string) int {
+		reply = text
+		before := notices()
+		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "ads", ToAgent: "Shopper", Title: "watch ads", Input: "look at the ads; tell me when a price is under 100"}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.e.RunTask(ctx, tk, TaskOpts{})
+		return notices() - before
+	}
+	if n := run("we have looked and found no price under the threshold NO_REPLY"); n != 0 {
+		t.Fatalf("a stray NO_REPLY must silence the reply (%d notices)", n)
+	}
+	if !sawRule {
+		t.Fatal("a cron run is told the reporting rule")
+	}
+	if n := run("Checked 12 ads — no ads under 100 euro right now."); n != 0 {
+		t.Fatalf("a message that only says nothing was found must be dropped (%d notices)", n)
+	}
+	if n := run("Price dropped: the red bike is now 89 euro."); n != 1 {
+		t.Fatalf("real news must be delivered (%d notices)", n)
+	}
+	if err := h.e.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{NoticeFilter: "all"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := run("Checked 12 ads — no ads under 100 euro right now."); n != 1 {
+		t.Fatalf("in everything mode the reply is delivered (%d notices)", n)
+	}
+}

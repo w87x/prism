@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"prism/internal/textutil"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"prism/internal/llm"
 	"prism/internal/memory"
+	"prism/internal/settings"
 	"prism/internal/tasks"
 	"prism/internal/tools"
 )
@@ -809,6 +811,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
+	if (t.FromKind == "cron" || t.FromKind == "intent") && t.Depth == 0 && settings.Load(tctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() {
+		input += reportingRule
+	}
 	if t.WakeAt != nil || t.WakeNote != "" { // it went to sleep earlier: this run is its wake-up, in the same session
 		input = fmt.Sprintf("[system] You went to sleep (%s) and are awake again — it is now %s. Continue the task from where you stopped: check what you were waiting for, then carry on, sleep again if it is not ready yet, or finish.", firstNonEmptyStr(t.WakeNote, "waiting"), time.Now().Format("2 Jan 15:04"))
 		e.Tasks.ClearWake(tctx, t.ID)
@@ -887,7 +892,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	// autonomous top-level tasks report back to the user unless the agent stays silent
 	if t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system") && res.NeedsInput == "" {
 		txt := strings.TrimSpace(res.Text)
-		if txt != "" && !strings.EqualFold(strings.Trim(txt, ". \n"), "NO_REPLY") && !strings.HasPrefix(txt, "[partial") {
+		if txt != "" && !strings.HasPrefix(txt, "[partial") && e.worthTelling(ctx, t, txt) {
 			e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic})
 		}
 	}
@@ -921,4 +926,39 @@ func (e *Engine) cancelOne(ctx context.Context, id int64) error {
 		return e.Tasks.Cancel(ctx, id)
 	}
 	return nil
+}
+
+// reportingRule is added to what a cron or standing intent is asked to do: the reply is delivered to the user as a notification,
+// so a run that found nothing must say nothing.
+const reportingRule = "\n\n[Reporting rule] Your final reply is sent to the user as a notification. If the thing the user wants to hear about did not happen (the condition is not met, nothing new, nothing changed, nothing found), reply with exactly NO_REPLY and nothing else — never a message saying that nothing was found. Otherwise write a short message containing only the news."
+
+var noReplyRe = regexp.MustCompile(`(?i)\bNO_REPLY\b`)
+
+// silentReply: the agent chose silence — NO_REPLY anywhere in its reply, not only as the whole reply (models often write a
+// sentence about finding nothing and then add NO_REPLY).
+func silentReply(txt string) bool { return noReplyRe.MatchString(txt) }
+
+const worthTellingPrompt = `A background agent (a scheduled job or a watch the user set up) produced the message below for the user. Decide whether it deserves to interrupt them.
+tell = false for: nothing found, nothing changed, the condition the user cares about is not met, "checked, all fine", status-only reports, apologies or restatements of the task.
+tell = true for: something the user asked to hear about actually happened (a price dropped under the threshold, a release appeared, a new item matched), a failure that needs the user, a periodic digest or report the user asked for, the outcome of an action that was taken.
+Answer JSON only: {"tell":true|false}`
+
+// worthTelling decides whether an autonomous run's reply is delivered. It fails open: if anything is unclear or the check cannot
+// run, the user is told.
+func (e *Engine) worthTelling(ctx context.Context, t tasks.Task, txt string) bool {
+	if silentReply(txt) {
+		return false
+	}
+	if !settings.Load(ctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() || e.LLM == nil || e.LLM.RoleRef(ctx, "fast") == "" {
+		return true
+	}
+	var out struct {
+		Tell *bool `json:"tell"`
+	}
+	cctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	if err := e.LLM.CompleteJSON(cctx, "role:fast", worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+brief(t.Input, 700)+"\n\nMESSAGE:\n"+brief(txt, 1500), &out); err != nil || out.Tell == nil {
+		return true
+	}
+	return *out.Tell
 }
