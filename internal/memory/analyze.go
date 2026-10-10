@@ -22,6 +22,8 @@ const (
 	DefaultAnalyzeMin = 12
 	maxAnalyzeFacts   = 120
 	maxHypothesisConf = 0.6
+	// maxAnalyzeChanges caps the insight changes one analysis pass may make (questions and hypotheses are asked for explicitly).
+	maxAnalyzeChanges = 10
 )
 
 var insightNeeds = map[string]int{"pattern": 3, "deduction": 2, "hypothesis": 2, "trend": 2, "preference": 2, "risk": 2, "question": 1, "connection": 2}
@@ -36,13 +38,36 @@ Think like a careful analyst. Look for:
 - "preference": a stable like, dislike or working style that several facts show.
 - "risk": something likely to go wrong, be forgotten or become a problem, judging from the facts.
 - "question": an important thing the memory does NOT know but that would matter (gap). Write it as a question. Also give "importance" 1-5: 5 = a genuine, specific ambiguity you cannot confidently act on (e.g. conflicting signals about which of two named options the user prefers), 1 = mild curiosity with no real consequence. Only importance 4-5 interrupts the user; most gaps are NOT worth that and should be scored low. Every other insight type: omit importance or leave it 0.
+Questions and hypotheses are the most useful things you produce for the user, so do not skip them: every pass, look for puzzles and gaps. Propose 1-3 "question" insights — a specific thing the user could answer in one sentence; name what it concerns, and where the answers are predictable offer them inside the question ("Is X for work or for fun?"). Propose 1-3 "hypothesis" insights, each built from TWO OR MORE different facts that together suggest an explanation (cite all of them as evidence, never just one). Skip these only when the facts truly raise none; never repeat a question or hypothesis that is already among your INSIGHTS.
 Also report:
 - "contradictions": pairs of FACT ids that cannot both be true now (not just different topics). Say why.
 - "duplicates": groups of FACT ids that say the same thing; keep the best-worded one.
 - "card": a compact profile of what this bank is about (for the user's bank: who they are, what they do, what they care about, how they like to work) — plain sentences, max 700 characters, only what the facts support. Return "" if nothing changed.
 
-Rules: never invent; cite only fact ids you were given, and never a conclusion or insight id as evidence; every insight is one self-contained sentence in the third person; do not restate a single fact or an existing conclusion; prefer a few sharp insights over many vague ones (at most 8 changes). Insight actions: "new", "strengthen" (id of an existing insight + only the NEW evidence ids), "revise" (id + corrected text + evidence), "retire" (id). "confidence" is 0.0-1.0.
+Rules: never invent; cite only fact ids you were given, and never a conclusion or insight id as evidence; every insight is one self-contained sentence in the third person; do not restate a single fact or an existing conclusion; prefer sharp insights over vague ones (at most 10 changes, of which at most 4 questions). Insight actions: "new", "strengthen" (id of an existing insight + only the NEW evidence ids), "revise" (id + corrected text + evidence), "retire" (id). "confidence" is 0.0-1.0.
 Answer JSON only: {"insights":[{"action":"new|strengthen|revise|retire","id":null,"type":"pattern|deduction|hypothesis|trend|preference|risk|question","text":"...","evidence":[ids],"confidence":0.0,"importance":0}],"contradictions":[{"a":1,"b":2,"note":"..."}],"duplicates":[{"keep":1,"drop":[2]}],"card":"..."}`
+
+type analysisParsed struct {
+	Insights []struct {
+		Action     string  `json:"action"`
+		ID         *int64  `json:"id"`
+		Type       string  `json:"type"`
+		Text       string  `json:"text"`
+		Evidence   []int64 `json:"evidence"`
+		Confidence float64 `json:"confidence"`
+		Importance int     `json:"importance"`
+	} `json:"insights"`
+	Contradictions []struct {
+		A    int64  `json:"a"`
+		B    int64  `json:"b"`
+		Note string `json:"note"`
+	} `json:"contradictions"`
+	Duplicates []struct {
+		Keep int64   `json:"keep"`
+		Drop []int64 `json:"drop"`
+	} `json:"duplicates"`
+	Card string `json:"card"`
+}
 
 type AnalyzeResult struct {
 	Bank           string `json:"bank"`
@@ -232,27 +257,7 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 		sb.WriteString("(none yet)\n")
 	}
 	fmt.Fprintf(&sb, "\nCARD:\n%s\n", strings.TrimSpace(card))
-	var parsed struct {
-		Insights []struct {
-			Action     string  `json:"action"`
-			ID         *int64  `json:"id"`
-			Type       string  `json:"type"`
-			Text       string  `json:"text"`
-			Evidence   []int64 `json:"evidence"`
-			Confidence float64 `json:"confidence"`
-			Importance int     `json:"importance"`
-		} `json:"insights"`
-		Contradictions []struct {
-			A    int64  `json:"a"`
-			B    int64  `json:"b"`
-			Note string `json:"note"`
-		} `json:"contradictions"`
-		Duplicates []struct {
-			Keep int64   `json:"keep"`
-			Drop []int64 `json:"drop"`
-		} `json:"duplicates"`
-		Card string `json:"card"`
-	}
+	var parsed analysisParsed
 	role := "role:chat"
 	if s.llm.RoleRef(ctx, "chat") == "" {
 		role = "role:fast"
@@ -260,8 +265,8 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 	if err := s.llm.CompleteJSON(ctx, role, analyzePrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("analysis: %w", err)
 	}
-	if len(parsed.Insights) > 8 {
-		parsed.Insights = parsed.Insights[:8]
+	if len(parsed.Insights) > maxAnalyzeChanges {
+		parsed.Insights = parsed.Insights[:maxAnalyzeChanges]
 	}
 	for _, ch := range parsed.Insights {
 		ev := validEvidence(ch.Evidence, byID)

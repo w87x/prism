@@ -421,6 +421,10 @@ func (s *Service) AnalyzeAll(ctx context.Context, maxRuns int) ([]AnalyzeResult,
 		}
 		out = append(out, r)
 	}
+	// banks too small to be analysed alone are read together, so a handful of facts here and there is not "nothing to analyze"
+	if pr, err := s.poolSmallBanks(ctx); err == nil && pr != nil {
+		out = append(out, *pr)
+	}
 	return out, nil
 }
 

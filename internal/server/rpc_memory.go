@@ -195,6 +195,23 @@ func (s *Server) registerMemory() {
 	}) (bool, error) {
 		return true, a.Memory.Unlink(ctx, r.A, r.B)
 	})
+	// settle a contradiction: keep a or b (confirmed; the other retired), retire both, or "none" (not a contradiction)
+	rpc(s, "memory.resolve_contradiction", func(ctx context.Context, r struct {
+		A      int64  `json:"a"`
+		B      int64  `json:"b"`
+		Keep   string `json:"keep"`
+		Reject bool   `json:"reject"`
+	}) (bool, error) {
+		return true, a.Memory.ResolveContradiction(ctx, r.A, r.B, r.Keep, r.Reject)
+	})
+	// "no, this is false": retired, marked rejected, and never learned again
+	rpc(s, "memory.fact_reject", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Memory.RejectFact(ctx, "user", r.ID, "rejected by the user")
+	})
+	// open hypotheses and questions, for the chat's question pill and the review list
+	rpc(s, "memory.open", func(ctx context.Context, _ none) ([]memory.Fact, error) { return a.Memory.OpenInsights(ctx, 60) })
 	rpc(s, "memory.bank_merge", func(ctx context.Context, r struct {
 		Sources []int64 `json:"sources"`
 		Into    int64   `json:"into"`
@@ -258,6 +275,16 @@ func (s *Server) registerMemory() {
 			a.Logf("info", "memory", "analysis (manual) — %s", x)
 		}
 		return rs, err
+	})
+	// deep analysis over several banks read together (bank_ids empty = the user's bank and every project / domain bank)
+	rpc(s, "memory.analyze_pooled", func(ctx context.Context, r struct {
+		BankIDs []int64 `json:"bank_ids"`
+	}) (res memory.AnalyzeResult, err error) {
+		end := a.MemRunStart("Analyzing several banks")
+		defer func() { end(err) }()
+		res, err = a.Memory.AnalyzePooled(ctx, r.BankIDs, true, 0)
+		a.Logf("info", "memory", "analysis (manual, pooled) — %s", res)
+		return res, err
 	})
 	// levels of thinking: level 2 (synthesis across banks) and 3 (principles); 0 = both, in order
 	rpc(s, "memory.synthesize", func(ctx context.Context, r struct {

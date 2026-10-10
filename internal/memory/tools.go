@@ -219,6 +219,8 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 					return "", err
 				}
 				switch {
+				case r.Rejected:
+					return fmt.Sprintf("Not stored: the user already rejected this as false (fact #%d). Do not store it again; if you have new evidence, say so to the user instead.", r.Fact.ID), nil
 				case propose && !r.Duplicate:
 					return fmt.Sprintf("Proposed as #%d: you are on probation, so a curator must approve it before it enters %s. It is not used until then.", r.Fact.ID, a.Bank), nil
 				case r.Corroborated:

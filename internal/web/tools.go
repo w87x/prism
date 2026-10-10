@@ -74,6 +74,43 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 			},
 		},
 		&tools.Tool{
+			Name: "image_search", Category: "web", Risk: tools.RiskRead, Untrusted: true,
+			Description: "Search the web for PICTURES (like an image search): returns image file addresses with a title, size and the page each sits on. " +
+				"To show one to the user, pass its image address to image_fetch (with a short caption) and put the [image:N] marker it returns in your reply. " +
+				"Choose images that clearly match the request (prefer larger ones from reputable sites); do not fetch more than 2-3.",
+			Params: tools.Obj("query", tools.Str("query", "what the picture should show"), tools.Int("limit", "max results (default 6, at most 12)")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					Query string
+					Limit int
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				res, used, err := SearchImages(ctx, s.cfg(ctx), a.Query, a.Limit)
+				if err != nil {
+					return "", err
+				}
+				if len(res) == 0 {
+					return "No pictures found for that query; try other words.", nil
+				}
+				var sb strings.Builder
+				fmt.Fprintf(&sb, "Pictures (via %s):\n", used)
+				for i, r := range res {
+					size := ""
+					if r.W > 0 && r.H > 0 {
+						size = fmt.Sprintf(" (%d×%d)", r.W, r.H)
+					}
+					fmt.Fprintf(&sb, "%d. %s%s\n   image: %s\n", i+1, strings.TrimSpace(r.Title), size, r.Image)
+					if r.Page != "" {
+						fmt.Fprintf(&sb, "   page: %s\n", r.Page)
+					}
+				}
+				sb.WriteString("To show one: image_fetch(url=<image address>, caption=<what it shows>), then put the [image:N] marker in your reply.")
+				return sb.String(), nil
+			},
+		},
+		&tools.Tool{
 			Name: "web_fetch", Category: "web", Risk: tools.RiskRead, Untrusted: true,
 			Description: "Fetch a web page and return it as markdown (default), text, links, raw html, or a JSON DOM tree. Uses plain HTTP and escalates to a real browser / FlareSolverr for JS-heavy or protected pages (render=auto). Long pages are paged with offset. For structured data prefer web_structured (free, exact) then web_extract; for images, video and stream URLs use web_media.",
 			Params: tools.Obj("url",

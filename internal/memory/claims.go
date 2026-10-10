@@ -31,6 +31,9 @@ const (
 // effectiveStatus is the status a reader should see: a retired row reports why it was retired (rows written
 // before the status column existed, or by code that only sets valid_to, count as retracted), a current row
 // reports contested while it has a live contradiction.
+// StatusRejected: retired because the user said it is false (see RejectFact).
+const StatusRejected = "rejected"
+
 func effectiveStatus(stored string, validTo interface{}, supersededBy *int64, contested bool) string {
 	retired := false
 	switch v := validTo.(type) {
@@ -45,6 +48,8 @@ func effectiveStatus(stored string, validTo interface{}, supersededBy *int64, co
 			return StatusSuperseded
 		case stored == StatusExpired:
 			return StatusExpired
+		case stored == StatusRejected:
+			return StatusRejected
 		}
 		return StatusRetracted
 	}
@@ -120,6 +125,45 @@ func (s *Service) Retract(ctx context.Context, actor string, id int64, reason st
 	s.audit(ctx, actor, "retract", id, reason)
 	s.changed()
 	return nil
+}
+
+// RejectFact is the user saying "no, this is false": the fact is retired like any other, but marked rejected, so it shows
+// as such in history and is never learned again — Store refuses the same sentence afterwards (see rejectedMatch). A plain
+// retirement only says "no longer true / relevant" and the fact may come back from the web or an extraction.
+func (s *Service) RejectFact(ctx context.Context, actor string, id int64, reason string) error {
+	tag, err := s.db.Exec(ctx, `UPDATE memory_facts SET valid_to=now(), status='rejected' WHERE id=$1 AND valid_to IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("fact #%d is already retired (or does not exist)", id)
+	}
+	s.audit(ctx, actor, "reject", id, reason)
+	s.changed()
+	return nil
+}
+
+// rejectedMatch finds a fact the user rejected in this bank that says (nearly) the same as text, so it is not learned again.
+func (s *Service) rejectedMatch(ctx context.Context, bankID int64, text string) (*Fact, bool) {
+	rows, err := s.db.Query(ctx, `SELECT id,text FROM memory_facts WHERE bank_id=$1 AND status='rejected' ORDER BY id DESC LIMIT 300`, bankID)
+	if err != nil {
+		return nil, false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var t string
+		if rows.Scan(&id, &t) != nil {
+			continue
+		}
+		if normFactText(t) == normFactText(text) || jaccard(t, text) >= 0.85 {
+			f, err := s.GetFact(ctx, id)
+			if err == nil {
+				return &f, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // ConfirmByUser records that the user vouches for a fact: it is trusted (confidence ≥ 0.95) and forgets four

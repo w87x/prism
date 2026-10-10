@@ -38,6 +38,30 @@ type Review struct {
 	Open             []Fact          `json:"open"`       // hypotheses and questions from deep analysis
 }
 
+// OpenInsights lists the open hypotheses and questions from deep analysis (newest-important first): what memory wants the
+// user's judgement on. Questions come first — they are the ones waiting for an answer.
+func (s *Service) OpenInsights(ctx context.Context, limit int) ([]Fact, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 40
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+factCols+` FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
+		WHERE f.valid_to IS NULL AND f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis','question']
+		ORDER BY (f.tags && ARRAY['question']) DESC, f.rank DESC, f.id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Fact{}
+	for rows.Next() {
+		f, err := scanFact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (s *Service) Review(ctx context.Context, limit int) (*Review, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 40
@@ -186,4 +210,37 @@ func (s *Service) ResolveInsight(ctx context.Context, id int64, verdict, answer 
 	}
 	s.changed()
 	return made, nil
+}
+
+// ResolveContradiction settles a contradiction the user looked at. keep is "a" or "b" (that fact is confirmed — the user vouches
+// for it — and the other is retired), "both" (both are retired: neither is true), or "none" (not a contradiction after all: the
+// link is dropped and both stay). reject marks a retired loser as false instead of merely outdated (see RejectFact).
+func (s *Service) ResolveContradiction(ctx context.Context, a, b int64, keep string, reject bool) error {
+	retire := func(id int64, why string) error {
+		if reject {
+			return s.RejectFact(ctx, "user", id, why)
+		}
+		return s.Retract(ctx, "user", id, why)
+	}
+	switch keep {
+	case "a", "b":
+		win, lose := a, b
+		if keep == "b" {
+			win, lose = b, a
+		}
+		if err := s.ConfirmByUser(ctx, "user", win); err != nil {
+			return err
+		}
+		return retire(lose, fmt.Sprintf("contradicted by #%d (your decision)", win))
+	case "both":
+		err1 := retire(a, fmt.Sprintf("contradiction with #%d: neither is true (your decision)", b))
+		err2 := retire(b, fmt.Sprintf("contradiction with #%d: neither is true (your decision)", a))
+		if err1 != nil && err2 != nil {
+			return err1
+		}
+		return nil
+	case "none":
+		return s.Unlink(ctx, a, b)
+	}
+	return fmt.Errorf("unknown choice %q (a, b, both or none)", keep)
 }

@@ -18,7 +18,9 @@
   import Led from '../lib/ui/Led.svelte';
   import Segmented from '../lib/ui/Segmented.svelte';
   import MemoryGraph from '../lib/MemoryGraph.svelte';
+  import MemoryGraph3D from '../lib/MemoryGraph3D.svelte';
   import { nearEnd } from '../lib/nearend.js';
+  import OpenInsight from '../lib/OpenInsight.svelte';
   import Provenance from '../lib/Provenance.svelte';
 
   let banks = $state([]);
@@ -28,7 +30,7 @@
   let q = $state('');
   let history = $state(false);
   let kind = $state(''); // '' | fact | conclusion
-  let view = $state('list'); // list | graph
+  let view = $state('list'); // list | graph | graph3d
   let searching = $state(false);
   let busy = $state('');
   let edit = $state(null);
@@ -52,12 +54,21 @@
     const t = rs.reduce((a, r) => ({ e: a.e + r.entities, r: a.r + r.relations, m: a.m + (r.merged || 0) }), { e: 0, r: 0, m: 0 });
     toast(t.e + t.r + t.m ? `${t.e} entities, ${t.r} relations${t.m ? `, ${t.m} duplicates merged` : ''}` : (rs[0]?.skipped ? `Nothing to extract: ${rs[0].skipped}` : 'Nothing new to extract'));
   }
+  // contradictions: keep one (it is confirmed, the other retired), retire both, or "not a contradiction"; rejectLoser marks the
+  // retired one(s) as false (never learned again) instead of merely outdated
+  let rejectLoser = $state(false);
   async function resolveContradiction(c, keep) {
-    const drop = keep === c.a.id ? c.b.id : c.a.id;
-    await call('memory.fact_outdate', { id: drop });
-    loadReview(); loadFacts();
+    if (await call('memory.resolve_contradiction', { a: c.a.id, b: c.b.id, keep, reject: rejectLoser })) { loadReview(); loadFacts(); }
   }
-  async function dismissContradiction(c) { await call('memory.unlink', { a: c.a.id, b: c.b.id }); loadReview(); }
+  async function rejectFact(f, e) {
+    e?.stopPropagation();
+    if (await call('memory.fact_reject', { id: f.id })) { toast('Marked as not true — it will not be learned again'); loadReview(); loadFacts(); }
+  }
+  // opening a fact from the review list: the review comes back when the editor closes
+  let editBack = $state(false);
+  function openFromReview(f) { reviewOpen = false; editBack = true; openFact(f); }
+  function editClosed() { if (editBack) { editBack = false; reviewOpen = true; } }
+  $effect(() => { if (!editOpen) untrack(editClosed); }); // however the editor closed (saved, resolved, cancelled), the review comes back
   async function pinFromReview(f) { if (await call('memory.fact_pin', { id: f.id, pinned: true })) loadReview(); }
   // ── research: send an agent to check and enrich something ──
   let rsOpen = $state(false);
@@ -153,6 +164,7 @@
     if (await call('memory.resolve_insight', { id: f.id, verdict, answer: answers[f.id] || '' })) { delete answers[f.id]; loadReview(); loadFacts(); }
   }
   async function outdateFromReview(f) { await call('memory.fact_outdate', { id: f.id }); loadReview(); }
+  async function rejectFromReview(f) { await rejectFact(f); }
 
   async function loadBanks() {
     banks = (await call('memory.banks', {}, { quiet: true })) || [];
@@ -298,8 +310,18 @@
     if (!rs) return;
     const t = rs.reduce((a, r) => ({ i: a.i + r.insights, s: a.s + r.strengthened + r.revised, c: a.c + r.contradictions, d: a.d + r.duplicates }), { i: 0, s: 0, c: 0, d: 0 });
     if (t.i + t.s + t.c + t.d) toast(`${t.i} new insights, ${t.s} updated, ${t.c} contradictions flagged, ${t.d} duplicates retired`);
-    else toast(skipNote(rs, 'analyse'));
+    else toast(skipNote(rs, 'analyse') + ' — “Analyze across banks” reads the small banks together.');
     loadBanks(); loadFacts(); loadHealth();
+  }
+  // deep analysis over several banks read together — for banks that are too small to be analysed alone
+  async function analyzePooled() {
+    busy = 'pool';
+    const r = await call('memory.analyze_pooled', { bank_ids: [] });
+    busy = '';
+    if (!r) return;
+    if (r.skipped) toast(`Nothing to analyse across banks: ${r.skipped}`);
+    else toast(`${r.insights} new insights, ${r.strengthened + r.revised} updated, ${r.contradictions} contradictions flagged (read ${r.considered} facts from ${r.bank})`);
+    loadBanks(); loadFacts(); loadHealth(); loadReview();
   }
   async function synthesize() {
     busy = 'synth';
@@ -401,7 +423,7 @@
     <Button size="sm" onclick={loadFacts}>Search</Button>
     {#if q}<Button size="sm" variant="ghost" onclick={() => { q = ''; loadFacts(); }}>Clear</Button>{/if}
     <Checkbox bind:checked={history} label="history" onchange={loadFacts} />
-    <Segmented size="sm" bind:value={view} options={[{ value: 'list', label: 'list' }, { value: 'graph', label: 'graph' }]} />
+    <Segmented size="sm" bind:value={view} options={[{ value: 'list', label: 'list' }, { value: 'graph', label: 'graph' }, { value: 'graph3d', label: '3D' }]} />
     <Segmented size="sm" bind:value={kind} options={[{ value: '', label: 'all' }, { value: 'fact', label: 'facts' }, { value: 'conclusion', label: 'conclusions' }]} />
     <span class="grow"></span>
     <Button size="sm" variant="ghost" title="What memory believed on a given date, and what changed day by day" onclick={() => { timeOpen = true; }}>Time</Button>
@@ -443,6 +465,7 @@
       {#snippet right()}
         <Button size="sm" variant="ghost" loading={busy === 'reflect'} title="Draw conclusions from facts that agree with each other{bank ? ' in this bank' : ''}" onclick={reflect}>Reflect</Button>
         <Button size="sm" variant="ghost" loading={busy === 'analyze'} title="Deep analysis: patterns, hypotheses, trends, contradictions, duplicates and a profile card{bank ? ' for this bank' : ''}" onclick={analyze}>Analyze</Button>
+        <Button size="sm" variant="ghost" loading={busy === 'pool'} title="Read the user bank and every project and domain bank together: patterns, questions and contradictions that span banks — and the way to analyse banks that have too few facts to be analysed alone" onclick={analyzePooled}>Analyze across banks</Button>
         <Button size="sm" variant="ghost" loading={busy === 'synth'} title="Higher levels of thinking across all banks: level 2 syntheses (themes, causes, implications, tensions), then level 3 principles" onclick={synthesize}>Synthesize</Button>
         <Button size="sm" variant="ghost" loading={busy === 'entities'} title="Pull named entities (people, products, places…) and their relations out of facts{bank ? ' in this bank' : ''}" onclick={extractEntities}>Extract entities</Button>
         <Button size="sm" variant="ghost" loading={busy === 'process'} onclick={() => run('process', 'memory.process', {}, (n) => `${n} facts distilled from raw`)}>Digest raw</Button>
@@ -450,7 +473,9 @@
         <Button size="sm" variant="ghost" loading={busy === 'prune'} onclick={() => run('prune', 'memory.prune', {}, (r) => `archived ${r.archived}, purged ${r.purged}`)}>Prune</Button>
         {#if bank}<Button size="sm" variant="ghost" loading={busy === 'dedupe'} title="Find and merge near-duplicate facts in this bank" onclick={dedupeFacts}>Dedupe</Button>{/if}
       {/snippet}
-      {#if view === 'graph'}
+      {#if view === 'graph3d'}
+        <div class="gbody"><MemoryGraph3D {bank} {history} onopen={openId} /></div>
+      {:else if view === 'graph'}
         <div class="gbody"><MemoryGraph {bank} {history} onopen={openId} onresearch={research} /></div>
       {:else}
       <div class="scroll" use:nearEnd={loadMore}>
@@ -460,7 +485,7 @@
             {#each facts as f (f.id)}
               <tr class="click" onclick={() => openFact(f)} class:old={f.valid_to} class:concl={f.kind === 'conclusion'}>
                 <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.kind !== 'conclusion'}<Bar value={f.value_ratio} max={1} color={valueColor(f.value_ratio)} height={3} label="value {Math.round(f.value_ratio * 100)}% — {valueName(f.value_ratio)} — how likely this is to still matter later, distinct from rank/confidence" />{/if}{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
-                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.also_in?.length}<Badge tone="mute" title="also shown in {f.also_in.join(', ')}">+{f.also_in.length}</Badge>{/if}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
+                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.status === 'rejected'} <Badge tone="err" title="you said this is false; never learned again">rejected</Badge>{/if}{#if f.also_in?.length}<Badge tone="mute" title="also shown in {f.also_in.join(', ')}">+{f.also_in.length}</Badge>{/if}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
                 {#if !bank || searching}<td class="dim nowrap">{f.bank}</td>{/if}
                 <td class="mute sm">{(f.tags || []).join(', ')}</td>
                 <td class="mute sm">{f.links || ''}</td>
@@ -483,8 +508,12 @@
   </div>
 </div>
 
-<Modal bind:open={editOpen} title="{edit?.kind === 'conclusion' ? 'Conclusion' : 'Fact'} #{edit?.id} · {edit?.bank}" width={720}>
+<Modal bind:open={editOpen} onclose={editClosed} title="{edit?.kind === 'conclusion' ? 'Conclusion' : 'Fact'} #{edit?.id} · {edit?.bank}" width={720}>
   {#if edit}
+    {#if edit.kind === 'conclusion' && !edit.valid_to && (edit.tags?.includes('question') || edit.tags?.includes('hypothesis'))}
+      <div class="rvrow"><div class="sm mute">{edit.tags.includes('question') ? 'Memory has no answer to this yet — answer it here:' : 'A guess memory made from several facts — is it true?'}</div><OpenInsight f={edit} ondone={() => { editOpen = false; loadFacts(); loadReview(); }} /></div>
+    {/if}
+    {#if edit.status === 'rejected'}<div class="sm"><Badge tone="err">rejected</Badge> you said this is false; it is kept in history and never learned again</div>{/if}
     <Field label="Text" hint={edit.kind === 'conclusion' ? '' : 'changing this preserves the old wording in history and flags any conclusion built on it for review'}><Textarea bind:value={edit.text} rows={4} mono={false} /></Field>
     <Provenance id={edit.id} onopen={openId} />
     <div class="row wrap gap-12">
@@ -527,10 +556,11 @@
     </div>
   {/if}
   {#snippet footer()}
-    {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="retire with no replacement" onclick={markOutdated}>Mark outdated</Button>{/if}
+    {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="retire with no replacement" onclick={markOutdated}>Mark outdated</Button>
+      <Button variant="ghost" title="It is false: retired, marked rejected and never learned again" onclick={async () => { if (await call('memory.fact_reject', { id: edit.id })) { toast('Marked as not true'); editOpen = false; loadFacts(); loadReview(); } }}>Not true</Button>{/if}
     <span class="grow"></span>
     {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="Have an agent check this on the web and add what it finds" onclick={() => research({ fact_id: edit.id, label: edit.text })}>Research</Button>{/if}
-    <Button variant="ghost" onclick={() => (editOpen = false)}>Cancel</Button>
+    <Button variant="ghost" onclick={() => { editOpen = false; editClosed(); }}>Cancel</Button>
     <Button variant="primary" onclick={saveFact}>Save</Button>
   {/snippet}
 </Modal>
@@ -717,34 +747,37 @@
   <div class="sm mute">Things memory can't resolve on its own — a human call, not a maintenance job.</div>
   {#if review}
     <h4>Contradictions <span class="mute sm">{review.contradictions.length}</span></h4>
+    {#if review.contradictions.length}<div class="row"><Checkbox bind:checked={rejectLoser} label="mark the fact(s) I drop as false — never learned again (otherwise just retired: kept in history, could be learned anew)" /></div>{/if}
     {#each review.contradictions as c (c.a.id + '-' + c.b.id)}
       <div class="rvrow">
-        <div class="rvpair">
-          <button type="button" class="ltx" onclick={() => resolveContradiction(c, c.a.id)} title="keep this one, retire the other">{c.a.text}</button>
-          <span class="sm mute">vs.</span>
-          <button type="button" class="ltx" onclick={() => resolveContradiction(c, c.b.id)} title="keep this one, retire the other">{c.b.text}</button>
+        <div class="rvpair2">
+          {#each [[c.a, 'a'], [c.b, 'b']] as [x, k] (k)}
+            <div class="rvside">
+              <button type="button" class="ltx" onclick={() => openFromReview(x)} title="open this fact">{x.text}</button>
+              <div class="sm mute">{x.bank}</div>
+              <Button size="sm" variant="primary" title="This one is right: confirm it and retire the other" onclick={() => resolveContradiction(c, k)}>This is true</Button>
+            </div>
+          {/each}
         </div>
         {#if c.note}<div class="sm mute">{c.note}</div>{/if}
-        <div class="row end"><Button size="sm" variant="ghost" onclick={() => dismissContradiction(c)}>Not actually a contradiction</Button></div>
+        <div class="row end">
+          <Button size="sm" variant="ghost" title="Neither is true: retire both" onclick={() => resolveContradiction(c, 'both')}>Both wrong</Button>
+          <Button size="sm" variant="ghost" title="They can both be true: drop the warning, keep both" onclick={() => resolveContradiction(c, 'none')}>Not actually a contradiction</Button>
+        </div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>Open questions and hypotheses <span class="mute sm">{review.open.length}</span></h4>
     {#each review.open as f (f.id)}
       {@const q = f.tags?.includes('question')}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}><Badge tone={q ? 'accent' : 'attn'}>{q ? 'question' : 'hypothesis'}</Badge> {f.text}</button>
-        {#if q}<input class="ans" placeholder="your answer" bind:value={answers[f.id]} />{/if}
-        <div class="row end">
-          {#if q}<Button size="sm" variant="ghost" disabled={!(answers[f.id] || '').trim()} onclick={() => resolveOpen(f, 'answer')}>Answer</Button>
-          {:else}<Button size="sm" variant="ghost" title="Store it as a trusted fact" onclick={() => resolveOpen(f, 'confirm')}>True</Button>{/if}
-          <Button size="sm" variant="ghost" title="Retire it" onclick={() => resolveOpen(f, 'reject')}>{q ? 'Skip' : 'False'}</Button>
-        </div>
+        <button type="button" class="ltx" onclick={() => openFromReview(f)}><Badge tone={q ? 'accent' : 'attn'}>{q ? 'question' : 'hypothesis'}</Badge> {f.text}</button>
+        <OpenInsight {f} ondone={() => { loadReview(); loadFacts(); }} />
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>Proposed by agents <span class="mute sm">{review.proposed?.length || 0}</span></h4>
     {#each review.proposed || [] as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}>{f.text}</button>
+        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="sm mute">for {f.bank}; an agent on probation wants this remembered — it is not used until you accept it</div>
         <div class="row end">
           <Button size="sm" variant="primary" onclick={async () => { if (await call('memory.proposal_resolve', { id: f.id, accept: true })) { loadReview(); loadFacts(); } }}>Accept</Button>
@@ -756,26 +789,27 @@
     {#if review.unverified.length + review.open.length}<div class="row end"><Button size="sm" variant="accent" title="An agent checks up to 6 of these against the web and confirms, retires or leaves them" onclick={async () => { const n = await call('memory.verify_now', { ids: [] }); if (n !== undefined && n !== null) toast(n ? `${n} claims sent to an agent to verify` : 'Nothing to verify right now'); }}>Verify with an agent</Button></div>{/if}
     {#each review.unverified as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}>{f.text}</button>
-        <div class="sm mute">learned from {f.origins?.length ? f.origins.join(', ') : 'untrusted content'}; not used for conclusions until confirmed</div>
+        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
+        <div class="sm mute">learned from {f.origins?.length ? f.origins.join(', ') : 'untrusted content'}; not used for conclusions until confirmed. Retire keeps it in history (it could return); Not true keeps it as rejected and it is never learned again.</div>
         <div class="row end">
           <Button size="sm" variant="ghost" title="Send an agent to check this one" onclick={async () => { if (await call('memory.verify_now', { ids: [f.id] })) toast('Sent to an agent'); }}>Verify</Button>
-          <Button size="sm" variant="ghost" onclick={() => confirmFromReview(f)}>Confirm</Button>
-          <Button size="sm" variant="ghost" onclick={() => outdateFromReview(f)}>Retire</Button>
+          <Button size="sm" variant="ghost" title="It is true: trusted from now on" onclick={() => confirmFromReview(f)}>Confirm</Button>
+          <Button size="sm" variant="ghost" title="It is false: retired, marked rejected and never learned again" onclick={() => rejectFromReview(f)}>Not true</Button>
+          <Button size="sm" variant="ghost" title="No longer relevant: retired (kept in history with 'history' on), but it could be learned again" onclick={() => outdateFromReview(f)}>Retire</Button>
         </div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>Stale conclusions <span class="mute sm">{review.stale_conclusions.length}</span></h4>
     {#each review.stale_conclusions as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}>{f.text}</button>
+        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="sm mute">some of its evidence was retired — Reflect will revise or retire it</div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>About to be auto-archived <span class="mute sm">{review.prune_candidates.length}</span></h4>
     {#each review.prune_candidates as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => { reviewOpen = false; openFact(f); }}>{f.text}</button>
+        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="row end">
           <Button size="sm" variant="ghost" onclick={() => pinFromReview(f)}>Pin</Button>
           <Button size="sm" variant="ghost" onclick={() => outdateFromReview(f)}>Retire now</Button>
@@ -787,6 +821,9 @@
 </Modal>
 
 <style>
+  .rvpair2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .rvside { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line-2); }
+  @media (max-width: 560px) { .rvpair2 { grid-template-columns: 1fr; } }
   .pg { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; }
   .bar { display: flex; flex-wrap: wrap; row-gap: 6px; align-items: center; gap: 8px; flex: none; }
   .srch { width: 320px; }

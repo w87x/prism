@@ -518,6 +518,8 @@ type StoreResult struct {
 	Superseded []int64 `json:"superseded,omitempty"`
 	// Corroborated: this was a known web-learned fact and the new report raised its confidence.
 	Corroborated bool `json:"corroborated,omitempty"`
+	// Rejected: the user already said this is false (Fact is that rejected fact); nothing was stored.
+	Rejected bool `json:"rejected,omitempty"`
 }
 
 var (
@@ -543,6 +545,9 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 	bank, err := s.BankBySpec(ctx, r.Bank, r.Agent, true)
 	if err != nil {
 		return nil, err
+	}
+	if rf, hit := s.rejectedMatch(ctx, bank.ID, r.Text); hit { // the user already said this is false: do not learn it again
+		return &StoreResult{Fact: *rf, Duplicate: true, Rejected: true}, nil
 	}
 	emb, embModel := s.embedOne(ctx, r.Text)
 	vec := decodeVec(emb)

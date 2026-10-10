@@ -469,3 +469,45 @@ func TestAnalyzeAsksUserOnlyForImportantQuestions(t *testing.T) {
 		t.Fatalf("a low-importance question must not be pushed: %+v", asked)
 	}
 }
+
+// Banks too small to be analysed alone are read together: one pass over several banks files each insight in the bank that holds
+// most of its evidence, and a question or hypothesis built from facts of different banks is kept.
+func TestAnalyzePooledReadsSeveralSmallBanks(t *testing.T) {
+	ctx := context.Background()
+	s, fake := newSvc(t)
+	u1 := store(t, s, StoreReq{Bank: "user", Text: "User listens to techno while coding"}).ID
+	u2 := store(t, s, StoreReq{Bank: "user", Text: "User works late at night"}).ID
+	p1 := store(t, s, StoreReq{Bank: "project:homelab", Text: "The homelab NAS runs a media server"}).ID
+	p2 := store(t, s, StoreReq{Bank: "project:homelab", Text: "The homelab is maintained after midnight"}).ID
+	p3 := store(t, s, StoreReq{Bank: "project:homelab", Text: "Backups of the homelab run at 3am"}).ID
+	// alone, the user bank (2 facts) cannot be analysed
+	ub, _ := s.BankBySpec(ctx, "user", "", false)
+	if r, _ := s.Analyze(ctx, ub.ID, true, 0); r.Skipped == "" {
+		t.Fatalf("a two-fact bank must be skipped on its own: %+v", r)
+	}
+	fake.Handler = analysisReply(t, fmt.Sprintf(`{"insights":[
+		{"action":"new","type":"hypothesis","text":"User probably does most of the homelab work at night.","evidence":[%d,%d,%d],"confidence":0.7},
+		{"action":"new","type":"question","text":"Is the night-time work a choice or forced by the day job?","evidence":[%d,%d],"confidence":0.5,"importance":2}],
+		"contradictions":[],"duplicates":[],"card":""}`, p2, u2, p3, u2, p1))
+	res, err := s.AnalyzePooled(ctx, nil, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Skipped != "" || res.Insights != 2 {
+		t.Fatalf("pooled result = %+v", res)
+	}
+	_ = u1
+	pb, _ := s.BankBySpec(ctx, "project:homelab", "", false)
+	pins, _ := s.analysisInsights(ctx, pb.ID)
+	uins, _ := s.analysisInsights(ctx, ub.ID)
+	if len(pins) != 1 || insightType(pins[0].Tags) != "hypothesis" {
+		t.Fatalf("the hypothesis has 2 of 3 facts in the project bank, so it lives there: %+v", pins)
+	}
+	if len(uins)+len(pins) != 2 {
+		t.Fatalf("both insights must exist: %d + %d", len(uins), len(pins))
+	}
+	open, err := s.OpenInsights(ctx, 10)
+	if err != nil || len(open) != 2 || !slices.Contains(open[0].Tags, "question") {
+		t.Fatalf("open insights (questions first): %+v %v", open, err)
+	}
+}

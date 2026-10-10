@@ -7,6 +7,7 @@
   import Select from './ui/Select.svelte';
   import Modal from './ui/Modal.svelte';
   import Input from './ui/Input.svelte';
+  import OpenQuestions from './OpenQuestions.svelte';
 
   const chat = $derived(S.chats.find((c) => c.topic === S.chatTopic));
   let banks = $state([]);
@@ -24,6 +25,7 @@
   <div class="hd">
     <span class="ttl">Main</span>
     <span class="grow"></span>
+    <OpenQuestions />
     <span class="proj" title="This chat's project: its bank is searched first and receives facts about the work. Everything else in memory stays reachable.">
       <span class="sm mute">project</span>
       <Select size="sm" value={chat.project_bank_id || 0} options={options} onchange={bind} />

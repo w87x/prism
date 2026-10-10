@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"prism/internal/tools"
 	"strings"
 	"testing"
@@ -550,5 +552,129 @@ func TestMemoryCheckToolReportsGapsAndDoesNotReinforce(t *testing.T) {
 	}
 	if _, err := chk.Run(ctx, &tools.Env{Agent: "Scout"}, json.RawMessage(`{"needs":[]}`)); err == nil {
 		t.Fatalf("an empty list of needs must be refused")
+	}
+}
+
+func TestRejectedFactIsNotLearnedAgainAndContradictionChoices(t *testing.T) {
+	s, _ := newSvc(t)
+	ctx := context.Background()
+	mk := func(text string) int64 {
+		r, err := s.Store(ctx, StoreReq{Bank: "user", Text: text, Source: "user", Agent: "Atlas"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Fact.ID
+	}
+	// reject: retired with the rejected status, and the same sentence is refused afterwards
+	bad := mk("The user owns a boat named Aurora")
+	if err := s.RejectFact(ctx, "user", bad, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.GetFact(ctx, bad); f.Status != StatusRejected || f.ValidTo == nil {
+		t.Fatalf("a rejected fact must be retired and marked rejected: %+v", f)
+	}
+	again, err := s.Store(ctx, StoreReq{Bank: "user", Text: "the user owns a boat named  AURORA", Source: "web"})
+	if err != nil || !again.Rejected || again.Fact.ID != bad {
+		t.Fatalf("a rejected fact must not be learned again: %+v %v", again, err)
+	}
+
+	// contradiction: keep one (confirmed, other retired) / both retired / not a contradiction
+	pair := func() (int64, int64) {
+		a, b := mk(fmt.Sprintf("The NAS lives in the %s", fmt.Sprint(time.Now().UnixNano()))), mk(fmt.Sprintf("The NAS is kept in the %s", fmt.Sprint(time.Now().UnixNano()+1)))
+		if err := s.Link(ctx, a, b, LinkContradicts, "test", "user", 0.8); err != nil {
+			t.Fatal(err)
+		}
+		return a, b
+	}
+	a, b := pair()
+	if err := s.ResolveContradiction(ctx, a, b, "a", false); err != nil {
+		t.Fatal(err)
+	}
+	fa, _ := s.GetFact(ctx, a)
+	fb, _ := s.GetFact(ctx, b)
+	if fa.ValidTo != nil || fa.Confirmation != ConfirmUser || fb.ValidTo == nil || fb.Status != StatusRetracted {
+		t.Fatalf("keep a: a must be confirmed and live, b retired: %+v / %+v", fa, fb)
+	}
+	a, b = pair()
+	if err := s.ResolveContradiction(ctx, a, b, "both", true); err != nil {
+		t.Fatal(err)
+	}
+	fa, _ = s.GetFact(ctx, a)
+	fb, _ = s.GetFact(ctx, b)
+	if fa.ValidTo == nil || fb.ValidTo == nil || fa.Status != StatusRejected || fb.Status != StatusRejected {
+		t.Fatalf("both retired (rejected): %+v / %+v", fa, fb)
+	}
+	a, b = pair()
+	if err := s.ResolveContradiction(ctx, a, b, "none", false); err != nil {
+		t.Fatal(err)
+	}
+	fa, _ = s.GetFact(ctx, a)
+	fb, _ = s.GetFact(ctx, b)
+	if fa.ValidTo != nil || fb.ValidTo != nil {
+		t.Fatal("not a contradiction: both must stay")
+	}
+	rv, _ := s.Review(ctx, 50)
+	for _, c := range rv.Contradictions {
+		if (c.A.ID == a && c.B.ID == b) || (c.A.ID == b && c.B.ID == a) {
+			t.Fatal("a dismissed contradiction must leave the review list")
+		}
+	}
+}
+
+// A fact the user rejected is never purged with the rest of the history (that is what keeps it from being learned again), and
+// migration 042 upgrades a database that predates the rejected status without touching its data.
+func TestRejectedFactSurvivesPruneAndMigration042Upgrades(t *testing.T) {
+	s, _ := newSvc(t)
+	ctx := context.Background()
+	mk := func(text string) int64 {
+		r, err := s.Store(ctx, StoreReq{Bank: "user", Text: text, Source: "user"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Fact.ID
+	}
+	bad, old, keep := mk("The user has a pet iguana"), mk("The user lives on Elm Street"), mk("The user likes tea")
+	if err := s.RejectFact(ctx, "user", bad, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Retract(ctx, "user", old, "moved"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, purged, err := s.Prune(ctx, 0); err != nil || purged != 1 {
+		t.Fatalf("prune must purge the plain retirement only: purged=%d %v", purged, err)
+	}
+	if _, err := s.GetFact(ctx, bad); err != nil {
+		t.Fatalf("the rejected fact must survive: %v", err)
+	}
+	if _, err := s.GetFact(ctx, old); err == nil {
+		t.Fatal("the plainly retired fact should have been purged")
+	}
+
+	// simulate a database from before the rejected status, then run the migration on it
+	if _, err := s.db.Exec(ctx, `ALTER TABLE memory_facts DROP CONSTRAINT memory_facts_status_check;
+		UPDATE memory_facts SET status='retracted' WHERE status='rejected';
+		ALTER TABLE memory_facts ADD CONSTRAINT memory_facts_status_check CHECK (status IN ('proposed','active','superseded','retracted','expired'));
+		ALTER TABLE briefings DROP COLUMN questions`); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := os.ReadFile("../db/migrations/042_review_rejected_status.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // twice: it must be safe to run on a database that already has it
+		if _, err := s.db.Exec(ctx, string(sql)); err != nil {
+			t.Fatalf("migration 042 (run %d): %v", i+1, err)
+		}
+	}
+	if f, err := s.GetFact(ctx, keep); err != nil || f.Text != "The user likes tea" {
+		t.Fatalf("data must be untouched: %+v %v", f, err)
+	}
+	other := mk("The user owns a sailboat")
+	if err := s.RejectFact(ctx, "user", other, ""); err != nil {
+		t.Fatalf("the rejected status must be accepted after the migration: %v", err)
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO briefings(agent,title,body,questions) VALUES('a','t','b','[]')`); err != nil {
+		t.Fatalf("briefings.questions must exist after the migration: %v", err)
 	}
 }
