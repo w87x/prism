@@ -119,6 +119,21 @@ type Autonomy struct {
 	// stay silent (NO_REPLY) when its condition is not met, a stray NO_REPLY anywhere in a message silences it, and a cheap
 	// check drops messages that merely say nothing was found or nothing changed. "all": every reply is delivered as before.
 	NoticeFilter string `json:"notice_filter"`
+	// RoutineModel: which model runs cron and standing-intent jobs (checking listings, polling pages…). "" or "fast" (the default):
+	// the small, cheap fast model, which may call the escalate tool to ask the main model when it is unsure; "main": the main
+	// chat model like any other task; or the name of a specific model. An agent whose profile pins a model keeps it.
+	RoutineModel string `json:"routine_model"`
+}
+
+// RoutineModelRef is the model reference for routine jobs, or "" to leave the agent's own choice alone.
+func (a Autonomy) RoutineModelRef() string {
+	switch a.RoutineModel {
+	case "", "fast":
+		return "role:fast"
+	case "main":
+		return ""
+	}
+	return a.RoutineModel
 }
 
 // QuietNotices reports whether autonomous replies are filtered (the default).

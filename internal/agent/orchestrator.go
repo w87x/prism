@@ -811,8 +811,13 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
-	if (t.FromKind == "cron" || t.FromKind == "intent") && t.Depth == 0 && settings.Load(tctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() {
-		input += reportingRule
+	if routineTask(t) {
+		if settings.Load(tctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() {
+			input += reportingRule
+		}
+		if p.Model == "" && e.routineModelRef(tctx, t) == "role:fast" {
+			input += escalationHint
+		}
 	}
 	if t.WakeAt != nil || t.WakeNote != "" { // it went to sleep earlier: this run is its wake-up, in the same session
 		input = fmt.Sprintf("[system] You went to sleep (%s) and are awake again — it is now %s. Continue the task from where you stopped: check what you were waiting for, then carry on, sleep again if it is not ready yet, or finish.", firstNonEmptyStr(t.WakeNote, "waiting"), time.Now().Format("2 Jan 15:04"))
@@ -928,9 +933,29 @@ func (e *Engine) cancelOne(ctx context.Context, id int64) error {
 	return nil
 }
 
+// routineTask reports whether a task is a routine autonomous job: a cron or a standing intent run (top level).
+func routineTask(t tasks.Task) bool {
+	return t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent")
+}
+
+// routineModelRef is the model a routine job runs on (see settings.Autonomy.RoutineModel), "" meaning the agent's default.
+func (e *Engine) routineModelRef(ctx context.Context, t tasks.Task) string {
+	if !routineTask(t) || e.LLM == nil {
+		return ""
+	}
+	ref := settings.Load(ctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).RoutineModelRef()
+	if ref == "role:fast" && e.LLM.RoleRef(ctx, "fast") == "" {
+		return "" // no fast model configured: nothing cheaper to use
+	}
+	return ref
+}
+
 // reportingRule is added to what a cron or standing intent is asked to do: the reply is delivered to the user as a notification,
 // so a run that found nothing must say nothing.
 const reportingRule = "\n\n[Reporting rule] Your final reply is sent to the user as a notification. If the thing the user wants to hear about did not happen (the condition is not met, nothing new, nothing changed, nothing found), reply with exactly NO_REPLY and nothing else — never a message saying that nothing was found. Otherwise write a short message containing only the news."
+
+// escalationHint is added to routine jobs that run on the small model: it may ask the main model, but only when it needs to.
+const escalationHint = "\n\n[Small model] You are running on a small, cheap model because this is routine checking. Do the routine steps yourself. When you are genuinely unsure — how to read an odd page, whether a listing really matches, what to conclude — call escalate(question, details) once to ask the stronger model, instead of guessing; do not escalate for ordinary steps."
 
 var noReplyRe = regexp.MustCompile(`(?i)\bNO_REPLY\b`)
 
@@ -961,4 +986,21 @@ func (e *Engine) worthTelling(ctx context.Context, t tasks.Task, txt string) boo
 		return true
 	}
 	return *out.Tell
+}
+
+// autonomousRoot returns the root task of a task tree when that root is a cron or standing-intent run.
+func (e *Engine) autonomousRoot(ctx context.Context, taskID int64) (tasks.Task, bool) {
+	t, err := e.Tasks.Get(ctx, taskID)
+	if err != nil {
+		return tasks.Task{}, false
+	}
+	if t.RootID != 0 && t.RootID != t.ID {
+		if r, rerr := e.Tasks.Get(ctx, t.RootID); rerr == nil {
+			t = r
+		}
+	}
+	if t.FromKind == "cron" || t.FromKind == "intent" {
+		return t, true
+	}
+	return tasks.Task{}, false
 }

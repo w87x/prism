@@ -167,7 +167,7 @@ func RegisterTools(reg *tools.Registry, s *Service) {
 			Name: "tracker_alert", Category: "trackers", Risk: tools.RiskWrite,
 			Description: "Add or replace an alert on a tracker: a deterministic test on a typed column that is checked every time a row is written, no model involved. " +
 				"When it becomes true for a row the user is notified (notify=true); a row whose value was not observed is UNKNOWN, never false. Example: name 'cheap', field 'Price', op 'lte', value 2500. " +
-				"Operators: lt, lte, gt, gte (numbers or dates), eq, ne, contains (text/list), exists. Use this instead of a recurring intent for 'tell me when X reaches Y' over tracked rows.",
+				"Operators: lt, lte, gt, gte (numbers or dates), eq, ne, contains (text/list), exists. Use this instead of a recurring intent for 'tell me when X reaches Y' over tracked rows. It tests every row when it is written, so a row that appears LATER (a new listing) is tested too: it fits \"tell me about any ad under X\" over a changing set of listings, not only watching one item's price over time.",
 			Params: tools.Obj("tracker,name,field,op",
 				tools.Str("tracker", "tracker name"),
 				tools.Str("name", "short name of the alert"),

@@ -26,6 +26,7 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolAgentUpdate(),
 		e.toolAskUser(),
 		e.toolSleep(),
+		e.toolEscalate(),
 		e.toolTaskStatus(),
 		e.toolTaskSteer(),
 		e.toolTaskCancel(),
@@ -673,6 +674,53 @@ func (e *Engine) toolSleep() *tools.Tool {
 	}
 }
 
+var (
+	escalateMu  sync.Mutex
+	escalateUse = map[int64]int{}
+)
+
+const maxEscalationsPerTask = 4
+
+// toolEscalate lets a routine job running on the small model ask the main model one self-contained question.
+func (e *Engine) toolEscalate() *tools.Tool {
+	return &tools.Tool{
+		Name: "escalate", Category: "agents", Base: true, Risk: tools.RiskRead, Timeout: 5 * time.Minute,
+		Description: "Ask the stronger main model one question when you — a small model doing routine work — are genuinely unsure: how to read a page, whether something matches, what to conclude. " +
+			"Put everything it needs in 'details' (it sees nothing else: paste the relevant page text or listing). It answers once; use its answer, do not argue with it. A few times per task at most, only when needed.",
+		Params: tools.Obj("question", tools.Str("question", "the one thing you need decided"), tools.Str("details", "all the material it needs: excerpts, listings, your reasoning so far")),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			a, err := tools.Decode[struct{ Question, Details string }](raw)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(a.Question) == "" {
+				return "", errors.New("say what you need decided")
+			}
+			if env != nil && env.TaskID != 0 {
+				if t, terr := e.Tasks.Get(ctx, env.TaskID); terr == nil && e.routineModelRef(ctx, t) == "" {
+					return "You are already running on the main model: decide this yourself.", nil
+				}
+			}
+			escalateMu.Lock()
+			key := int64(0)
+			if env != nil {
+				key = env.TaskID
+			}
+			if key != 0 && escalateUse[key] >= maxEscalationsPerTask {
+				escalateMu.Unlock()
+				return "", fmt.Errorf("you have already escalated %d times in this task: decide with what you have", maxEscalationsPerTask)
+			}
+			escalateUse[key]++
+			escalateMu.Unlock()
+			out, err := e.LLM.Complete(ctx, "role:chat", "You are the senior model helping a smaller assistant that does routine background work. Answer the question directly and concisely, using only the material given; say plainly if it is not enough to decide.", "QUESTION:\n"+a.Question+"\n\nDETAILS:\n"+brief(a.Details, 12000), false)
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(out), nil
+		},
+	}
+}
+
 func (e *Engine) toolTaskStatus() *tools.Tool {
 	return &tools.Tool{
 		Name: "task_status", Category: "agents", Risk: tools.RiskRead,
@@ -751,6 +799,17 @@ func (e *Engine) toolNotify() *tools.Tool {
 			notifyMu.Unlock()
 			if a.Level == "" {
 				a.Level = "info"
+			}
+			// inside a cron / standing-intent tree an agent's progress messages must not bloat the messenger either: only news gets through
+			if env != nil && env.TaskID != 0 {
+				if root, ok := e.autonomousRoot(ctx, env.TaskID); ok && settings.Load(ctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() {
+					if silentReply(a.Text) {
+						return "Not sent: you chose silence (NO_REPLY). Stay silent when there is nothing to tell.", nil
+					}
+					if a.Level == "info" && !e.worthTelling(ctx, root, a.Text) {
+						return "Not sent: it only says that nothing was found or nothing changed. Tell the user only about news; progress and status stay in your final reply (or NO_REPLY).", nil
+					}
+				}
 			}
 			return e.NotifyReport(ctx, Notice{Agent: env.Agent, Text: a.Text, Level: a.Level, Topic: a.Topic, SkipWebChat: a.Topic != ""}), nil
 		},

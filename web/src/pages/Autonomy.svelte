@@ -1,6 +1,6 @@
 <script>
   import QuestionForm from '../lib/QuestionForm.svelte';
-  import { S, call, listen, toast, confirmBox, loadSetting, saveSetting, ago, until, stamp, openProposal, go } from '../lib/store.svelte.js';
+  import { S, call, listen, toast, confirmBox, loadSetting, saveSetting, ago, until, stamp, openProposal, go, modelOptions, loadModels } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Tabs from '../lib/ui/Tabs.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -23,7 +23,8 @@
   import { AUTONOMY_HELP } from '../lib/help.js';
 
   let tab = $state('intents');
-  let cfg = $state({ enabled: true, dream_enabled: true, auto_evolve: false, hire_limit: 3, promise_review: 'fix', notice_filter: 'smart' });
+  $effect(() => { loadModels(); });
+  let cfg = $state({ enabled: true, dream_enabled: true, auto_evolve: false, hire_limit: 3, promise_review: 'fix', notice_filter: 'smart', routine_model: '' });
   $effect(() => { loadSetting('autonomy', { enabled: true, dream_enabled: true, auto_evolve: false }).then((c) => (cfg = c)); });
   const saveCfg = () => saveSetting('autonomy', cfg, 'Autonomy settings saved');
 
@@ -168,6 +169,8 @@
     </Hint>
     <span class="sm mute" title="How many agents other agents (Forge) may hire per week. Each starts on probation without exec tools until you confirm it. 0 forbids hiring.">auto-hires per week</span>
     <NumberInput bind:value={cfg.hire_limit} min={0} max={20} onchange={saveCfg} />
+    <span class="sm mute" title="Which model runs cron and standing-intent jobs (checking listings, polling pages). The fast model is cheap and may ask the main model through an escalate tool when it is unsure. An agent whose profile pins a model keeps it.">routine jobs run on</span>
+    <Select size="sm" value={cfg.routine_model || ''} options={[{ value: '', label: 'fast model (escalates when unsure)' }, { value: 'main', label: 'main model' }, ...modelOptions('chat')]} onchange={(v) => { cfg.routine_model = v; saveCfg(); }} />
     <span class="sm mute" title="What a cron or standing run may tell you. smart = it is asked to stay silent (NO_REPLY) when its condition is not met, a stray NO_REPLY in a message silences it, and messages that only say nothing was found or nothing changed are dropped. all = every reply is delivered.">notices</span>
     <Segmented size="sm" value={cfg.notice_filter || 'smart'} options={[{ value: 'smart', label: 'only news' }, { value: 'all', label: 'everything' }]} onchange={(v) => { cfg.notice_filter = v; saveCfg(); }} />
     <span class="sm mute" title="After a cron or standing run, a reviewer checks that what the agent said it did — or would do (&quot;if it is released I will download it&quot;) — really happened: a tool call did it, or a watch / cron will. fix = tell you and ask the agent once to make it real; report = only tell you (Today → Needs your attention); off = no review.">promise review</span>

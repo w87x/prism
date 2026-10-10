@@ -342,6 +342,9 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	defer func() { res.Tainted = tainted }() // whatever tainted ends at when this Run returns, however it returns
 
 	modelRef := p.Model
+	if modelRef == "" && spec.Task != nil { // routine jobs (cron, standing intents) run on the cheaper model unless the agent pins its own
+		modelRef = e.routineModelRef(ctx, *spec.Task)
+	}
 	window := e.LLM.Window(ctx, modelRef)
 	ar.window.Store(int64(window))
 
@@ -752,7 +755,7 @@ var minimalBase = map[string]bool{"memory_find": true, "memory_banks": true, "me
 // steer tasks, fetch images, map folders, read mental models, list artifacts…) belongs to the agents whose job it
 // is and is listed on their profile — a coder does not need web or orchestration tools just because they exist.
 var workerBase = map[string]bool{
-	"clock": true, "sleep": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
+	"clock": true, "sleep": true, "escalate": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
 	"memory_find": true, "memory_check": true, "memory_store": true, "memory_banks": true, "memory_feedback": true, "memory_verify": true,
 	"artifact_read": true, "artifact_save": true, "scratchpad_read": true, "scratchpad_write": true, "scratchpad_share": true,
 	"skill_load": true, "skill_search": true,

@@ -2716,3 +2716,83 @@ func TestAutonomousRepliesOnlyDeliverNews(t *testing.T) {
 		t.Fatalf("in everything mode the reply is delivered (%d notices)", n)
 	}
 }
+
+// Routine jobs (cron, standing intents) run on the small model and may escalate to the main one; their progress messages
+// (notify_user) are filtered like their final reply.
+func TestRoutineJobsUseSmallModelEscalateAndStayQuiet(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		_, content, _ := msgAt(req, -1)
+		switch {
+		case strings.Contains(sys, "senior model"):
+			return testutil.Reply{Content: "The second listing matches."}
+		case strings.Contains(sys, "deserves to interrupt them"):
+			return testutil.Reply{Content: map[bool]string{true: `{"tell":false}`, false: `{"tell":true}`}[strings.Contains(content, "nothing")]}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	cron, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "ads", ToAgent: "Atlas", Title: "ads", Input: "watch the ads"}, true)
+	user, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: "Atlas", Title: "x", Input: "x"}, true)
+	if got := h.e.routineModelRef(ctx, cron); got != "role:fast" {
+		t.Fatalf("a cron job runs on the fast model by default: %q", got)
+	}
+	if got := h.e.routineModelRef(ctx, user); got != "" {
+		t.Fatalf("a user's task keeps the default model: %q", got)
+	}
+	_ = h.e.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{RoutineModel: "main"})
+	if got := h.e.routineModelRef(ctx, cron); got != "" {
+		t.Fatalf("main means no override: %q", got)
+	}
+	_ = h.e.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{RoutineModel: "chat"})
+	if got := h.e.routineModelRef(ctx, cron); got != "chat" {
+		t.Fatalf("a named model is used as given: %q", got)
+	}
+	_ = h.e.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{})
+
+	esc, _ := h.e.Tools.Get("escalate")
+	call := func(id int64) (string, error) {
+		b, _ := json.Marshal(map[string]any{"question": "which listing matches?", "details": "A: 120 euro, B: 80 euro"})
+		return esc.Run(ctx, &tools.Env{TaskID: id}, b)
+	}
+	if out, err := call(cron.ID); err != nil || !strings.Contains(out, "second listing") {
+		t.Fatalf("escalate must return the main model's answer: %q %v", out, err)
+	}
+	if out, _ := call(user.ID); !strings.Contains(out, "already running on the main model") {
+		t.Fatalf("a task that is not routine has nothing to escalate to: %q", out)
+	}
+	for i := 0; i < maxEscalationsPerTask; i++ {
+		_, _ = call(cron.ID)
+	}
+	if _, err := call(cron.ID); err == nil {
+		t.Fatal("escalation is capped per task")
+	}
+
+	// progress messages inside a cron tree: silence and "nothing found" are not sent; news and urgent things are
+	notify, _ := h.e.Tools.Get("notify_user")
+	send := func(taskID int64, text, level string) string {
+		b, _ := json.Marshal(map[string]any{"text": text, "level": level})
+		out, err := notify.Run(ctx, &tools.Env{Agent: "Atlas", TaskID: taskID}, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	before := h.events.count("notice")
+	if out := send(cron.ID, "still looking... NO_REPLY", "info"); !strings.HasPrefix(out, "Not sent") {
+		t.Fatalf("NO_REPLY silences a progress message: %q", out)
+	}
+	if out := send(cron.ID, "checked, nothing under the price yet", "info"); !strings.HasPrefix(out, "Not sent") {
+		t.Fatalf("a nothing-found progress message is not sent: %q", out)
+	}
+	if h.events.count("notice") != before {
+		t.Fatal("nothing should have been delivered so far")
+	}
+	send(cron.ID, "the blue bike is now 70 euro", "info")
+	send(cron.ID, "the shop is down for good", "warning")
+	send(user.ID, "checked, nothing yet", "info") // not an autonomous tree: unchanged
+	if got := h.events.count("notice") - before; got != 3 {
+		t.Fatalf("news, a warning and a user task's message are delivered (got %d)", got)
+	}
+}
