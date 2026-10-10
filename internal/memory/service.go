@@ -547,6 +547,7 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 		return nil, err
 	}
 	if rf, hit := s.rejectedMatch(ctx, bank.ID, r.Text); hit { // the user already said this is false: do not learn it again
+		_, _ = s.db.Exec(ctx, `UPDATE memory_facts SET last_used=now() WHERE id=$1`, rf.ID) // it was asked for again: its forgetting clock restarts
 		return &StoreResult{Fact: *rf, Duplicate: true, Rejected: true}, nil
 	}
 	emb, embModel := s.embedOne(ctx, r.Text)

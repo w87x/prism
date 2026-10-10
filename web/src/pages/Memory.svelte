@@ -55,14 +55,14 @@
     toast(t.e + t.r + t.m ? `${t.e} entities, ${t.r} relations${t.m ? `, ${t.m} duplicates merged` : ''}` : (rs[0]?.skipped ? `Nothing to extract: ${rs[0].skipped}` : 'Nothing new to extract'));
   }
   // contradictions: keep one (it is confirmed, the other retired), retire both, or "not a contradiction"; rejectLoser marks the
-  // retired one(s) as false (never learned again) instead of merely outdated
+  // retired one(s) as false (not learned again) instead of merely outdated
   let rejectLoser = $state(false);
   async function resolveContradiction(c, keep) {
     if (await call('memory.resolve_contradiction', { a: c.a.id, b: c.b.id, keep, reject: rejectLoser })) { loadReview(); loadFacts(); }
   }
   async function rejectFact(f, e) {
     e?.stopPropagation();
-    if (await call('memory.fact_reject', { id: f.id })) { toast('Marked as not true — it will not be learned again'); loadReview(); loadFacts(); }
+    if (await call('memory.fact_reject', { id: f.id })) { toast('Marked as not true — it will not be learned again for a long time'); loadReview(); loadFacts(); }
   }
   // opening a fact from the review list: the review comes back when the editor closes
   let editBack = $state(false);
@@ -485,7 +485,7 @@
             {#each facts as f (f.id)}
               <tr class="click" onclick={() => openFact(f)} class:old={f.valid_to} class:concl={f.kind === 'conclusion'}>
                 <td data-sort={f.rank}><Bar value={Math.min(f.rank, 3)} max={3} color={rankColor(f)} height={4} label="rank {f.rank.toFixed(2)} — {rankName(f)}" />{#if f.kind !== 'conclusion'}<Bar value={f.value_ratio} max={1} color={valueColor(f.value_ratio)} height={3} label="value {Math.round(f.value_ratio * 100)}% — {valueName(f.value_ratio)} — how likely this is to still matter later, distinct from rank/confidence" />{/if}{#if f.score}<div class="sm mute">{f.score.toFixed(2)}</div>{/if}</td>
-                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.status === 'rejected'} <Badge tone="err" title="you said this is false; never learned again">rejected</Badge>{/if}{#if f.also_in?.length}<Badge tone="mute" title="also shown in {f.also_in.join(', ')}">+{f.also_in.length}</Badge>{/if}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
+                <td class="pre">{#if f.pinned}<Icon name="pin" size={10} /> {/if}{f.text}{#if f.status === 'rejected'} <Badge tone="err" title="you said this is false; not learned again, and forgotten after about two years without being brought up">rejected</Badge>{/if}{#if f.also_in?.length}<Badge tone="mute" title="also shown in {f.also_in.join(', ')}">+{f.also_in.length}</Badge>{/if}{#if f.valid_to}<Badge tone="mute" title="{f.status} {stamp(f.valid_to)}">{f.status === 'superseded' ? 'replaced' : f.status === 'expired' ? 'expired' : 'retired'}</Badge>{:else if f.status === 'contested'}<Badge tone="warn" title="a live fact contradicts this one — see Review">disputed</Badge>{:else if f.status === 'proposed'}<Badge tone="attn" title="proposed by an agent on probation — not used until you approve it (Review)">proposed</Badge>{/if}{#if f.confirmation === 'user_confirmed'}<Badge tone="ok" title="you vouched for this fact: trusted, and it is forgotten four times slower">confirmed</Badge>{:else if f.confirmation === 'multi_source_confirmed'}<Badge tone="ok" title="two or more independent sources agree">sources</Badge>{/if}{#if f.expires_at && !f.valid_to}<Badge tone="mute" title="a volatile fact: retired automatically after {stamp(f.expires_at)}">expires</Badge>{/if}{#if f.kind === 'conclusion'}<Badge tone="accent" title="a conclusion drawn from {f.proof} facts ({(f.confidence * 100).toFixed(0)}% sure)">{f.tags?.find((x) => ['pattern','deduction','hypothesis','trend','preference','risk','question'].includes(x)) || 'conclusion'} · {f.proof}</Badge>{#if f.stale}<Badge tone="warn" title="some of its evidence was retired; the next reflection revises it">review</Badge>{/if}{:else if f.confidence < 0.5}<Badge tone="attn" title="learned from untrusted content{f.origins?.length ? ' (' + f.origins.join(', ') + ')' : ''}">unverified</Badge>{:else if f.origins?.length > 1}<Badge tone="ok" title="the same fact was found on {f.origins.join(', ')}">{f.origins.length} sites</Badge>{/if}{#if f.via}<Badge tone="mute" title="not matched by the query itself: reached through a link from #{f.via}">via #{f.via}</Badge>{/if}</td>
                 {#if !bank || searching}<td class="dim nowrap">{f.bank}</td>{/if}
                 <td class="mute sm">{(f.tags || []).join(', ')}</td>
                 <td class="mute sm">{f.links || ''}</td>
@@ -513,7 +513,7 @@
     {#if edit.kind === 'conclusion' && !edit.valid_to && (edit.tags?.includes('question') || edit.tags?.includes('hypothesis'))}
       <div class="rvrow"><div class="sm mute">{edit.tags.includes('question') ? 'Memory has no answer to this yet — answer it here:' : 'A guess memory made from several facts — is it true?'}</div><OpenInsight f={edit} ondone={() => { editOpen = false; loadFacts(); loadReview(); }} /></div>
     {/if}
-    {#if edit.status === 'rejected'}<div class="sm"><Badge tone="err">rejected</Badge> you said this is false; it is kept in history and never learned again</div>{/if}
+    {#if edit.status === 'rejected'}<div class="sm"><Badge tone="err">rejected</Badge> you said this is false; it is kept in history and not learned again — until about two years pass with nobody bringing it up</div>{/if}
     <Field label="Text" hint={edit.kind === 'conclusion' ? '' : 'changing this preserves the old wording in history and flags any conclusion built on it for review'}><Textarea bind:value={edit.text} rows={4} mono={false} /></Field>
     <Provenance id={edit.id} onopen={openId} />
     <div class="row wrap gap-12">
@@ -557,7 +557,7 @@
   {/if}
   {#snippet footer()}
     {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="retire with no replacement" onclick={markOutdated}>Mark outdated</Button>
-      <Button variant="ghost" title="It is false: retired, marked rejected and never learned again" onclick={async () => { if (await call('memory.fact_reject', { id: edit.id })) { toast('Marked as not true'); editOpen = false; loadFacts(); loadReview(); } }}>Not true</Button>{/if}
+      <Button variant="ghost" title="It is false: retired and marked rejected: it is not learned again, and is forgotten only after about two years of nobody bringing it up" onclick={async () => { if (await call('memory.fact_reject', { id: edit.id })) { toast('Marked as not true'); editOpen = false; loadFacts(); loadReview(); } }}>Not true</Button>{/if}
     <span class="grow"></span>
     {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="Have an agent check this on the web and add what it finds" onclick={() => research({ fact_id: edit.id, label: edit.text })}>Research</Button>{/if}
     <Button variant="ghost" onclick={() => { editOpen = false; editClosed(); }}>Cancel</Button>
@@ -747,7 +747,7 @@
   <div class="sm mute">Things memory can't resolve on its own — a human call, not a maintenance job.</div>
   {#if review}
     <h4>Contradictions <span class="mute sm">{review.contradictions.length}</span></h4>
-    {#if review.contradictions.length}<div class="row"><Checkbox bind:checked={rejectLoser} label="mark the fact(s) I drop as false — never learned again (otherwise just retired: kept in history, could be learned anew)" /></div>{/if}
+    {#if review.contradictions.length}<div class="row"><Checkbox bind:checked={rejectLoser} label="mark the fact(s) I drop as false — not learned again (otherwise just retired: forgotten after ~6 months, could be learned anew)" /></div>{/if}
     {#each review.contradictions as c (c.a.id + '-' + c.b.id)}
       <div class="rvrow">
         <div class="rvpair2">
@@ -790,11 +790,11 @@
     {#each review.unverified as f (f.id)}
       <div class="rvrow">
         <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
-        <div class="sm mute">learned from {f.origins?.length ? f.origins.join(', ') : 'untrusted content'}; not used for conclusions until confirmed. Retire keeps it in history (it could return); Not true keeps it as rejected and it is never learned again.</div>
+        <div class="sm mute">learned from {f.origins?.length ? f.origins.join(', ') : 'untrusted content'}; not used for conclusions until confirmed. Retire keeps it in history (it could return); Not true keeps it as rejected: it is not learned again, and fades only after about two years of nobody bringing it up.</div>
         <div class="row end">
           <Button size="sm" variant="ghost" title="Send an agent to check this one" onclick={async () => { if (await call('memory.verify_now', { ids: [f.id] })) toast('Sent to an agent'); }}>Verify</Button>
           <Button size="sm" variant="ghost" title="It is true: trusted from now on" onclick={() => confirmFromReview(f)}>Confirm</Button>
-          <Button size="sm" variant="ghost" title="It is false: retired, marked rejected and never learned again" onclick={() => rejectFromReview(f)}>Not true</Button>
+          <Button size="sm" variant="ghost" title="It is false: retired and marked rejected: it is not learned again, and is forgotten only after about two years of nobody bringing it up" onclick={() => rejectFromReview(f)}>Not true</Button>
           <Button size="sm" variant="ghost" title="No longer relevant: retired (kept in history with 'history' on), but it could be learned again" onclick={() => outdateFromReview(f)}>Retire</Button>
         </div>
       </div>

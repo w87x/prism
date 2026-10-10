@@ -621,8 +621,8 @@ func TestRejectedFactIsNotLearnedAgainAndContradictionChoices(t *testing.T) {
 	}
 }
 
-// A fact the user rejected is never purged with the rest of the history (that is what keeps it from being learned again), and
-// migration 042 upgrades a database that predates the rejected status without touching its data.
+// A fact the user rejected outlives ordinary history (that is what keeps it from being learned again), until nobody asks for it
+// any more; and migration 042 upgrades a database that predates the rejected status without touching its data.
 func TestRejectedFactSurvivesPruneAndMigration042Upgrades(t *testing.T) {
 	s, _ := newSvc(t)
 	ctx := context.Background()
@@ -640,15 +640,32 @@ func TestRejectedFactSurvivesPruneAndMigration042Upgrades(t *testing.T) {
 	if err := s.Retract(ctx, "user", old, "moved"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	if _, purged, err := s.Prune(ctx, 0); err != nil || purged != 1 {
+	keepFor := 100 * time.Millisecond // history window; a rejected fact lasts four times as long
+	time.Sleep(130 * time.Millisecond)
+	if _, purged, err := s.Prune(ctx, keepFor); err != nil || purged != 1 {
 		t.Fatalf("prune must purge the plain retirement only: purged=%d %v", purged, err)
 	}
 	if _, err := s.GetFact(ctx, bad); err != nil {
-		t.Fatalf("the rejected fact must survive: %v", err)
+		t.Fatalf("the rejected fact must outlive ordinary history: %v", err)
 	}
 	if _, err := s.GetFact(ctx, old); err == nil {
 		t.Fatal("the plainly retired fact should have been purged")
+	}
+	// something tries to learn it again long after: it is still refused, and that restarts its clock
+	time.Sleep(300 * time.Millisecond)
+	if again, err := s.Store(ctx, StoreReq{Bank: "user", Text: "The user has a pet iguana", Source: "web"}); err != nil || !again.Rejected {
+		t.Fatalf("still rejected: %+v %v", again, err)
+	}
+	if _, purged, _ := s.Prune(ctx, keepFor); purged != 0 {
+		t.Fatalf("a rejected fact that was just asked for again must stay: purged=%d", purged)
+	}
+	// nobody asks for it any more: it dissolves, and the claim may be learned afresh
+	time.Sleep(450 * time.Millisecond)
+	if _, purged, _ := s.Prune(ctx, keepFor); purged != 1 {
+		t.Fatalf("an unrequested rejected fact must eventually dissolve: purged=%d", purged)
+	}
+	if fresh, err := s.Store(ctx, StoreReq{Bank: "user", Text: "The user has a pet iguana", Source: "user"}); err != nil || fresh.Rejected {
+		t.Fatalf("after it dissolved the claim can be learned again: %+v %v", fresh, err)
 	}
 
 	// simulate a database from before the rejected status, then run the migration on it
