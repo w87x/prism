@@ -60,6 +60,15 @@ type Task struct {
 	// NotifyTopic: for a cron- or intent-fired task, the Telegram topic its "reports back to the user" notice
 	// (internal/agent/orchestrator.go) should use — set by the firing cron/intent (see scheduler/topics.go).
 	NotifyTopic string `json:"notify_topic,omitempty"`
+	// WakeAt / WakeNote: a task that went to sleep (the sleep tool) waits as 'queued' until WakeAt; the note says why. They are
+	// cleared when it wakes.
+	WakeAt   *time.Time `json:"wake_at,omitempty"`
+	WakeNote string     `json:"wake_note,omitempty"`
+}
+
+// Sleeping reports whether the task is queued but waiting for its wake-up time.
+func (t Task) Sleeping() bool {
+	return t.Status == Queued && t.WakeAt != nil && t.WakeAt.After(time.Now())
 }
 
 func (t Task) Terminal() bool { return t.Status == Done || t.Status == Failed || t.Status == Cancelled }
@@ -83,12 +92,12 @@ func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db, waiters: map[int64][]chan struct{}{}}
 }
 
-const cols = `id,parent_id,root_id,from_kind,from_name,to_agent,title,input,status,result,error,question,depth,priority,session_id,tokens_in,tokens_out,created_at,started_at,finished_at,restarts,acknowledged_at,notify_topic`
+const cols = `id,parent_id,root_id,from_kind,from_name,to_agent,title,input,status,result,error,question,depth,priority,session_id,tokens_in,tokens_out,created_at,started_at,finished_at,restarts,acknowledged_at,notify_topic,wake_at,wake_note`
 
 func scan(r pgx.Row) (Task, error) {
 	var t Task
 	err := r.Scan(&t.ID, &t.ParentID, &t.RootID, &t.FromKind, &t.FromName, &t.ToAgent, &t.Title, &t.Input, &t.Status, &t.Result, &t.Error,
-		&t.Question, &t.Depth, &t.Priority, &t.SessionID, &t.TokensIn, &t.TokensOut, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Restarts, &t.AcknowledgedAt, &t.NotifyTopic)
+		&t.Question, &t.Depth, &t.Priority, &t.SessionID, &t.TokensIn, &t.TokensOut, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Restarts, &t.AcknowledgedAt, &t.NotifyTopic, &t.WakeAt, &t.WakeNote)
 	return t, err
 }
 
@@ -185,7 +194,7 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Task, error) {
 // ClaimNext atomically moves the highest-priority queued task to running.
 func (s *Store) ClaimNext(ctx context.Context) (*Task, error) {
 	row := s.db.QueryRow(ctx, `UPDATE tasks SET status='running', started_at=COALESCE(started_at,now())
-		WHERE id=(SELECT id FROM tasks WHERE status='queued' ORDER BY priority DESC, id FOR UPDATE SKIP LOCKED LIMIT 1)
+		WHERE id=(SELECT id FROM tasks WHERE status='queued' AND (wake_at IS NULL OR wake_at<=now()) ORDER BY priority DESC, id FOR UPDATE SKIP LOCKED LIMIT 1)
 		RETURNING `+cols)
 	t, err := scan(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -196,6 +205,31 @@ func (s *Store) ClaimNext(ctx context.Context) (*Task, error) {
 	}
 	s.notify(t)
 	return &t, nil
+}
+
+// Sleep puts a running task to sleep until `until`: it is queued again, but the dispatcher will not take it before then. Its
+// session is kept, so it resumes with the same context.
+func (s *Store) Sleep(ctx context.Context, id int64, until time.Time, note string) error {
+	t, err := scan(s.db.QueryRow(ctx, `UPDATE tasks SET status='queued', wake_at=$2, wake_note=$3 WHERE id=$1 AND status='running' RETURNING `+cols, id, until, textutil.Clean(note)))
+	if err != nil {
+		return err
+	}
+	s.notify(t)
+	return nil
+}
+
+// WakeNow ends a sleep early (the user pressed "wake now"): the task is due at once.
+func (s *Store) WakeNow(ctx context.Context, id int64) error {
+	tag, err := s.db.Exec(ctx, `UPDATE tasks SET wake_at=now() WHERE id=$1 AND status='queued' AND wake_at IS NOT NULL`, id)
+	if err == nil && tag.RowsAffected() == 0 {
+		return fmt.Errorf("task #%d is not sleeping", id)
+	}
+	return err
+}
+
+// ClearWake removes the wake-up mark once the task has been woken (so it is not told twice).
+func (s *Store) ClearWake(ctx context.Context, id int64) {
+	_, _ = s.db.Exec(ctx, `UPDATE tasks SET wake_at=NULL, wake_note='' WHERE id=$1`, id)
 }
 
 // Resume moves a waiting_input/partial/done task back to running (multi-turn continuation, or picking a

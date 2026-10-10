@@ -48,6 +48,9 @@
   const kids = (r) => tasks.filter((t) => t.root_id === r.id && t.id !== r.id).sort((a, b) => a.id - b.id);
   const rows = $derived(roots.flatMap((r) => [{ t: r, lvl: 0 }, ...(collapsed[r.id] ? [] : kids(r).map((k) => ({ t: k, lvl: k.depth || 1 })))]));
 
+  const asleep = (t) => t.status === 'queued' && t.wake_at && new Date(t.wake_at) > new Date();
+  const statusText = (t) => (asleep(t) ? `sleeping until ${new Date(t.wake_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : t.status.replace('_', ' '));
+  const wakeNow = async (t, e) => { e?.stopPropagation(); if (await call('tasks.wake', { id: t.id })) { toast('Waking it up'); load(); } };
   const led = (s) => ({ queued: 'standby', running: 'ok', waiting_input: 'attention', partial: 'attention', done: 'ok', failed: 'error', cancelled: 'off' })[s] || 'off';
   const brief = (a) => (a.description || a.group || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0].slice(0, 70);
   const agentOpts = $derived([{ value: '', label: 'all agents' }, ...S.agents.map((a) => ({ value: a.name, label: a.name, hint: brief(a) }))]);
@@ -109,7 +112,7 @@
         {:else if t.status === 'partial'}<div class="attn sm mline">⚠ {t.error}</div>
         {:else if t.status === 'failed'}<div class="err sm mline">{t.error}</div>{/if}
         <div class="mbot">
-          <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'} style="font-size:var(--fs-sm)">{t.status.replace('_', ' ')}</span>
+          <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'} style="font-size:var(--fs-sm)" title={asleep(t) ? t.wake_note : ''}>{statusText(t)}</span>{#if asleep(t)}<Button size="sm" variant="ghost" title="End the sleep now: {t.wake_note}" onclick={(e) => wakeNow(t, e)}>Wake now</Button>{/if}
           <span class="mute sm">{fmtTokens(t.tokens_in)}↑ {fmtTokens(t.tokens_out)}↓</span><span class="grow"></span>
           {#if t.status === 'queued' || t.status === 'running' || t.status === 'waiting_input'}<Button size="sm" variant="danger" onclick={(e) => cancel(t, e)}>Stop</Button>
           {:else if t.status === 'waiting_input'}<span class="grow"></span><Button size="sm" variant="accent" onclick={() => (answerId = t.id)}>Answer…</Button>
@@ -142,7 +145,7 @@
                 <span class="dim">{t.from_kind === 'agent' ? t.from_name : t.from_kind}</span> <span class="mute">→</span> <span class="hi" title={t.from_kind === 'user' ? 'you asked Atlas directly — a top-level request' : ''}><Glyph name={t.to_agent} /> {t.to_agent}</span>{#if n}<span class="mute sm"> +{n}</span>{/if}
               </td>
               <td class="ellipsis" style="max-width:340px">{t.title}{#if t.question}<div class="attn sm ellipsis">? {t.question}</div>{:else if t.status === 'partial'}<div class="attn sm ellipsis">⚠ {t.error}</div>{/if}</td>
-              <td class="nowrap"><Led state={led(t.status)} pulse={t.status === 'running' || t.status === 'waiting_input'} size={8} /> <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'}>{t.status.replace('_', ' ')}</span></td>
+              <td class="nowrap"><Led state={led(t.status)} pulse={t.status === 'running' || t.status === 'waiting_input'} size={8} /> <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'}>{statusText(t)}</span></td>
               <td class="mute sm">{fmtTokens(t.tokens_in)}↑ {fmtTokens(t.tokens_out)}↓</td>
               <td class="mute sm">{ago(t.created_at)}</td>
               <td>

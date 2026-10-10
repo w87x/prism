@@ -25,6 +25,7 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolAgentCreate(),
 		e.toolAgentUpdate(),
 		e.toolAskUser(),
+		e.toolSleep(),
 		e.toolTaskStatus(),
 		e.toolTaskSteer(),
 		e.toolTaskCancel(),
@@ -612,6 +613,62 @@ func (e *Engine) toolAskUser() *tools.Tool {
 				return "", err
 			}
 			return "User answered: " + ans, nil
+		},
+	}
+}
+
+// Sleep limits: a wait up to inlineSleepMax simply blocks the run; a longer one in a background task ends the run and the task
+// is resumed later, so no goroutine, model context or connection is held for hours.
+const (
+	inlineSleepMax      = 10 * time.Minute
+	interactiveSleepMax = 2 * time.Minute
+	suspendSleepMax     = 24 * time.Hour
+)
+
+func (e *Engine) toolSleep() *tools.Tool {
+	return &tools.Tool{
+		Name: "sleep", Category: "agents", Base: true, Risk: tools.RiskRead, Timeout: inlineSleepMax + time.Minute,
+		Description: "Wait for a while, then continue the same task — use it when something needs time (a download or a build to finish, a page to update, a rate limit to pass) instead of polling in a loop or giving up. " +
+			"Say why you are waiting. Up to 10 minutes it just pauses; in a background task (cron, watch, standing task) you may sleep much longer (up to 24 hours): the task is put aside and resumed with everything you know. " +
+			"In a chat turn or as a colleague's one-off helper the wait is capped (2 and 10 minutes) — then finish with what you have, or schedule the follow-up (a watch or a cron) instead.",
+		Params: tools.Obj("seconds", tools.Int("seconds", "how long to sleep, in seconds"), tools.Str("reason", "what you are waiting for")),
+		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+			a, err := tools.Decode[struct {
+				Seconds int    `json:"seconds"`
+				Reason  string `json:"reason"`
+			}](raw)
+			if err != nil {
+				return "", err
+			}
+			d := time.Duration(a.Seconds) * time.Second
+			if d < time.Second {
+				d = time.Second
+			}
+			reason := strings.TrimSpace(a.Reason)
+			if reason == "" {
+				reason = "waiting"
+			}
+			limit := inlineSleepMax
+			if env != nil && env.Channel != "" && env.TaskID == 0 { // a chat turn
+				limit = interactiveSleepMax
+			}
+			if d > limit && env != nil && env.CanSuspend {
+				d = min(d, suspendSleepMax)
+				return "", &tools.Sleep{Until: time.Now().Add(d), Reason: reason}
+			}
+			note := ""
+			if d > limit {
+				d = limit
+				note = fmt.Sprintf(" (capped at %s here: a wait this long is only possible in a background task)", limit)
+			}
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			return fmt.Sprintf("Slept %s (%s)%s. Continue.", d.Round(time.Second), reason, note), nil
 		},
 	}
 }

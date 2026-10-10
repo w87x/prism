@@ -344,6 +344,16 @@ func (s *Server) registerCore() {
 	}) (*tasks.Task, error) {
 		return a.Engine.AnswerTask(ctx, r.ID, r.Answer)
 	})
+	// end a sleeping task's sleep early: it is due at once
+	rpc(s, "tasks.wake", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		if err := a.Tasks.WakeNow(ctx, r.ID); err != nil {
+			return false, err
+		}
+		a.Engine.Wake()
+		return true, nil
+	})
 	rpc(s, "tasks.resolve", func(ctx context.Context, r struct {
 		ID     int64  `json:"id"`
 		Action string `json:"action"`

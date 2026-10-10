@@ -597,6 +597,10 @@ var pngBytes = append([]byte("\x89PNG\r\n\x1a\n"), []byte("pretend pixels")...)
 func TestImageInputReachesTheModel(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
+	// pictures are costly (~1k tokens each): give the fake model a roomy window so compaction, which would drop them, stays out of this test
+	if _, err := h.e.DB.Exec(ctx, `UPDATE models SET context_window=32000 WHERE name='chat'`); err != nil {
+		t.Fatal(err)
+	}
 	store := map[int64][]byte{}
 	var next int64
 	h.e.SaveImage = func(_ context.Context, name, mime string, data []byte) (int64, error) {
@@ -2530,5 +2534,62 @@ func TestRestartCancelsRunningSubtasksWhoseRequesterIsGone(t *testing.T) {
 		if got, _ := h.e.Tasks.Get(ctx, id); got.Status != want {
 			t.Errorf("task %d is %s, want %s", id, got.Status, want)
 		}
+	}
+}
+
+// An agent in a background task can sleep for a long time: the run ends, the task waits as queued with a wake-up time (the
+// dispatcher skips it), and when it is woken it resumes in the same session with a note about the sleep. A short sleep just
+// pauses; a long one in a chat turn is capped.
+func TestAgentSleepsAndIsResumedInTheSameSession(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Sleeper", Soul: "You are Sleeper.", Enabled: true, MaxIterations: 8}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawWake bool
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		role, content, _ := msgAt(req, -1)
+		switch {
+		case role == "user" && strings.Contains(content, "You went to sleep"):
+			sawWake = strings.Contains(content, "movie release")
+			return testutil.Reply{Content: "it is out now, downloading"}
+		case role == "user":
+			return testutil.Reply{Tools: []llm.ToolCall{tc("s1", "sleep", map[string]any{"seconds": 7200, "reason": "waiting for the movie release"})}}
+		}
+		return testutil.Reply{Content: "unexpected " + role + ": " + content}
+	}
+	task, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "movies", ToAgent: p.Name, Input: "check whether the movie is released"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := h.e.RunTask(ctx, task, TaskOpts{})
+	if out.Status != tasks.Queued || out.WakeAt == nil || !out.WakeAt.After(time.Now().Add(time.Hour)) || !out.Sleeping() {
+		t.Fatalf("a long sleep must leave the task queued with a wake-up time: %+v", out)
+	}
+	if got, _ := h.e.Tasks.ClaimNext(ctx); got != nil {
+		t.Fatalf("the dispatcher must not take a sleeping task: %+v", got)
+	}
+	sess := out.SessionID
+	if err := h.e.Tasks.WakeNow(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	woken, _ := h.e.Tasks.ClaimNext(ctx)
+	if woken == nil || woken.ID != task.ID {
+		t.Fatalf("a woken task is claimed: %+v", woken)
+	}
+	done := h.e.RunTask(ctx, *woken, TaskOpts{})
+	if done.Status != tasks.Done || !strings.Contains(done.Result, "downloading") || !sawWake {
+		t.Fatalf("the woken task must continue and be told why it slept: %+v (told: %v)", done, sawWake)
+	}
+	if done.SessionID == nil || sess == nil || *done.SessionID != *sess || done.WakeAt != nil {
+		t.Fatalf("same session, wake mark cleared: %+v", done)
+	}
+
+	// the tool itself: a short sleep pauses and says so; a long one outside a background task is capped
+	tool, _ := h.e.Tools.Get("sleep")
+	b, _ := json.Marshal(map[string]any{"seconds": 1, "reason": "settling"})
+	if r, err := tool.Run(ctx, &tools.Env{}, b); err != nil || !strings.Contains(r, "Slept 1s") {
+		t.Fatalf("short sleep: %q %v", r, err)
 	}
 }

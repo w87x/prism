@@ -691,6 +691,9 @@ func (e *Engine) Enqueue(ctx context.Context, t tasks.Task) (tasks.Task, error) 
 
 var wakeCh = make(chan struct{}, 1)
 
+// Wake nudges the dispatcher to look at the queue now (a task was woken or added).
+func (e *Engine) Wake() { e.wake() }
+
 func (e *Engine) wake() {
 	select {
 	case wakeCh <- struct{}{}:
@@ -806,6 +809,10 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
+	if t.WakeAt != nil || t.WakeNote != "" { // it went to sleep earlier: this run is its wake-up, in the same session
+		input = fmt.Sprintf("[system] You went to sleep (%s) and are awake again — it is now %s. Continue the task from where you stopped: check what you were waiting for, then carry on, sleep again if it is not ready yet, or finish.", firstNonEmptyStr(t.WakeNote, "waiting"), time.Now().Format("2 Jan 15:04"))
+		e.Tasks.ClearWake(tctx, t.ID)
+	}
 	prov := "agent"
 	if t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system" {
 		prov = "system"
@@ -830,6 +837,13 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	res, err := e.Run(tctx, spec)
 	if err != nil {
 		return fail(err)
+	}
+	if res.Sleep != nil { // the agent chose to wait: the task goes back to the queue with a wake-up time, session kept
+		if serr := e.Tasks.Sleep(ctx, t.ID, res.Sleep.Until, res.Sleep.Reason); serr != nil {
+			return fail(serr)
+		}
+		out, _ := e.Tasks.Get(ctx, t.ID)
+		return out
 	}
 	var recov *recovery
 	if res.Aborted != "" && res.NeedsInput == "" && tctx.Err() == nil && e.autoRetryOn(tctx) {

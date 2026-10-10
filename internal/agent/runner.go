@@ -237,7 +237,9 @@ type RunSpec struct {
 type RunResult struct {
 	Text       string
 	NeedsInput string
-	Aborted    string
+	// Sleep is set when the run ended because the agent went to sleep (the sleep tool): the task is resumed at Sleep.Until.
+	Sleep   *tools.Sleep
+	Aborted string
 	// Extensions: how many times the iteration budget was extended because the run was making progress.
 	Extensions int
 	Iterations int
@@ -377,6 +379,8 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	if spec.Task != nil {
 		env.TaskID = spec.Task.ID
 	}
+	// only a background task (no chat turn, no colleague's one-off help) may be put aside for a long sleep and resumed later
+	env.CanSuspend = spec.Task != nil && spec.Depth == 0 && !spec.Interactive
 	env.Ask = func(ctx context.Context, q tools.Question) (string, error) {
 		if q.Kind != "confirm" && spec.Depth > 0 {
 			return "", &tools.NeedsInput{Question: q.Text}
@@ -532,10 +536,14 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		// ── tool execution ──
 		results := e.execTools(ctx, spec, ar, env, resp.ToolCalls, &tainted, guard, spec.Steer)
 		needs := ""
+		var sleeping *tools.Sleep
 		for i, tc := range resp.ToolCalls {
 			r := results[i]
 			if r.needsInput != "" {
 				needs = r.needsInput
+			}
+			if r.sleep != nil {
+				sleeping = r.sleep
 			}
 			prov := "tool"
 			if r.untrusted != "" {
@@ -549,6 +557,10 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		if guard.abort {
 			res.Aborted = "stopped by loop detection"
 			break
+		}
+		if sleeping != nil { // the agent went to sleep: the run ends here, the task is resumed (same session) at the wake-up time
+			res.Sleep = sleeping
+			return res, nil
 		}
 		if needs != "" {
 			res.NeedsInput = needs
@@ -740,7 +752,7 @@ var minimalBase = map[string]bool{"memory_find": true, "memory_banks": true, "me
 // steer tasks, fetch images, map folders, read mental models, list artifacts…) belongs to the agents whose job it
 // is and is listed on their profile — a coder does not need web or orchestration tools just because they exist.
 var workerBase = map[string]bool{
-	"clock": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
+	"clock": true, "sleep": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
 	"memory_find": true, "memory_check": true, "memory_store": true, "memory_banks": true, "memory_feedback": true, "memory_verify": true,
 	"artifact_read": true, "artifact_save": true, "scratchpad_read": true, "scratchpad_write": true, "scratchpad_share": true,
 	"skill_load": true, "skill_search": true,
@@ -805,6 +817,7 @@ type toolResult struct {
 	text       string
 	untrusted  string // provenance label when output is untrusted
 	needsInput string
+	sleep      *tools.Sleep
 }
 
 // loopGuard implements loop detection on top of the hard iteration budget. The warn/abort thresholds come
@@ -1200,7 +1213,8 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	}
 	if e.OnTool != nil {
 		var ni0 *tools.NeedsInput
-		if !errors.As(err, &ni0) { // a question relayed to the user is not a tool failure
+		var sl0 *tools.Sleep
+		if !errors.As(err, &ni0) && !errors.As(err, &sl0) { // a question relayed to the user, or going to sleep, is not a tool failure
 			msg := ""
 			if err != nil {
 				msg = err.Error()
@@ -1209,7 +1223,11 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		}
 	}
 	var ni *tools.NeedsInput
+	var sl *tools.Sleep
 	switch {
+	case errors.As(err, &sl):
+		emit("end", true)
+		return toolResult{text: fmt.Sprintf("Going to sleep until %s (%s). You will be woken then and continue with everything you know.", sl.Until.Format("2 Jan 15:04"), sl.Reason), sleep: sl}
 	case errors.As(err, &ni):
 		emit("end", true)
 		return toolResult{text: "Your question was relayed to the requester: " + ni.Question, needsInput: ni.Question}

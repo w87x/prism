@@ -106,6 +106,8 @@ type Env struct {
 	Taint func()
 	// ParentRun links events of sub-runs to the calling run.
 	RunID int64
+	// CanSuspend: this run may go to sleep for a long time and be resumed later (a background task, not a chat turn or a colleague's one-off help).
+	CanSuspend bool
 	// Restricted runs (an agent on probation, and everyone it asks for help) get no exec tools.
 	Restricted bool
 	// Sources are the web sites seen in this run's untrusted output (see memory_store's source_url).
@@ -115,6 +117,15 @@ type Env struct {
 // ErrNeedsInput is returned by Env.Ask in sub-agents: the run should end and the
 // question bubbles up to the delegating agent.
 type NeedsInput struct{ Question string }
+
+// Sleep is returned by the sleep tool for a long wait in a background task: the run ends, the task is queued again with a wake-up
+// time and resumes with the same context.
+type Sleep struct {
+	Until  time.Time
+	Reason string
+}
+
+func (e *Sleep) Error() string { return "sleeping until " + e.Until.Format("15:04") + ": " + e.Reason }
 
 func (e *NeedsInput) Error() string { return "needs input: " + e.Question }
 
