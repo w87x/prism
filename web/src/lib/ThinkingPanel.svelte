@@ -11,12 +11,14 @@
   const runs = $derived(activeRuns());
   const shown = $derived(runs.slice(-4));
   const hidden = $derived(Math.max(0, runs.length - shown.length));
-  const ask = $derived(S.asks[0]);
+  // tool approvals stay here; an agent's clarification questions are shown in the chat itself (see Chat.svelte)
+  const confirms = $derived(S.asks.filter((a) => a.kind === 'confirm'));
+  const ask = $derived(confirms[0]);
 </script>
 
 <div class="crt" class:attn={!!ask}>
   {#if ask}
-    <div class="askwrap"><AskCard {ask} />{#if S.asks.length > 1}<div class="more">+{S.asks.length - 1} more waiting</div>{/if}</div>
+    <div class="askwrap"><AskCard {ask} />{#if confirms.length > 1}<div class="more">+{confirms.length - 1} more waiting</div>{/if}</div>
   {:else if runs.length === 0}
     <div class="idle"><Led state="standby" pulse size={8} /> STANDBY</div>
   {:else}

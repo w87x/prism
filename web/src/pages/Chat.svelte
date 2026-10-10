@@ -1,7 +1,8 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { S, call, toast, clock, stamp, setActivityMode } from '../lib/store.svelte.js';
   import ChatHeader from '../lib/ChatHeader.svelte';
+  import AskCard from '../lib/AskCard.svelte';
   import { artifactUrl } from '../lib/ws.js';
   import { prepareImage, imagesFrom, MAX_IMAGES } from '../lib/image.js';
   import { readFile, filesFrom, sizeText, MAX_FILES, MAX_TOTAL } from '../lib/attach.js';
@@ -105,6 +106,9 @@
   });
 
   // ── scrolling: follow new content unless the user scrolled up to read ──
+  // a new question brings the chat to it
+  let askSeen = 0;
+  $effect(() => { const n = S.asks.filter((a) => a.kind !== 'confirm').length; if (n > askSeen) tick().then(() => toBottom()); askSeen = n; });
   const toBottom = () => { if (list) { list.scrollTop = list.scrollHeight; stick = true; unread = 0; } };
   function onScroll() { stick = list.scrollHeight - list.scrollTop - list.clientHeight < 48; if (stick) unread = 0; }
   let seen = 0;
@@ -233,6 +237,10 @@
       {:else}
         <div class="m agent"><span class="who"><span class="gl"><Glyph name="Atlas" /></span>Atlas:</span><span class="tx">Hi! I'm Atlas — tell me what you need and I'll take it from there. Type <code>/</code> for commands.</span></div>
       {/each}
+      <!-- clarification questions from an agent that really does not know what to do sit here, in the conversation, as one form -->
+      {#each S.asks.filter((a) => a.kind !== 'confirm') as a (a.id)}
+        <div class="m askrow"><span class="who"><span class="gl"><Glyph name={a.agent} /></span>{a.agent} needs you:</span><div class="tx askbox"><AskCard ask={a} /></div></div>
+      {/each}
     </div>
     {#if unread > 0}<button class="pill" onclick={toBottom}>↓ {unread} new</button>{/if}
   </div>
@@ -335,6 +343,8 @@
   .log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
   .log { flex: 1; border: 1px solid var(--line); background: var(--panel-bg); padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
   .m { display: flex; gap: 8px; align-items: baseline; }
+  .askrow { align-items: flex-start; }
+  .askbox { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--attn-dim); background: var(--attn-bg); }
   .who { flex: none; font-weight: 600; }
   .agent .who { color: var(--fg-hi); }
   .agent .tx { color: var(--fg); }

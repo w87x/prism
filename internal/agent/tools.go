@@ -563,7 +563,7 @@ func (e *Engine) toolAgentUpdate() *tools.Tool {
 func (e *Engine) toolAskUser() *tools.Tool {
 	return &tools.Tool{
 		Name: "ask_user", Category: "agents", Base: true, Risk: tools.RiskRead,
-		Description: "Ask the user when you are genuinely blocked or a real choice is theirs (never for things you can decide or look up). " +
+		Description: "Ask the user when you really do not know what to do, or a real choice is theirs (never for things you can decide, look up or settle with a sensible default; check memory first). The question appears in the user's main chat. Put all your open questions into one call. " +
 			"Either one question (question + optional options), or a form of up to 4 questions in one go (questions): each is type single (pick one), multi (pick several) or text (free answer). " +
 			"Offer 2–6 short options where the answers are predictable — put the recommended one first and add \" (Recommended)\"; an options entry may carry a one-line explanation after \" — \". " +
 			"The user can always type something else instead. Blocks until answered; the reply lists each answer.",
