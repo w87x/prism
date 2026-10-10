@@ -42,6 +42,8 @@ func providers() []provider {
 		{"anysearch", "AnySearch", func(c settings.Web) bool { return c.AnySearchKey != "" }, searchAnySearch},
 		{"tavily", "Tavily", func(c settings.Web) bool { return c.TavilyKey != "" }, searchTavily},
 		{"ddg", "DuckDuckGo", func(c settings.Web) bool { return true }, searchDDG},
+		{"bing", "Bing (browser)", func(c settings.Web) bool { return browserAvailable() }, searchBing},
+		{"google", "Google (browser)", func(c settings.Web) bool { return browserAvailable() }, searchGoogle},
 	}
 }
 
@@ -60,7 +62,7 @@ func ProviderList(c settings.Web) []ProviderInfo {
 	return out
 }
 
-func DefaultOrder() []string { return []string{"yandex", "anysearch", "tavily", "ddg"} }
+func DefaultOrder() []string { return []string{"yandex", "anysearch", "tavily", "ddg", "bing"} }
 
 // Search runs the query through the configured providers in order until one answers.
 func Search(ctx context.Context, c settings.Web, query string, limit int) (results []Result, used string, err error) {

@@ -26,6 +26,13 @@ func TestImageSearchDuckDuckGoAndTavily(t *testing.T) {
 		}
 	}))
 	defer ddg.Close()
+	bing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html><body>nothing here</body></html>"))
+	}))
+	defer bing.Close()
+	oldB := bingImagesURL
+	bingImagesURL = bing.URL + "/?"
+	defer func() { bingImagesURL = oldB }()
 	oldP, oldJ := ddgImagePageURL, ddgImageJSONURL
 	ddgImagePageURL, ddgImageJSONURL = ddg.URL+"/", ddg.URL+"/i.js"
 	defer func() { ddgImagePageURL, ddgImageJSONURL = oldP, oldJ }()

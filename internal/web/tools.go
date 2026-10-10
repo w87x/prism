@@ -36,6 +36,16 @@ func (s *Service) cfg(ctx context.Context) settings.Web {
 
 // RegisterTools installs web_search, web_fetch and web_extract.
 func (s *Service) RegisterTools(reg *tools.Registry) {
+	// the browser-search plugins (Bing, Google, Bing images) read results pages through PRISM's own browser
+	if s.Fetcher != nil {
+		BrowserHTML = func(ctx context.Context, rawURL, waitSelector string) (string, error) {
+			p, err := s.Fetcher.Fetch(ctx, rawURL, "browser", waitSelector, 1200*time.Millisecond)
+			if err != nil {
+				return "", err
+			}
+			return p.Body, nil
+		}
+	}
 	reg.Register(
 		&tools.Tool{
 			Name: "web_search", Category: "web", Risk: tools.RiskRead, Untrusted: true,

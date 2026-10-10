@@ -30,6 +30,13 @@ var (
 	tavilySearchURL = "https://api.tavily.com/search"
 )
 
+func joinErr(prev error, next string) error {
+	if prev == nil {
+		return errors.New(next)
+	}
+	return fmt.Errorf("%v; %s", prev, next)
+}
+
 var vqdRe = regexp.MustCompile(`vqd=["']?([\d-]+)["']?`)
 
 // SearchImages finds pictures for a query: through Tavily when the user has a key (it returns image addresses with
@@ -50,12 +57,15 @@ func SearchImages(ctx context.Context, c settings.Web, q string, limit int) ([]I
 			firstErr = err
 		}
 	}
+	// Bing's image page next (it serves the tiles without a token and with the full image address), then DuckDuckGo's JSON
+	if r, err := searchImagesBing(ctx, c, q, limit); err == nil && len(r) > 0 {
+		return r, "Bing", nil
+	} else if err != nil {
+		firstErr = joinErr(firstErr, "Bing: "+err.Error())
+	}
 	r, err := searchImagesDDG(ctx, c, q, limit)
 	if err != nil {
-		if firstErr != nil {
-			return nil, "", fmt.Errorf("%v; DuckDuckGo: %v", firstErr, err)
-		}
-		return nil, "", err
+		return nil, "", joinErr(firstErr, "DuckDuckGo: "+err.Error())
 	}
 	return r, "DuckDuckGo", nil
 }
