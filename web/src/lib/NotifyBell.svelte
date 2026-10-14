@@ -25,7 +25,7 @@
   </button>
   {#if open}
     <div class="dd">
-      <div class="hd"><span>Notifications</span><span class="grow"></span><button type="button" onclick={readAll}>mark all read</button><button type="button" onclick={clear}>clear</button></div>
+      <div class="hd"><span>Notifications</span><span class="grow"></span><button type="button" class="lnk up" onclick={readAll}>mark all read</button><button type="button" class="lnk up" onclick={clear}>clear</button></div>
       <div class="list scroll">
         {#each S.notifs.items as n (n.id)}
           <button type="button" class="it" class:unread={!n.read} onclick={() => pick(n)}>
@@ -46,7 +46,6 @@
   .ct { position: absolute; top: -3px; right: -5px; min-width: 14px; height: 14px; padding: 0 3px; background: var(--attn); color: #000; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
   .dd { position: absolute; right: 0; top: 30px; width: 380px; max-width: 92vw; background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.75); z-index: 1500; }
   .hd { display: flex; gap: 10px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--line-2); background: var(--bg-2); text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--fs-sm); color: var(--fg-dim); }
-  .hd button { background: none; border: 0; color: var(--accent); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; } .hd button:hover { color: var(--accent-hi); }
   .list { max-height: 60vh; }
   .it { display: flex; gap: 8px; align-items: flex-start; width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 5px 10px; text-align: left; color: var(--fg-dim); }
   .it:hover { background: var(--bg-3); }

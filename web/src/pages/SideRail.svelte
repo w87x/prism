@@ -75,7 +75,6 @@
 <TaskReview taskId={reviewId} onclose={() => (reviewId = 0)} ondone={load} />
 
 <style>
-  .lnk { background: none; border: 0; color: var(--accent); padding: 0; font-size: var(--fs-sm); } .lnk:hover { color: var(--accent-hi); }
   .ag { display: flex; flex-direction: column; gap: 2px; padding: 3px 4px; border-bottom: 1px dotted var(--line); cursor: pointer; } .ag:hover { background: var(--bg-2); }
   .rw { display: flex; align-items: center; gap: 6px; }
   .nm { color: var(--fg-hi); font-weight: 700; }

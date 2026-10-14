@@ -539,12 +539,12 @@
       {#if edit.kind !== 'conclusion'}<div class="pinfield"><Checkbox checked={edit.pinned} onchange={async (v) => { if (await call('memory.fact_pin', { id: edit.id, pinned: v })) edit.pinned = v; }} label="pinned — never auto-archived or decayed" /></div>{/if}
       {#if edit.kind !== 'conclusion'}<Field label="Move to bank"><Select value={edit.bank_id} options={moveBankOpts} searchable onchange={moveFact} /></Field>{/if}
       {#if edit.kind !== 'conclusion' && !edit.valid_to}<Field label="Also shown in" hint="the same fact on another shelf — not a copy: one history, one set of sources">
-        <div class="row wrap gap-6">{#each edit.also_in || [] as b (b)}<Badge tone="accent">{b} <button type="button" class="x" title="stop showing it there" onclick={() => unshareFact(b)}>×</button></Badge>{/each}
+        <div class="row wrap gap-6">{#each edit.also_in || [] as b (b)}<Badge tone="accent">{b} <button type="button" class="xbtn" title="stop showing it there" onclick={() => unshareFact(b)}>×</button></Badge>{/each}
           <Select value="" options={shareOpts} searchable placeholder="add a bank…" onchange={shareFact} /></div></Field>{/if}
     </div>
     <div class="sm mute">
       source {edit.source || '—'} · confidence {(edit.confidence * 100).toFixed(0)}% · hits {edit.hits} · created {stamp(edit.created_at)}
-      {#if edit.task_id} · <button type="button" class="ltx inline" onclick={(e) => openFromTask(edit.task_id, e)}>from task #{edit.task_id}</button>{/if}
+      {#if edit.task_id} · <button type="button" class="rowlink ltx inline" onclick={(e) => openFromTask(edit.task_id, e)}>from task #{edit.task_id}</button>{/if}
       {#if edit.supersedes} · supersedes #{edit.supersedes}{/if}
       {#if edit.origins?.length} · learned from {edit.origins.join(', ')}{/if}{#if edit.superseded_by} · superseded by #{edit.superseded_by}{/if}
       {#if !edit.embedded} · <span class="attn">not embedded</span>{/if}
@@ -554,7 +554,7 @@
       {#each links as l (l.id)}
         <div class="lrow" class:old={l.valid_to}>
           <Badge tone={linkTone[l.link_kind] || 'mute'} w={11}>{l.link_kind}</Badge>
-          <button type="button" class="ltx" title="open this fact" onclick={() => openFact(l)}>{l.text}</button>
+          <button type="button" class="rowlink ltx" title="open this fact" onclick={() => openFact(l)}>{l.text}</button>
           <span class="sm mute nowrap">{l.bank}{l.valid_to ? ' · retired' : ''}</span>
           <Bar value={l.link_weight} max={1} height={3} label="link strength {l.link_weight.toFixed(2)}" />
           <Button size="sm" variant="ghost" title="remove the link" onclick={() => unlink(l)}><Icon name="x" size={10} /></Button>
@@ -566,7 +566,7 @@
         <Button size="sm" onclick={findLink}>Find</Button>
       </div>
       {#each linkHits as h (h.id)}
-        <div class="lrow"><button type="button" class="ltx" onclick={() => addLink(h)} title="link this fact">{h.text}</button><span class="sm mute nowrap">{h.bank}</span><Button size="sm" onclick={() => addLink(h)}><Icon name="link" size={10} /></Button></div>
+        <div class="lrow"><button type="button" class="rowlink ltx" onclick={() => addLink(h)} title="link this fact">{h.text}</button><span class="sm mute nowrap">{h.bank}</span><Button size="sm" onclick={() => addLink(h)}><Icon name="link" size={10} /></Button></div>
       {/each}
     </div>
   {/if}
@@ -637,7 +637,7 @@
   <div class="row"><input bind:this={picker} type="file" hidden onchange={uploadForLearn} /><Button size="sm" onclick={() => picker.click()}>Upload a file…</Button><span class="sm mute">or pick one already in the inbox</span></div>
   {#snippet fileRow(f)}
     <div class="frow2">
-      <button type="button" class="ltx" class:on={pick === f.name} onclick={() => inspect(f.name)}>{f.name} <span class="mute sm">{(f.size / 1024).toFixed(0)} KB · {ago(f.modified)}</span></button>
+      <button type="button" class="rowlink ltx" class:on={pick === f.name} onclick={() => inspect(f.name)}>{f.name} <span class="mute sm">{(f.size / 1024).toFixed(0)} KB · {ago(f.modified)}</span></button>
       {#if f.status === 'needs_you'}<Badge tone="attn" title="a chat: tell PRISM which participant you are">needs you</Badge>{:else if f.status === 'unreadable'}<Badge tone="err" title={f.note}>can't read</Badge>{:else if f.status === 'learning'}<Badge tone="accent">learning</Badge>{:else if f.status === 'partial'}<Badge tone="warn" title="a job stopped before the end — start it again or resume it below">partly learned</Badge>{:else if f.status === 'learned'}<Badge tone="ok">{f.facts} facts</Badge>{/if}
       <Button size="sm" variant="ghost" title="Remove this file from the inbox (facts already learned stay in memory)" onclick={() => removeFile(f)}>Delete</Button>
     </div>
@@ -695,7 +695,7 @@
       <div class="rvrow">
         <div class="row"><b>{d.day}</b>{#if d.added}<Badge tone="ok">+{d.added} learned</Badge>{/if}{#if d.corrected}<Badge tone="accent">{d.corrected} corrected</Badge>{/if}{#if d.retired}<Badge tone="mute">{d.retired} retired</Badge>{/if}</div>
         {#each d.samples as it (it.kind + it.id)}
-          <button type="button" class="ltx" onclick={() => { timeOpen = false; openId(it.id); }}><span class="mute sm">{it.kind === 'added' ? '+' : it.kind === 'corrected' ? '~' : '−'}</span> {it.text} <span class="mute sm">{it.bank}</span></button>
+          <button type="button" class="rowlink ltx" onclick={() => { timeOpen = false; openId(it.id); }}><span class="mute sm">{it.kind === 'added' ? '+' : it.kind === 'corrected' ? '~' : '−'}</span> {it.text} <span class="mute sm">{it.bank}</span></button>
         {/each}
         {#if d.added + d.corrected + d.retired > d.samples.length}<div class="sm mute">…and {d.added + d.corrected + d.retired - d.samples.length} more</div>{/if}
       </div>
@@ -787,7 +787,7 @@
         <div class="rvpair2">
           {#each [[c.a, 'a'], [c.b, 'b']] as [x, k] (k)}
             <div class="rvside">
-              <button type="button" class="ltx" onclick={() => openFromReview(x)} title="open this fact">{x.text}</button>
+              <button type="button" class="rowlink ltx" onclick={() => openFromReview(x)} title="open this fact">{x.text}</button>
               <div class="sm mute">{x.bank}</div>
               <Button size="sm" variant="primary" title="This one is right: confirm it and retire the other" onclick={() => resolveContradiction(c, k)}>This is true</Button>
             </div>
@@ -804,14 +804,14 @@
     {#each review.open as f (f.id)}
       {@const q = f.tags?.includes('question')}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => openFromReview(f)}><Badge tone={q ? 'accent' : 'attn'}>{q ? 'question' : 'hypothesis'}</Badge> {f.text}</button>
+        <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}><Badge tone={q ? 'accent' : 'attn'}>{q ? 'question' : 'hypothesis'}</Badge> {f.text}</button>
         <OpenInsight {f} ondone={() => { loadReview(); loadFacts(); }} />
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>Proposed by agents <span class="mute sm">{review.proposed?.length || 0}</span></h4>
     {#each review.proposed || [] as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
+        <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="sm mute">for {f.bank}; an agent on probation wants this remembered — it is not used until you accept it</div>
         <div class="row end">
           <Button size="sm" variant="primary" onclick={async () => { if (await call('memory.proposal_resolve', { id: f.id, accept: true })) { loadReview(); loadFacts(); } }}>Accept</Button>
@@ -823,7 +823,7 @@
     {#if review.unverified.length + review.open.length}<div class="row end"><Button size="sm" variant="accent" title="An agent checks up to 6 of these against the web and confirms, retires or leaves them" onclick={async () => { const n = await call('memory.verify_now', { ids: [] }); if (n !== undefined && n !== null) toast(n ? `${n} claims sent to an agent to verify` : 'Nothing to verify right now'); }}>Verify with an agent</Button></div>{/if}
     {#each review.unverified as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
+        <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="sm mute">learned from {f.origins?.length ? f.origins.join(', ') : 'untrusted content'}; not used for conclusions until confirmed. Retire keeps it in history (it could return); Not true keeps it as rejected: it is not learned again, and fades once nobody has brought it up for a month.</div>
         <div class="row end">
           <Button size="sm" variant="ghost" title="Send an agent to check this one" onclick={async () => { if (await call('memory.verify_now', { ids: [f.id] })) toast('Sent to an agent'); }}>Verify</Button>
@@ -836,14 +836,14 @@
     <h4>Stale conclusions <span class="mute sm">{review.stale_conclusions.length}</span></h4>
     {#each review.stale_conclusions as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
+        <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="sm mute">some of its evidence was retired — Reflect will revise or retire it</div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>About to be auto-archived <span class="mute sm">{review.prune_candidates.length}</span></h4>
     {#each review.prune_candidates as f (f.id)}
       <div class="rvrow">
-        <button type="button" class="ltx" onclick={() => openFromReview(f)}>{f.text}</button>
+        <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="row end">
           <Button size="sm" variant="ghost" onclick={() => pinFromReview(f)}>Pin</Button>
           <Button size="sm" variant="ghost" onclick={() => outdateFromReview(f)}>Retire now</Button>
@@ -879,8 +879,7 @@
   .lrow { display: flex; align-items: center; gap: 6px; }
   .lrow.old { opacity: 0.55; }
   .lrow :global(.bar), .lrow > :global(div) { flex: none; width: 44px; }
-  .ltx { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ltx:hover { color: var(--fg-hi); text-decoration: underline; }
+  .ltx { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mgl { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; max-height: 240px; overflow: auto; border: 1px solid var(--line); padding: 4px 6px; }
   .mgrow { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .mghint { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); background: var(--bg-1); font-size: 12px; }
@@ -897,5 +896,4 @@
   .rvrow { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-2); }
   .rvpair { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .rvpair .ltx { flex: 1 1 auto; min-width: 160px; white-space: normal; }
-  .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 0 0 4px; font: inherit; }
 </style>

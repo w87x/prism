@@ -40,14 +40,12 @@
 
 <svelte:window onkeydown={key} />
 
-<button type="button" class="fsb {cls}" onclick={toggle} aria-label={on ? 'Leave full screen' : title} title={on ? 'Leave full screen' : title} aria-pressed={on}>
+<button type="button" class="ibtn fsb {cls}" onclick={toggle} aria-label={on ? 'Leave full screen' : title} title={on ? 'Leave full screen' : title} aria-pressed={on}>
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     {#if on}<path d="M5 1v4H1M9 1v4h4M5 13V9H1M9 13V9h4" />{:else}<path d="M1 5V1h4M13 5V1H9M1 9v4h4M13 9v4H9" />{/if}
   </svg>
 </button>
 
 <style>
-  .fsb { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); cursor: pointer; padding: 0; }
-  .fsb:hover { background: var(--bg-4); }
   .fsb.sm { width: 26px; height: 26px; }
 </style>

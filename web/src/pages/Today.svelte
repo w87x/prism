@@ -195,7 +195,6 @@
 <style>
   .quiet { font-size: 10px; color: var(--attn); border: 1px solid var(--attn-dim); padding: 0 5px; white-space: nowrap; }
   .more { list-style: none; padding: 4px 10px 6px; }
-  .lnk { background: none; border: 0; padding: 0; color: var(--accent-hi); font-size: var(--fs-sm); cursor: pointer; }
   .ghead { list-style: none; padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); border-top: 1px solid var(--line-2); }
   .ghead:first-child { border-top: 0; }
   .shead { list-style: none; padding: 9px 10px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--fg-dim); background: var(--bg-1); border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }

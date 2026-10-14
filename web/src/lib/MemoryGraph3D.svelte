@@ -216,8 +216,8 @@
 
 <div class="g3" bind:this={host}>
   <div class="bt">
-    <button type="button" class:on={spin} onclick={() => (spin = !spin)} title="slowly turn the graph" aria-pressed={spin}>⟳</button>
-    <button type="button" onclick={() => api?.reset()} title="reset the view">⌖</button>
+    <button type="button" class="ibtn" class:on={spin} onclick={() => (spin = !spin)} title="slowly turn the graph" aria-pressed={spin}>⟳</button>
+    <button type="button" class="ibtn" onclick={() => api?.reset()} title="reset the view">⌖</button>
   </div>
   {#if busy}<div class="st">loading…</div>{:else if more}<div class="st">{more} more facts not shown</div>{/if}
   {#if tip}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}<div class="mute sm">{tip.sub}</div></div>{/if}
@@ -233,8 +233,6 @@
 <style>
   .g3 { position: relative; flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--line-2); background: radial-gradient(circle at 50% 50%, var(--bg-2) 0%, var(--bg) 100%); }
   .bt { position: absolute; left: 8px; top: 8px; z-index: 4; display: flex; flex-direction: column; gap: 4px; }
-  .bt button { width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
-  .bt button.on { border-color: var(--accent); color: var(--accent-hi); }
   .st { position: absolute; right: 10px; top: 8px; z-index: 4; font-size: var(--fs-sm); color: var(--fg-mute); }
   .tip { position: absolute; z-index: 5; max-width: 320px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; }
   .sel { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 4; max-width: 520px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 8px 10px; background: var(--bg-1); border: 1px solid var(--line-3); }

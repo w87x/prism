@@ -35,7 +35,7 @@
     <Textarea bind:this={ta} bind:value={text} rows={3} maxRows={8} autosize mono={false}
       placeholder="Tell Atlas something, from wherever you are…" onenter={send} disabled={sending} />
     {#snippet footer()}
-      <button type="button" class="lnk" onclick={openChat}><Icon name="chat" size={12} /> open full chat</button>
+      <button type="button" class="lnk dim" onclick={openChat}><Icon name="chat" size={12} /> open full chat</button>
       <span class="grow"></span>
       <Button variant="primary" disabled={!text.trim() || sending} loading={sending} onclick={send}><Icon name="send" size={12} /> Send</Button>
     {/snippet}
@@ -43,6 +43,5 @@
 {/if}
 
 <style>
-  .lnk { background: none; border: 0; color: var(--fg-dim); font-size: var(--fs-sm); display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; } .lnk:hover { color: var(--accent); }
   .grow { flex: 1; }
 </style>

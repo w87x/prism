@@ -46,7 +46,7 @@
         <i class="led"></i>
         <span class="t ellipsis" class:new={chatHasNew(c)}>{label(c)}</span>
         {#if showArchived && c.merged_into}<button type="button" class="undo" onclick={(e) => undo(c, e)}>undo</button>
-        {:else if c.topic && !showArchived}<span class="acts"><button type="button" title="Archive" aria-label="archive" onclick={(e) => archiveRow(c, e)}>▭</button><button type="button" title="Delete" aria-label="delete" onclick={(e) => deleteRow(c, e)}>×</button></span>{/if}
+        {:else if c.topic && !showArchived}<span class="acts"><button type="button" class="ibtn sm danger" title="Archive" aria-label="archive" onclick={(e) => archiveRow(c, e)}>▭</button><button type="button" class="ibtn sm danger" title="Delete" aria-label="delete" onclick={(e) => deleteRow(c, e)}>×</button></span>{/if}
       </div>
     {:else}<div class="sm mute pad">{showArchived ? 'no archived chats' : 'no chats'}</div>{/each}
   </div>
@@ -88,8 +88,6 @@
   .t.new { color: var(--fg-hi); font-weight: 700; }
   .acts { display: none; gap: 3px; flex: none; }
   .ci:hover .acts { display: inline-flex; }
-  .acts button { background: none; border: 1px solid var(--line-2); color: var(--fg-mute); font-size: 10px; line-height: 1; padding: 1px 4px; cursor: pointer; }
-  .acts button:hover { color: var(--err); border-color: var(--err); }
   .ci input[type='checkbox'] { margin: 0 0 0 2px; }
   .tip { position: fixed; z-index: 60; width: 256px; pointer-events: none; background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); padding: 7px 9px; display: flex; flex-direction: column; gap: 4px; }
   .tt { color: var(--fg-hi); font-weight: 700; overflow-wrap: anywhere; }

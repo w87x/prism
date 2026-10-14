@@ -31,7 +31,7 @@
 <button type="button" bind:this={trigger} class="tr" class:open {disabled} onclick={toggleOpen} onkeydown={(e) => e.key === 'Escape' && (open = false)}>
   <span class="chips">
     {#if !value?.length}<span class="ph">{placeholder}</span>
-    {:else if chips}{#each value.slice(0, 40) as v}<span class="chip">{v}<span class="x" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); flip(v); }} onkeydown={(e) => e.key === 'Enter' && flip(v)}>×</span></span>{/each}
+    {:else if chips}{#each value.slice(0, 40) as v}<span class="chip">{v}<span class="xbtn" role="button" tabindex="-1" onclick={(e) => { e.stopPropagation(); flip(v); }} onkeydown={(e) => e.key === 'Enter' && flip(v)}>×</span></span>{/each}
     {:else}<span>{value.length} selected</span>{/if}
   </span>
   <span class="car">▾</span>
@@ -63,8 +63,6 @@
   .tr:disabled { opacity: 0.5; }
   .chips { flex: 1; display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
   .ph { color: var(--fg-faint); padding-left: 2px; }
-  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; background: var(--bg-3); border: 1px solid var(--line-2); font-size: var(--fs-sm); color: var(--fg); }
-  .x { color: var(--fg-mute); cursor: pointer; } .x:hover { color: var(--err); }
   .car { color: var(--fg-mute); font-size: 10px; align-self: center; }
   .pop { position: fixed; z-index: 3000; background: var(--bg-1); border: 1px solid var(--fg-dim); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7), var(--glow-sm); display: flex; flex-direction: column; }
   .q { background: var(--bg); border: 0; border-bottom: 1px solid var(--line-2); padding: 4px 8px; outline: 0; color: var(--fg-hi); }

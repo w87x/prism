@@ -98,11 +98,11 @@
     <div class="fr" style="padding-left:{6 + depth * 14}px">
       <button type="button" class="fh" onclick={() => (open[f.id] = !open[f.id])}><span class="car">{open[f.id] ? '▾' : '▸'}</span><span class="fn ellipsis">{f.name}</span>{#if f.smart}<Badge tone="accent" title="smart folder: it proposes its own pages from memory">smart</Badge>{/if}</button>
       <span class="acts">
-        <button type="button" title="new page here" onclick={() => newPage(f.id)}><Icon name="plus" size={11} /></button>
-        <button type="button" title="new subfolder" onclick={() => newFolder(f.id)}>▸+</button>
-        {#if f.smart}<button type="button" title="let the folder propose pages now" onclick={() => call('kb.folder_expand', { id: f.id, generate: true }).then(() => toast('Smart folder is working…'))}><Icon name="refresh" size={11} /></button>{/if}
-        <button type="button" title="edit folder" onclick={() => { ef = { ...f, parent_id: f.parent_id ?? 0 }; fOpen = true; }}><Icon name="edit" size={11} /></button>
-        <button type="button" title="delete folder" onclick={() => delFolder(f)}><Icon name="x" size={11} /></button>
+        <button type="button" class="ibtn sm" title="new page here" onclick={() => newPage(f.id)}><Icon name="plus" size={11} /></button>
+        <button type="button" class="ibtn sm" title="new subfolder" onclick={() => newFolder(f.id)}>▸+</button>
+        {#if f.smart}<button type="button" class="ibtn sm" title="let the folder propose pages now" onclick={() => call('kb.folder_expand', { id: f.id, generate: true }).then(() => toast('Smart folder is working…'))}><Icon name="refresh" size={11} /></button>{/if}
+        <button type="button" class="ibtn sm" title="edit folder" onclick={() => { ef = { ...f, parent_id: f.parent_id ?? 0 }; fOpen = true; }}><Icon name="edit" size={11} /></button>
+        <button type="button" class="ibtn sm" title="delete folder" onclick={() => delFolder(f)}><Icon name="x" size={11} /></button>
       </span>
     </div>
     {#if open[f.id]}
@@ -221,7 +221,6 @@
   .fh { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; background: none; border: 0; padding: 2px 0; color: var(--fg-hi); text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--fs-sm); }
   .car { color: var(--fg-mute); width: 10px; }
   .acts { display: none; gap: 2px; } .fr:hover .acts { display: flex; }
-  .acts button { background: none; border: 0; color: var(--fg-mute); padding: 1px 3px; font-size: 11px; } .acts button:hover { color: var(--fg); }
   .pr { display: flex; align-items: center; gap: 7px; width: 100%; background: none; border: 0; border-left: 2px solid transparent; padding: 2px 8px; color: var(--fg-dim); text-align: left; }
   .pr:hover { background: var(--bg-2); color: var(--fg); }
   .pr.on { border-left-color: var(--fg); background: var(--bg-3); color: var(--fg-hi); }
@@ -230,5 +229,4 @@
   .doc { max-width: 900px; }
   .gen { display: flex; flex-direction: column; gap: 4px; }
   .stream { background: radial-gradient(ellipse at center, #04120c 0%, #010503 100%); border: 1px solid var(--line-2); padding: 6px 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-sm); color: var(--fg-dim); line-height: 1.45; }
-  .lnk { background: none; border: 0; padding: 0; color: var(--accent); font-size: var(--fs-sm); } .lnk:hover { color: var(--accent-hi); }
 </style>

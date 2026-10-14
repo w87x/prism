@@ -596,18 +596,26 @@
       {/if}
       <div class="zoom">
         {#if layout !== '3d'}
-        <button type="button" aria-label="zoom in" onclick={() => zoomAt(1.4, w / 2, h / 2)}>+</button>
-        <button type="button" aria-label="zoom out" onclick={() => zoomAt(1 / 1.4, w / 2, h / 2)}>−</button>
-        <button type="button" aria-label="reset zoom" title="reset zoom" onclick={zoomReset}>⤢</button>
+        <button type="button" class="ibtn" aria-label="zoom in" onclick={() => zoomAt(1.4, w / 2, h / 2)}>+</button>
+        <button type="button" class="ibtn" aria-label="zoom out" onclick={() => zoomAt(1 / 1.4, w / 2, h / 2)}>−</button>
+        <button type="button" class="ibtn" aria-label="reset zoom" title="reset zoom" onclick={zoomReset}>⤢</button>
         {/if}
         <FullscreenToggle target={() => graphEl} title="Full screen" class="zfs" />
       </div>
       {#if tip && layout !== '3d'}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
-      <div class="legend">
-        <span><Led state="ok" size={7} /> specialist</span><span><Led state="standby" size={7} /> staff</span><span><Led state="off" size={7} /> disabled</span>
-        <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</span>
-        <span><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</span>
-        <span><i class="orb"></i> thinking · <i class="pls"></i> acting</span><span class="mute">names show on hover or while an agent works · agents settle apart to avoid overlap · shuffle for a new layout · drag to move · drag the background or pinch / scroll to pan and zoom · click to edit · a steady glow at rest = used a lot in the last 24h</span>
+      <div class="legend" tabindex="0" role="note" aria-label="legend">
+        <span class="sym" aria-hidden="true"><Led state="ok" size={7} /><Led state="standby" size={7} /><Led state="off" size={7} />
+          <svg width="16" height="8"><path d="M1,4 H15" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 4" fill="none" /></svg>
+          <svg width="16" height="8"><path d="M1,4 H15" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg>
+          <i class="orb"></i><i class="pls"></i></span>
+        <span class="q">?</span>
+        <div class="full">
+          <div class="lr"><Led state="ok" size={7} /> specialist</div><div class="lr"><Led state="standby" size={7} /> staff</div><div class="lr"><Led state="off" size={7} /> disabled</div>
+          <div class="lr"><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--attn)" stroke-width="1.6" stroke-dasharray="2 5" fill="none" /></svg> asking a colleague</div>
+          <div class="lr"><svg width="26" height="8" class="lg"><path d="M1,4 H25" stroke="var(--err)" stroke-width="1.8" fill="none" /></svg> needs you</div>
+          <div class="lr"><i class="orb"></i> thinking <i class="pls"></i> acting</div>
+          <div class="tips">Names show on hover or while an agent works. Agents settle apart to avoid overlap; shuffle for a new layout. Drag to move, drag the background or pinch / scroll to pan and zoom, click to edit. A steady glow at rest means used a lot in the last 24h.</div>
+        </div>
       </div>
       {#if !agents.length}<div class="abs"><Empty>no agents yet</Empty></div>{/if}
     </div>
@@ -643,13 +651,18 @@
   .graph { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line-2); overflow: hidden; background: radial-gradient(circle at 50% 50%, var(--bg-2) 0%, var(--bg) 100%); }
   canvas { position: absolute; inset: 0; display: block; touch-action: none; }
   .zoom { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 4; }
-  .zoom button { width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
-  .zoom button:hover { background: var(--bg-4); }
   .zoom :global(.zfs) { width: 32px; height: 32px; }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   .lg { vertical-align: middle; }
-  .legend { position: absolute; left: 8px; bottom: 6px; display: flex; gap: 12px; font-size: 10px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.07em; }
-  .legend span { display: inline-flex; gap: 5px; align-items: center; }
+  /* the legend is a row of small symbols; hover, focus or a tap opens the labelled key above it */
+  .legend { position: absolute; left: 8px; bottom: 6px; display: flex; align-items: center; gap: 6px; padding: 3px 7px; font-size: 10px; color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.07em; background: color-mix(in srgb, var(--bg-1) 70%, transparent); border: 1px solid var(--line-2); outline: none; }
+  .legend .sym { display: inline-flex; gap: 6px; align-items: center; }
+  .legend .q { color: var(--fg-faint); }
+  .legend:hover, .legend:focus-within { border-color: var(--line-3); }
+  .legend .full { display: none; position: absolute; left: -1px; bottom: calc(100% + 4px); width: max-content; max-width: min(300px, 86vw); background: var(--bg-1); border: 1px solid var(--line-3); padding: 7px 9px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); flex-direction: column; gap: 4px; }
+  .legend:hover .full, .legend:focus .full, .legend:focus-within .full { display: flex; }
+  .legend .lr { display: flex; align-items: center; gap: 7px; }
+  .legend .tips { text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); line-height: 1.4; color: var(--fg-dim); border-top: 1px solid var(--line-2); padding-top: 5px; margin-top: 2px; }
   .abs { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   .list { flex: 1; border: 1px solid var(--line-2); background: var(--bg-1); }
   .gl { display: inline-block; width: 1.5em; text-align: center; }

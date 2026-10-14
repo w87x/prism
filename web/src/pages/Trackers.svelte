@@ -150,7 +150,7 @@
         {/if}
         <Field label="Alerts" hint="deterministic tests on typed columns, checked on every write — you are told when one becomes true; a row whose value was not observed is unknown, never false">
           {#each t.conditions || [] as c (c.name)}
-            <div class="chg"><span class="hi">{c.name}</span> <span class="dim">{c.field} {opSym(c.op)} {c.value ?? ''}</span> {#if c.notify}<Badge tone="accent">notifies</Badge>{/if} <button type="button" class="x" title="remove" onclick={() => removeAlert(c.name)}>×</button></div>
+            <div class="chg"><span class="hi">{c.name}</span> <span class="dim">{c.field} {opSym(c.op)} {c.value ?? ''}</span> {#if c.notify}<Badge tone="accent">notifies</Badge>{/if} <button type="button" class="xbtn" title="remove" onclick={() => removeAlert(c.name)}>×</button></div>
           {:else}<div class="mute sm">none</div>{/each}
           <div class="alertform">
             <Input bind:value={alert.name} placeholder="name, e.g. cheap" size="sm" />
@@ -210,7 +210,6 @@
   .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .changes { display: flex; flex-direction: column; gap: 4px; max-height: 24vh; overflow: auto; font-size: var(--fs-sm); flex: none; }
   .chg { border-bottom: 1px solid var(--line-2); padding-bottom: 3px; }
-  .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font: inherit; }
   .ty { margin-left: 5px; }
   .alertform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
   .alertform > :global(*) { flex: 0 1 auto; width: auto; min-width: 120px; }

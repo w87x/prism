@@ -44,5 +44,4 @@
   .nm { color: var(--fg-hi); font-weight: 700; }
   .now { font-size: 10.5px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--fg-dim); }
-  .lnk { background: none; border: 0; color: var(--accent); text-align: left; padding: 0; font-size: var(--fs-sm); } .lnk:hover { color: var(--accent-hi); }
 </style>

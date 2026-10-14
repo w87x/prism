@@ -30,7 +30,7 @@
       <div><Badge tone={q ? 'accent' : 'attn'}>{q ? 'question' : 'hypothesis'}</Badge> <span class="mute sm">{f.bank}</span></div>
       <div class="qtx">{f.text}</div>
       <OpenInsight {f} ondone={load} />
-      <button type="button" class="lk" onclick={() => inMemory(f)}>see the facts behind it</button>
+      <button type="button" class="lnk dim lk" onclick={() => inMemory(f)}>see the facts behind it</button>
     </div>
   {:else}<div class="sm mute">nothing open right now</div>{/each}
   {#snippet footer()}<Button variant="primary" onclick={() => (open = false)}>Close</Button>{/snippet}
@@ -39,5 +39,5 @@
 <style>
   .qrow { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line-2); }
   .qtx { color: var(--fg-hi); }
-  .lk { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--fg-mute); font-size: var(--fs-sm); text-decoration: underline; cursor: pointer; }
+  .lk { align-self: flex-start; text-decoration: underline; }
 </style>

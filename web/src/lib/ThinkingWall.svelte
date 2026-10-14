@@ -3,6 +3,7 @@
   // look as the chat's thinking panel, but big enough to actually read several agents at once.
   import { S, activeRuns, fmtTokens } from './store.svelte.js';
   import Segmented from './ui/Segmented.svelte';
+  import Button from './ui/Button.svelte';
   import Led from './ui/Led.svelte';
   import Glyph from './ui/Glyph.svelte';
   import RunText from './RunText.svelte';
@@ -36,8 +37,8 @@
       <span class="grow"></span>
       <Segmented size="sm" bind:value={size} options={[{ value: '2', label: '2×2' }, { value: '3', label: '3×3' }, { value: '4', label: '4×4' }]} />
       <EditorBadge />
-      {#if !standalone}<button type="button" class="x" title="open the wall in its own window (for a second display)" onclick={popOut}>⧉ new window</button>
-      <button type="button" class="x" title="close (Esc)" onclick={() => (S.wallOpen = false)}>✕</button>{/if}
+      {#if !standalone}<Button size="sm" variant="ghost" title="open the wall in its own window (for a second display)" onclick={popOut}>⧉ new window</Button>
+      <Button size="sm" variant="ghost" title="close (Esc)" onclick={() => (S.wallOpen = false)}>✕</Button>{/if}
     </div>
     <div class="grid" style="grid-template-columns: repeat({n}, minmax(0, 1fr)); grid-template-rows: repeat({n}, minmax(0, 1fr));">
       {#each shown as r (r.id)}
@@ -60,8 +61,6 @@
     padding: calc(10px + max(env(safe-area-inset-top), var(--ios-safari-top-floor, 0px))) calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); background: radial-gradient(ellipse at center, color-mix(in srgb, rgb(var(--rgb-fg)) 9%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 100%); }
   .top { display: flex; align-items: center; gap: 12px; flex: none; }
   .ttl { color: var(--accent); letter-spacing: 0.25em; font-size: 12px; text-shadow: var(--glow-accent); display: inline-flex; gap: 8px; align-items: center; }
-  .x { background: none; border: 1px solid var(--line-2); color: var(--fg-dim); padding: 2px 9px; }
-  .x:hover { color: var(--fg-hi); border-color: var(--fg-dim); }
   .grid { flex: 1; min-height: 0; display: grid; gap: 8px; }
   .tile { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-3); background: color-mix(in srgb, rgb(var(--rgb-fg)) 4%, rgba(0,0,0,0.85)); box-shadow: inset 0 0 18px rgb(var(--rgb-fg) / 0.08); padding: 6px 9px; cursor: pointer; overflow: hidden; }
   .tile:hover { border-color: var(--fg-dim); }

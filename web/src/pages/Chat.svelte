@@ -264,8 +264,8 @@
     {/if}
     {#if docs.length || paths.length}
       <div class="chips">
-        {#each docs as d, i}<span class="chip" title={d.name}><Icon name="clip" size={11} /><span class="ellipsis">{d.name}</span><span class="mute">{sizeText(d.size)}</span><button type="button" aria-label="remove {d.name}" onclick={() => docs.splice(i, 1)}>×</button></span>{/each}
-        {#each paths as p, i}<span class="chip path" title={p}><Icon name="folder" size={11} /><span class="ellipsis">{base(p)}</span><button type="button" aria-label="remove {p}" onclick={() => paths.splice(i, 1)}>×</button></span>{/each}
+        {#each docs as d, i}<span class="chip" title={d.name}><Icon name="clip" size={11} /><span class="ellipsis">{d.name}</span><span class="mute">{sizeText(d.size)}</span><button type="button" class="xbtn" aria-label="remove {d.name}" onclick={() => docs.splice(i, 1)}>×</button></span>{/each}
+        {#each paths as p, i}<span class="chip path" title={p}><Icon name="folder" size={11} /><span class="ellipsis">{base(p)}</span><button type="button" class="xbtn" aria-label="remove {p}" onclick={() => paths.splice(i, 1)}>×</button></span>{/each}
       </div>
     {/if}
     {#if atts.length}
@@ -383,14 +383,10 @@
   .pics img { max-width: 220px; max-height: 160px; border: 1px solid var(--line-2); display: block; }
   .atts { display: flex; flex-wrap: wrap; gap: 6px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-  .chip { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 1px 6px; font-size: var(--fs-sm); background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg-dim); }
-  .chip.path { border-color: var(--accent-dim); color: var(--accent-hi); }
-  .chip button { background: none; border: 0; padding: 0 0 0 2px; color: var(--fg-mute); line-height: 1; }
-  .chip button:hover { color: var(--err); }
   .att { position: relative; }
   .att img { height: 54px; max-width: 110px; object-fit: cover; border: 1px solid var(--line-2); display: block; }
   .att .rm { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; padding: 0; line-height: 14px; text-align: center; background: var(--bg-2); border: 1px solid var(--line-3); color: var(--fg-hi); border-radius: 50%; }
-  .pill { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); background: var(--bg-2); border: 1px solid var(--accent); color: var(--accent-hi); font-size: var(--fs-sm); padding: 2px 12px; box-shadow: var(--glow-accent); }
+  .pill { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); }
   .mode { display: flex; align-items: center; gap: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-faint); }
   .row { display: flex; gap: 6px; align-items: flex-end; }
   /* the toolbar buttons match the textarea's single-line height (26px) and stay pinned to its bottom edge as it grows */

@@ -27,7 +27,7 @@
     {#if open}
       {#each facts as f (f.id)}
         <div class="row">
-          <button type="button" class="tx" onclick={() => open_(f)} title="open in Memory">{f.text}</button>
+          <button type="button" class="rowlink tx" onclick={() => open_(f)} title="open in Memory">{f.text}</button>
           {#if f.kind === 'conclusion'}<Badge tone="accent">conclusion</Badge>{:else if f.confidence < 0.5}<Badge tone="attn">unverified</Badge>{/if}
           {#if f.valid_to}<Badge tone="mute">outdated</Badge>{/if}
           <span class="sm mute nowrap">{f.bank}</span>
@@ -45,6 +45,5 @@
   .head { background: none; border: 0; color: var(--fg-dim); font: inherit; font-size: 11px; cursor: pointer; padding: 0; }
   .head:hover { color: var(--fg); }
   .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line-2); }
-  .tx { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; }
-  .tx:hover { text-decoration: underline; }
+  .tx { flex: 1; }
 </style>

@@ -30,6 +30,4 @@
   .sw { display: flex; width: 100%; height: 14px; border: 1px solid var(--line-2); }
   .sw i { flex: 1; display: block; }
   .tex { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-  .chip { padding: 2px 9px; background: var(--bg-2); border: 1px solid var(--line); color: var(--fg-dim); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.06em; }
-  .chip.on { border-color: var(--accent); color: var(--fg-hi); box-shadow: var(--glow-accent); }
 </style>

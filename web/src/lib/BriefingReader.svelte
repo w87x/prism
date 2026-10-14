@@ -158,7 +158,7 @@
   .seg button { background: none; border: 0; color: var(--fg-dim); padding: 0 14px; min-height: 38px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
   .seg button.on { color: var(--fg-hi); background: linear-gradient(180deg, rgb(var(--rgb-fg) / 0.16), transparent); }
   .grow { flex: 1; }
-  .pill { background: var(--bg-2); border: 1px solid var(--accent); color: var(--accent-hi); min-height: 38px; padding: 0 16px; font-size: 14px; animation: pop 0.4s ease; }
+  .pill { min-height: 38px; padding: 0 16px; font-size: 14px; animation: pop 0.4s ease; }
   @keyframes pop { from { transform: scale(0.85); opacity: 0; } }
   main { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 20px 32px; -webkit-overflow-scrolling: touch; }
   article { max-width: 780px; margin: 0 auto; }

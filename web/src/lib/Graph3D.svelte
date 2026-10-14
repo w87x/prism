@@ -313,8 +313,8 @@
 
 <div class="g3" bind:this={host}>
   <div class="bt">
-    <button type="button" class:on={spin} onclick={toggleSpin} title="slowly turn the whole graph (drag to take over)" aria-pressed={spin}>⟳</button>
-    <button type="button" onclick={() => api?.reset()} title="reset the view">⌖</button>
+    <button type="button" class="ibtn" class:on={spin} onclick={toggleSpin} title="slowly turn the whole graph (drag to take over)" aria-pressed={spin}>⟳</button>
+    <button type="button" class="ibtn" onclick={() => api?.reset()} title="reset the view">⌖</button>
   </div>
   {#if tip}<div class="tip" style="left:{tip.x + 14}px; top:{tip.y + 14}px">{tip.text}</div>{/if}
 </div>
@@ -322,8 +322,5 @@
 <style>
   .g3 { position: absolute; inset: 0; overflow: hidden; }
   .bt { position: absolute; left: 8px; top: 8px; z-index: 4; display: flex; flex-direction: column; gap: 4px; }
-  .bt button { width: 32px; height: 32px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
-  .bt button:hover { background: var(--bg-4); }
-  .bt button.on { border-color: var(--accent); color: var(--accent-hi); }
   .tip { position: absolute; z-index: 5; max-width: 300px; padding: 5px 8px; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--fg-hi); font-size: var(--fs-sm); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
 </style>

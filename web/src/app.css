@@ -105,6 +105,35 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
+/* ── shared elements: one look for each reusable piece, so pages do not restyle their own ──
+   .lnk      a link-styled button ("open task queue ›"); .lnk.dim for a quieter one
+   .rowlink  a text button that is the content of a row (a fact, a source); underlines on hover
+   .xbtn     the small × that dismisses or removes something inside a chip or badge
+   .chip     a small tag, attachment or choice; .chip.on is the chosen one, .chip.warn flags
+   .ibtn     a square icon button: 32px for a map's controls, .ibtn.sm for the little actions that appear on a row
+   .pill     a floating "N new" prompt that jumps somewhere */
+.lnk { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--accent); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.lnk:hover { color: var(--accent-hi); }
+.lnk.up { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.lnk.dim { color: var(--fg-dim); } .lnk.dim:hover { color: var(--accent); }
+.rowlink { background: none; border: 0; padding: 0; font: inherit; color: var(--fg); text-align: left; cursor: pointer; min-width: 0; }
+.rowlink:hover { color: var(--fg-hi); text-decoration: underline; }
+.xbtn { background: none; border: 0; padding: 0 2px; font: inherit; line-height: 1; color: inherit; opacity: 0.6; cursor: pointer; }
+.xbtn:hover { opacity: 1; color: var(--err); }
+.chip { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 1px 6px; font-size: var(--fs-sm); background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg-dim); border-radius: var(--r); }
+.chip.path { border-color: var(--accent-dim); color: var(--accent-hi); }
+.chip.warn { border-color: var(--attn-dim, var(--attn)); color: var(--attn); }
+button.chip { cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 9px; border-color: var(--line); }
+button.chip:hover { color: var(--fg); border-color: var(--line-3); }
+button.chip.on { border-color: var(--accent); color: var(--fg-hi); box-shadow: var(--glow-accent); }
+.ibtn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 0; padding: 0; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-hi); border-radius: var(--r); font-size: 16px; line-height: 1; cursor: pointer; }
+.ibtn:hover { background: var(--bg-4); }
+.ibtn.on { border-color: var(--accent); color: var(--accent-hi); }
+.ibtn.sm { width: auto; min-width: 20px; height: auto; padding: 1px 5px; font-size: 11px; background: none; color: var(--fg-mute); }
+.ibtn.sm:hover { background: none; color: var(--fg); border-color: var(--line-3); }
+.ibtn.sm.danger:hover { color: var(--err); border-color: var(--err); }
+.pill { background: var(--bg-2); border: 1px solid var(--accent); color: var(--accent-hi); font-size: var(--fs-sm); padding: 2px 12px; box-shadow: var(--glow-accent); cursor: pointer; }
+
 /* scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
