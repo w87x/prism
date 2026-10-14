@@ -14,6 +14,34 @@
 
   let view = $state('standup');
 
+  // ── tools paused, ant trails ──
+  let paused = $state([]);
+  let trails = $state([]);
+  const loadHealth = async () => { paused = (await call('breaker.list', {}, { quiet: true })) || []; trails = (await call('trails.list', {}, { quiet: true })) || []; };
+  async function resume(t) { await call('breaker.resume', { tool: t.tool }); toast(`${t.tool} resumed`); loadHealth(); }
+
+  // ── trust ──
+  let trust = $state([]);
+  const loadTrust = async () => { trust = (await call('trust.list', {}, { quiet: true })) || []; };
+  const ltone = (l) => ({ trusted: 'ok', distrusted: 'err' })[l] || 'mute';
+  async function resetTrust(r) { await call('trust.reset', { agent: r.agent, tool: r.tool }); loadTrust(); }
+
+  // ── lessons (immune memory) ──
+  let lessons = $state([]);
+  let nl = $state(null);
+  const loadLessons = async () => { lessons = (await call('antibodies.list', {}, { quiet: true })) || []; };
+  async function addLesson() { if (await call('antibodies.add', { agent: nl.agent, triggers: nl.triggers.split(',').map((x) => x.trim()).filter(Boolean), rule: nl.rule })) { nl = null; loadLessons(); } }
+  async function delLesson(l) { await call('antibodies.delete', { id: l.id }); loadLessons(); }
+
+  // ── charter and the working-with-you profile ──
+  let charter = $state({ text: '' });
+  let profile = $state('');
+  let refreshing = $state(false);
+  const loadProfile = async () => { const bs = (await call('core.list', {}, { quiet: true })) || []; profile = (bs.find((b) => b.label === 'working_with_user') || {}).text || ''; };
+  const saveCharter = () => saveSetting('charter', { text: charter.text }, 'Charter saved');
+  async function promote(l) { charter.text = (charter.text.trim() + '\n- ' + l.rule).trim(); await saveCharter(); toast('Added to the charter'); }
+  async function refreshProfile() { refreshing = true; const r = await call('person.refresh', {}); refreshing = false; if (r) { profile = r; toast('Profile updated'); } else toast('Not enough to go on yet — it needs a dozen or more of your messages'); }
+
   // ── runbooks ──
   let books = $state([]);
   let edit = $state(null);
@@ -52,7 +80,8 @@
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((l, i) => ({ value: String(i), label: l }));
 
   $effect(() => {
-    loadBooks(); loadRv(); loadUps();
+    loadBooks(); loadRv(); loadUps(); loadHealth(); loadTrust(); loadLessons(); loadProfile();
+    loadSetting('charter', { text: '' }).then((c) => (charter = { text: c.text || '' }));
     loadSetting('autonomy', { runbooks_off: false, audit_one_in: 0 }).then((c) => (auto = { runbooks_off: !!c.runbooks_off, audit_one_in: c.audit_one_in || 0 }));
     loadSetting('review', { enabled: false, always_ask: [] }).then((c) => (rv = { enabled: !!c.enabled, always_ask: c.always_ask || [] }));
     loadSetting('standup', { off: false, weekday: 1, hour: 9 }).then((c) => (su = { off: !!c.off, weekday: c.weekday ?? 1, hour: c.hour ?? 9 }));
@@ -61,7 +90,7 @@
 </script>
 
 <div class="body scroll">
-  <Segmented size="sm" bind:value={view} options={[{ value: 'standup', label: 'Standup' }, { value: 'runbooks', label: 'Runbooks' }, { value: 'decisions', label: 'Decisions' }, { value: 'review', label: 'Reviewer' }]} />
+  <Segmented size="sm" bind:value={view} options={[{ value: 'standup', label: 'Standup' }, { value: 'runbooks', label: 'Runbooks' }, { value: 'decisions', label: 'Decisions' }, { value: 'review', label: 'Reviewer' }, { value: 'trust', label: 'Trust' }, { value: 'health', label: 'Tools & trails' }, { value: 'lessons', label: 'Lessons' }, { value: 'charter', label: 'Charter & you' }]} />
 
   {#if view === 'standup'}
     <div class="sm mute" style="margin:8px 0">Once a week the team reports like a team: what each agent got done, what failed, what you rated down, which runbooks changed, how long the models were out, which decisions are due for another look. A pattern of thumbs-down on one agent's results (rate them in Tasks) puts a review on Metis's desk.</div>
@@ -110,6 +139,43 @@
       </div>
     {:else}<Empty>Nothing here.</Empty>{/each}
 
+  {:else if view === 'trust'}
+    <div class="sm mute" style="margin:8px 0">Trust is earned, tool by tool, from how an agent's work turned out: tasks that ended well, results you rated up, calls you or the reviewer refused, results you rated down. With the reviewer on, a good record (five or more good runs, few bad) goes through without asking; an unknown one is put to the reviewer; a bad one always comes to you. Code execution is never waved through.</div>
+    {#each trust as r (r.agent + r.tool)}
+      <div class="row wrap gap-8 sm"><Badge tone={ltone(r.level)}>{r.level}</Badge><b>{r.agent}</b><code>{r.tool}</code><span class="mute">{r.wins} good · {r.losses} bad</span><span class="grow"></span><Button size="sm" variant="ghost" onclick={() => resetTrust(r)}>Forget</Button></div>
+    {:else}<Empty>Nothing yet — trust builds as tasks finish.</Empty>{/each}
+
+  {:else if view === 'health'}
+    <div class="sm mute" style="margin:8px 0">A tool that keeps failing is cut off for everyone for a while (20 minutes, longer if it keeps failing after), instead of every agent retrying it. Below: what is paused now, and each agent's trail — what worked recently leaves a trace that fades by half every two weeks; routing leans a little toward agents with a fresh record.</div>
+    <h4>Paused tools</h4>
+    {#each paused as t (t.tool)}
+      <div class="row wrap gap-8 sm"><Badge tone="err">paused</Badge><code>{t.tool}</code><span class="mute">until {stamp(t.until)}</span><span class="dim grow ellipsis" title={t.last}>{t.last}</span><Button size="sm" variant="ghost" onclick={() => resume(t)}>Resume now</Button></div>
+    {:else}<div class="sm mute">none — every tool is working</div>{/each}
+    <h4>Trails</h4>
+    {#each trails as r (r.agent)}
+      <div class="row gap-8 sm"><b style="min-width:110px">{r.agent}</b><span class="bar"><i style="width:{Math.max(2, Math.min(100, (r.weight / 12) * 100))}%" class:neg={r.weight < 0}></i></span><span class="mute">{r.weight} · {r.wins} ok · {r.losses} bad</span></div>
+    {:else}<div class="sm mute">no trails yet</div>{/each}
+
+  {:else if view === 'lessons'}
+    <div class="sm mute" style="margin:8px 0">Short lessons learned from mistakes — a stalled task, a result you rated down. Each has a trigger and appears in an agent's task only when it fires, so souls stay small. A lesson that never fires for two months expires. Promote one that keeps firing to the charter.</div>
+    <div class="row wrap gap-8" style="margin-bottom:8px"><span class="grow"></span><Button variant="primary" onclick={() => (nl = { agent: '*', triggers: '', rule: '' })}>Add a lesson</Button></div>
+    {#each lessons as l (l.id)}
+      <div class="card">
+        <div class="row wrap gap-8"><Badge tone="mute">{l.agent === '*' ? 'everyone' : l.agent}</Badge>{#each l.triggers as t}<code class="sm">{t}</code>{:else}<span class="sm mute">always</span>{/each}<span class="sm mute">fired {l.hits}× · {l.source}</span><span class="grow"></span>
+          {#if l.hits >= 3}<Button size="sm" variant="ghost" onclick={() => promote(l)}>Add to charter</Button>{/if}<Button size="sm" variant="ghost" onclick={() => delLesson(l)}>Delete</Button></div>
+        <div>{l.rule}</div>
+      </div>
+    {:else}<Empty>No lessons yet.</Empty>{/each}
+
+  {:else if view === 'charter'}
+    <div class="sm mute" style="margin:8px 0">The charter is “how we work here”: house rules every agent is given. Keep it short — a handful of lines about what the team always or never does.</div>
+    <Textarea bind:value={charter.text} rows={8} mono={false} placeholder={'- Never download anything without telling me first.\n- Prices always come with the store and the date.\n- When unsure which of two things I meant, ask once, in one message.'} />
+    <div class="row end" style="margin:6px 0 14px"><Button variant="primary" onclick={saveCharter}>Save</Button></div>
+    <h4>How to work with you</h4>
+    <div class="sm mute">Learned from how you actually use PRISM — how you write, when you are around, what you rated down and why — and kept in core memory, so every agent reads it. Refreshed weekly with the standup. Edit it freely in Memory → Core memory.</div>
+    {#if profile}<div class="card"><div class="pre">{profile}</div></div>{:else}<div class="sm mute" style="margin:6px 0">Nothing yet: it needs a dozen or more of your messages.</div>{/if}
+    <div class="row end"><Button variant="ghost" loading={refreshing} onclick={refreshProfile}>Update now</Button></div>
+
   {:else}
     <div class="sm mute" style="margin:8px 0">Approval prompts for small actions train everyone to click “allow” without reading — which makes the prompts that matter worthless. With the reviewer on, a tool call that would ask you is first put to the main model, which knows your request: it approves what clearly follows from it, refuses what clearly does not, and passes the rest to you as before. Never reviewed (always asked): anything while web/mail content is in the turn, programs that run code, and tools that send, delete, pay, publish or install.</div>
     <div class="row wrap gap-8" style="margin-bottom:8px"><Switch bind:checked={rv.enabled} label="reviewer on" onchange={saveRv} /><span class="grow"></span><Button size="sm" variant="ghost" onclick={loadRv}>Refresh</Button></div>
@@ -130,6 +196,15 @@
   {#snippet footer()}<Button variant="ghost" onclick={() => (edit = null)}>Cancel</Button><Button variant="primary" onclick={saveBook}>Save</Button>{/snippet}
 </Modal>
 
+<Modal open={!!nl} title="Add a lesson" width={560} onclose={() => (nl = null)}>
+  {#if nl}
+    <Field label="For which agent" hint="* = everyone"><Input bind:value={nl.agent} /></Field>
+    <Field label="Shown when the task mentions" hint="words, comma separated; tool:<name> for agents holding that tool; empty = always"><Input bind:value={nl.triggers} /></Field>
+    <Field label="The lesson"><Textarea bind:value={nl.rule} rows={3} mono={false} placeholder="When checking prices, use the mobile site; the desktop one blocks bots." /></Field>
+  {/if}
+  {#snippet footer()}<Button variant="ghost" onclick={() => (nl = null)}>Cancel</Button><Button variant="primary" disabled={!nl?.rule?.trim()} onclick={addLesson}>Save</Button>{/snippet}
+</Modal>
+
 <Modal open={!!nd} title="Add a decision" width={560} onclose={() => (nd = null)}>
   {#if nd}
     <Field label="Title"><Input bind:value={nd.title} /></Field>
@@ -146,4 +221,5 @@
   .num { width: 56px; background: var(--bg); color: var(--fg); border: 1px solid var(--line-2); padding: 1px 4px; }
   h4 { margin: 12px 0 4px; }
   .err { color: var(--err); }
+  .bar { flex: 1; max-width: 220px; height: 5px; background: var(--bg-3); } .bar i { display: block; height: 100%; background: var(--accent); } .bar i.neg { background: var(--err); }
 </style>

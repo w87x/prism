@@ -30,6 +30,8 @@ var Actions = []Action{
 	{"runbook", "Write a runbook for a routine job from its successful runs", "Autonomy", "main"},
 	{"tool_review", "Pre-approve or refuse a tool call before asking you", "Autonomy", "main"},
 	{"standup", "Write the weekly team standup", "Autonomy", "aux"},
+	{"handover", "Write a handover note when a task stops", "Tasks", "aux"},
+	{"person_model", "Update the working-with-you profile from how you actually use PRISM", "Memory", "main"},
 	{"restart_review", "Judge a task resumed after a restart", "Tasks", "aux"},
 	{"task_review", "Review a task that stopped early", "Tasks", "aux"},
 	{"recover", "Plan the retry of a failed task", "Tasks", "aux"},

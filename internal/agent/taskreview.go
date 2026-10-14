@@ -146,10 +146,10 @@ func (e *Engine) ResolveTask(ctx context.Context, id int64, action, note string)
 	switch action {
 	case "continue":
 		err = enqueue(t.ToAgent, t.Title, fmt.Sprintf("%s\n\n(Earlier attempt, task #%d, stopped early: %s. Its partial result:\n%s\nContinue from there instead of starting over, and keep it efficient.)%s",
-			t.Input, t.ID, t.Error, brief(t.Result, 1500), ctxNote))
+			t.Input, t.ID, t.Error, brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
 	case "split":
 		err = enqueue("Atlas", "Split: "+t.Title, fmt.Sprintf("Task #%d for %s stopped early (%s) because it was too large. Break the job into smaller, independent steps and run them (delegate each to a suitable agent), then combine the results. Original request:\n%s\n\nPartial result so far:\n%s%s",
-			t.ID, t.ToAgent, t.Error, t.Input, brief(t.Result, 1500), ctxNote))
+			t.ID, t.ToAgent, t.Error, t.Input, brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
 	case "evolve":
 		err = enqueue("Metis", "Improve "+t.ToAgent, fmt.Sprintf("Task #%d for agent %s stopped early (%s). Read it with task_transcript(id=%d), work out what the agent kept getting wrong or lacked, and propose a soul/tool improvement with evolve_propose only if the evidence is clear.%s",
 			t.ID, t.ToAgent, t.Error, t.ID, ctxNote))

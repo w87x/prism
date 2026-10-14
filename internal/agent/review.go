@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -39,6 +40,17 @@ func (e *Engine) preReview(ctx context.Context, env *tools.Env, tool *tools.Tool
 			return "ask", ""
 		}
 	}
+	// trust earned by how this agent's earlier work with the tool turned out: a good record goes through, a bad one is asked about
+	switch level, w, l := e.trustLevel(ctx, env.Agent, tc); level {
+	case TrustDistrusted:
+		return "ask", ""
+	case TrustTrusted:
+		if tool.Risk != tools.RiskExec {
+			reason := fmt.Sprintf("trusted: %d good runs with it, %d bad", w, l)
+			_, _ = e.DB.Exec(ctx, `INSERT INTO review_log (agent, tool, args, verdict, reason, task_id) VALUES ($1,$2,$3,'approve',$4,NULLIF($5,0))`, env.Agent, tc, brief(args, 400), reason, env.TaskID)
+			return "approve", reason
+		}
+	}
 	var v struct {
 		Verdict string `json:"verdict"`
 		Reason  string `json:"reason"`
@@ -56,6 +68,7 @@ func (e *Engine) preReview(ctx context.Context, env *tools.Env, tool *tools.Tool
 			verdict = "ask" // code that runs, reaching outside: the reviewer may refuse it but never wave it through
 		}
 	case "deny":
+		e.noteTrustLoss(ctx, env.Agent, tc, 1)
 	default:
 		verdict = "ask"
 	}

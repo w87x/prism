@@ -203,6 +203,7 @@
     <Field label="Input"><pre>{t.input}</pre></Field>
     {#if t.question}<Field label="Waiting for"><pre class="attn">{t.question}</pre></Field>{/if}
     {#if t.result}<details class="fold" open><summary>Result</summary><pre>{t.result}</pre></details>{/if}
+    {#if detail.meta?.handover}<details class="fold"><summary>Handover note</summary><pre>{detail.meta.handover}</pre></details>{/if}
     {#if t.error}<Field label="Error"><pre class="err">{t.error}</pre></Field>{/if}
     {#if detail.summary}
       {@const sm = detail.summary}

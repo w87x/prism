@@ -80,6 +80,7 @@ type Engine struct {
 	asks      map[int64]*pendingAsk
 	cancels   map[int64]context.CancelFunc // task id → cancel
 	Sinks     []NoticeSink
+	brk       toolBreaker // tools cut off after repeated failures (nature.go)
 	// OnTaskDone, when set, is called after a task finished successfully (used to review coding workspaces).
 	OnTaskDone func(ctx context.Context, t tasks.Task)
 }
@@ -221,7 +222,9 @@ type RunSpec struct {
 	Depth       int
 	Preamble    string
 	ParentRun   int64
-	Run         *activeRun // pre-registered by the caller (chat steering); nil → created here
+	// ReadOnly: a scout's look — tools that change anything are refused, the small model is used and the budget is short.
+	ReadOnly bool
+	Run      *activeRun // pre-registered by the caller (chat steering); nil → created here
 	// Kind tags what kind of run this is for the UI (e.g. "quick" for QuickAsk) — inherited by every run it
 	// delegates to (see register()), so the whole resulting tree can be told apart from an unrelated chat
 	// conversation's own run tree even after several hops of delegation. Leaf sets "ask" the same way.
@@ -346,6 +349,9 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	if modelRef == "" && spec.Task != nil { // routine jobs (cron, standing intents) run on the cheaper model unless the agent pins its own
 		modelRef = e.routineModelRef(ctx, *spec.Task)
 	}
+	if spec.ReadOnly && p.Model == "" && e.LLM.RoleRef(ctx, "fast") != "" {
+		modelRef = "role:fast" // a scout's look is cheap
+	}
 	window := e.LLM.Window(ctx, modelRef)
 	ar.window.Store(int64(window))
 
@@ -418,6 +424,9 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		if cap := grCfg.AutonomousMaxIterations; cap > 0 && maxIter > cap {
 			maxIter = cap
 		}
+	}
+	if spec.ReadOnly && maxIter > 8 {
+		maxIter = 8
 	}
 	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort, failWarnAt: grCfg.ToolFailWarn, failBlockAt: grCfg.ToolFailBlock}
 	baseIter, extensions := maxIter, 0
@@ -1129,6 +1138,14 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		emit("denied", false, msg)
 		return toolResult{text: msg}
 	}
+	if spec.ReadOnly && tool.Risk != tools.RiskRead {
+		emit("denied", false)
+		return toolResult{text: "Error: this is a read-only look: " + tc.Name + " would change something. Use read-only tools only."}
+	}
+	if ok, msg := e.brk.allow(tc.Name); !ok { // pain reflex: the tool keeps failing for everyone
+		emit("denied", false, msg)
+		return toolResult{text: msg}
+	}
 	warn := guard.note(sig(tc))
 	if tool.Risk != tools.RiskRead {
 		needConfirm := !st.Armed || (tainted && !tool.Auto)
@@ -1169,6 +1186,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 				ar.approved.Store(tc.Name, true)
 			}
 			if err != nil || !isYes(ans) {
+				if err == nil {
+					e.noteTrustLoss(ctx, env.Agent, tc.Name, 2) // the user said no: the trust it had is worth less
+				}
 				emit("denied", false)
 				return toolResult{text: "Error: the user did not approve running " + tc.Name + ". Do not retry it; find another way or explain."}
 			}
@@ -1245,6 +1265,20 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 					}
 				}()
 				return toolResult{text: e.interruptedText(ctx, tool.Name, env.TaskID, detached, spec.SteerFrom)}
+			}
+		}
+	}
+	{
+		var ni1 *tools.NeedsInput
+		var sl1 *tools.Sleep
+		if !errors.As(err, &ni1) && !errors.As(err, &sl1) && ctx.Err() == nil {
+			msg := ""
+			if err != nil {
+				msg = err.Error()
+			}
+			if tripped, until := e.brk.record(tc.Name, err == nil, msg); tripped {
+				e.Emit("tool.paused", map[string]any{"tool": tc.Name, "until": until})
+				e.Notify(context.WithoutCancel(ctx), Notice{Level: "attention", Text: fmt.Sprintf("%s keeps failing, so I paused it for everyone until %s (last error: %s). Resume it in Autonomy → Team → Tools once what is wrong is fixed.", tc.Name, until.Format("15:04"), brief(msg, 140))})
 			}
 		}
 	}

@@ -86,4 +86,36 @@ func (s *Server) registerTeam() {
 		}
 		return out, nil
 	})
+
+	// pain reflex, ant trails, trust, immune memory, person model
+	rpc(s, "breaker.list", func(ctx context.Context, _ none) ([]agent.BreakerRow, error) { return a.Engine.PausedTools(), nil })
+	rpc(s, "breaker.resume", func(ctx context.Context, r struct {
+		Tool string `json:"tool"`
+	}) (bool, error) {
+		a.Engine.ResumeTool(r.Tool)
+		return true, nil
+	})
+	rpc(s, "trails.list", func(ctx context.Context, _ none) ([]agent.TrailRow, error) { return a.Engine.Trails(ctx), nil })
+	rpc(s, "trust.list", func(ctx context.Context, _ none) ([]agent.TrustRow, error) { return a.Engine.TrustTable(ctx), nil })
+	rpc(s, "trust.reset", func(ctx context.Context, r struct {
+		Agent string `json:"agent"`
+		Tool  string `json:"tool"`
+	}) (bool, error) {
+		a.Engine.ResetTrust(ctx, r.Agent, r.Tool)
+		return true, nil
+	})
+	rpc(s, "antibodies.list", func(ctx context.Context, _ none) ([]agent.Antibody, error) { return a.Engine.Antibodies(ctx) })
+	rpc(s, "antibodies.add", func(ctx context.Context, r struct {
+		Agent    string   `json:"agent"`
+		Triggers []string `json:"triggers"`
+		Rule     string   `json:"rule"`
+	}) (bool, error) {
+		return true, a.Engine.AddAntibody(ctx, r.Agent, r.Triggers, r.Rule, "added by the user")
+	})
+	rpc(s, "antibodies.delete", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.DeleteAntibody(ctx, r.ID)
+	})
+	rpc(s, "person.refresh", func(ctx context.Context, _ none) (string, error) { return a.Engine.RefreshPersonModel(ctx) })
 }

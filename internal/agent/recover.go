@@ -23,15 +23,17 @@ Decide whether ONE more attempt with a better instruction can plausibly finish i
 For "retry", write "prompt": a complete replacement instruction for a fresh agent that (1) restates the goal, (2) states concisely everything already achieved and found, so nothing is redone, (3) names what failed or looped and what to do instead, (4) asks for a focused plan of at most 8 tool calls and a final answer that reports plainly what could not be done rather than continuing forever.
 Always give "lesson" (one or two sentences: why it stalled) and "achieved" (what was accomplished, one short paragraph).
 Always give "pitfall": ONE imperative sentence (at most 40 words) the same agent can follow the next time it meets a similar task, in the form "When <kind of task>, do not <what it looped on>; instead <what to do, or stop and report what is missing>". It is stored as a lesson and shown to the agent when a similar task starts, so it must be general enough to match a similar task and specific enough to act on.
-Answer JSON only: {"decision":"retry|fail","lesson":"...","achieved":"...","pitfall":"...","prompt":"..."}`
+Also give "triggers": two to four lower-case words that would appear in a similar future request (they decide when the pitfall is shown again).
+Answer JSON only: {"decision":"retry|fail","lesson":"...","achieved":"...","pitfall":"...","triggers":["..."],"prompt":"..."}`
 
 type recovery struct {
-	Decision string `json:"decision"`
-	Lesson   string `json:"lesson"`
-	Achieved string `json:"achieved"`
-	Pitfall  string `json:"pitfall"`
-	Prompt   string `json:"prompt"`
-	Retried  bool   `json:"-"`
+	Decision string   `json:"decision"`
+	Lesson   string   `json:"lesson"`
+	Achieved string   `json:"achieved"`
+	Pitfall  string   `json:"pitfall"`
+	Triggers []string `json:"triggers"`
+	Prompt   string   `json:"prompt"`
+	Retried  bool     `json:"-"`
 }
 
 func (e *Engine) autoRetryOn(ctx context.Context) bool {
@@ -73,6 +75,7 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 	}
 	if pf := strings.TrimSpace(p.Pitfall); len(pf) > 20 {
 		plan.Pitfall = pf
+		plan.Triggers = p.Triggers
 	}
 	if strings.EqualFold(strings.TrimSpace(p.Decision), "fail") {
 		plan.Decision = "fail"
@@ -152,6 +155,9 @@ func (e *Engine) rememberPitfall(ctx context.Context, t tasks.Task, p *Profile, 
 	text := "Pitfall: " + strings.TrimSpace(plan.Pitfall)
 	if r := []rune(text); len(r) > 400 {
 		text = string(r[:400]) + "…"
+	}
+	if len(plan.Triggers) > 0 { // immune memory: the same lesson, shown deterministically when a similar request shows up, and expiring if it never does
+		_ = e.AddAntibody(ctx, p.Name, plan.Triggers, strings.TrimSpace(plan.Pitfall), "a stalled task (#"+fmt.Sprint(t.ID)+")")
 	}
 	_, _ = e.Memory.Store(ctx, memory.StoreReq{Bank: "profile", Agent: p.Name, Text: text, Tags: []string{"pitfall", "stall"},
 		Source: "recovery", Confidence: 0.85, ValueRatio: 0.9, TaskID: t.ID})

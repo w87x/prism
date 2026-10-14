@@ -82,7 +82,7 @@ memory.entity_graph memory.export memory.fact memory.facts memory.find memory.fu
 memory.stats models.list notifications.list obsidian.status onboarding.state onboarding.templates ops.dashboard ops.delegation plugins.get
 plugins.info plugins.list plugins.status processes.list processes.log providers.list roles.get runs.snapshot search.all settings.get setup.info
 shortcuts.list skills.get skills.hubs skills.list tasks.get tasks.list tasks.tree telegram.status today.get tools.list trackers.get trackers.list
-web.providers runbooks.list decisions.list review.log standup.list llm.health`.split(/\s+/));
+web.providers runbooks.list decisions.list review.log standup.list llm.health breaker.list trails.list trust.list antibodies.list core.list`.split(/\s+/));
 setRpcGuard((method) => (S.editor.editor || READ_ONLY_OK.has(method) ? '' : 'This tab is view-only — another window is the master. Use the badge in the corner to make this one the master.'));
 export function takeOver() { return rpc('editor.claim'); }
 // A keyboard shortcut that writes (e.g. quick chat) is a deliberate "I want to act from here" — same

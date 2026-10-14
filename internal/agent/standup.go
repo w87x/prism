@@ -94,6 +94,15 @@ func (e *Engine) BuildStandup(ctx context.Context, since, until time.Time) (stri
 	list("DECISIONS MADE", `SELECT title||' — '||left(decision,100) FROM decisions WHERE made_at>=$1 AND made_at<$2 AND status<>'superseded'`, since, until)
 	list("DECISIONS DUE FOR ANOTHER LOOK", `SELECT '#'||id||' '||title FROM decisions WHERE status='active' AND review_at IS NOT NULL AND review_at<$1`, until)
 	list("PROMISES NOT KEPT (still open)", `SELECT agent||': '||left(title,80) FROM promise_reviews WHERE status='open'`)
+	list("REPAIRS AFTER BAD RATINGS (checked a week later)", `SELECT agent||': task #'||task_id||' — '||status||CASE WHEN what<>'' THEN ' ('||left(what,60)||')' ELSE '' END FROM repairs WHERE (checked_at>=$1 AND checked_at<$2) OR (created_at>=$1 AND created_at<$2)`, since, until)
+	if pt := e.PausedTools(); len(pt) > 0 {
+		var l []string
+		for _, r := range pt {
+			l = append(l, "- "+r.Tool+": "+brief(r.Last, 80))
+		}
+		facts += "\nTOOLS PAUSED RIGHT NOW AFTER REPEATED FAILURES:\n" + strings.Join(l, "\n") + "\n"
+	}
+	list("AGENTS WHOSE TRACK RECORD IS STRONGEST OR WEAKEST (fading trail weights)", `SELECT agent||': '||round((weight*power(0.5, extract(epoch FROM now()-updated_at)/86400/14))::numeric,1)||' ('||wins||' ok, '||losses||' bad)' FROM trails WHERE kind='*' AND wins+losses>=3 ORDER BY weight*power(0.5, extract(epoch FROM now()-updated_at)/86400/14) DESC LIMIT 6`)
 	list("REVIEWER", `SELECT verdict||' ×'||count(*)||' (e.g. '||min(tool)||')' FROM review_log WHERE at>=$1 AND at<$2 GROUP BY verdict`, since, until)
 
 	text := ""
@@ -166,6 +175,7 @@ func (e *Engine) StartStandups(ctx context.Context, loc func(context.Context) *t
 				return
 			case <-t.C:
 			}
+			e.sweepNature(ctx)
 			cfg := e.standupConfig(ctx)
 			if cfg.Off || e.LLMDown() {
 				continue
@@ -184,6 +194,7 @@ func (e *Engine) StartStandups(ctx context.Context, loc func(context.Context) *t
 				since = last
 			}
 			_, _ = e.RunStandup(context.WithoutCancel(ctx), since, now, true)
+			_, _ = e.RefreshPersonModel(context.WithoutCancel(ctx))
 		}
 	}()
 }
@@ -198,6 +209,20 @@ func (e *Engine) RateTask(ctx context.Context, id int64, rating int, note string
 	}
 	if err := e.Tasks.Rate(ctx, id, rating, note); err != nil {
 		return err
+	}
+	if t.SessionID != nil { // trust follows how the user judged the work: the tools used share the verdict
+		used := e.toolsUsed(ctx, *t.SessionID)
+		switch {
+		case rating > 0:
+			e.noteTrust(ctx, t.ToAgent, used, true)
+		case rating < 0:
+			for _, u := range used {
+				e.noteTrustLoss(ctx, t.ToAgent, u, 1)
+			}
+		}
+	}
+	if rating < 0 {
+		e.startRepair(ctx, t, note)
 	}
 	if rating >= 0 || strings.EqualFold(t.ToAgent, "Metis") {
 		return nil

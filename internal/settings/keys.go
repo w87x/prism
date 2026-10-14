@@ -17,6 +17,7 @@ const (
 	KeyHeartbeat    = "heartbeat"
 	KeyReview       = "review"
 	KeyStandup      = "standup"
+	KeyCharter      = "charter"
 	KeyOnboarding   = "onboarding"
 	KeyMemory       = "memory"
 	KeyRuntime      = "runtime"
@@ -374,4 +375,9 @@ type ElevenLabs struct {
 
 func DefaultElevenLabs() ElevenLabs {
 	return ElevenLabs{ModelID: "eleven_flash_v2_5", MonthlyCap: 8000, ConfirmOver: 600, ImageModel: "gemini-2.5-flash-image"}
+}
+
+// Charter is "how we work here": the team's house rules, written by the user (and lessons promoted from experience), given to every agent.
+type Charter struct {
+	Text string `json:"text"`
 }

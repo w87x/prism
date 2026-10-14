@@ -54,6 +54,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("agent", "agent name (see the specialists list or agent_find); leave out and the best-matching specialist is chosen"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
+			tools.Bool("scout", "a cheap read-only recon is taken first and handed to the agent as a brief — for jobs that are risky, expensive or ambiguous (unknown files, an unfamiliar site, a large change); leave out for simple jobs"),
 			tools.Str("done_when", "what 'done' means for this item — concrete, checkable acceptance criteria (e.g. 'a file saved, its path reported, at least 5 entries'). The result is checked against it before it comes back to you; leave out for trivial work"),
 			tools.IntList("refs", "artifact ids with material the agent needs (artifact_save / scratchpad_share first) — hand over bulky material by reference, not pasted"),
 			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
@@ -64,6 +65,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 					Instruction string  `json:"instruction"`
 					Title       string  `json:"title"`
 					DoneWhen    string  `json:"done_when"`
+					Scout       bool    `json:"scout"`
 					TaskID      int64   `json:"task_id"`
 					Refs        []int64 `json:"refs"`
 				} `json:"tasks"`
@@ -101,7 +103,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 							return
 						}
 					}
-					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, it.DoneWhen)
+					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, it.DoneWhen, it.Scout)
 					tainted[i] = tn
 					if err != nil {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
@@ -168,7 +170,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 					name = best
 				}
 			}
-			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen)
+			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen, false)
 			if err != nil {
 				return "", err
 			}
@@ -216,8 +218,15 @@ func (e *Engine) bestSpecialist(ctx context.Context, request, caller string) (st
 		}
 		best, bestScore := "", 0.0
 		for _, p := range ps { // ps is in text-match order, so the first of equals wins
-			if ok(p) && score[strings.ToLower(p.Name)] > bestScore {
-				best, bestScore = p.Name, score[strings.ToLower(p.Name)]
+			if !ok(p) {
+				continue
+			}
+			sc := score[strings.ToLower(p.Name)]
+			if sc > 0 {
+				sc += e.trailBonus(ctx, p.Name) // ant trails: a fresh record of success shades a close call
+			}
+			if sc > bestScore {
+				best, bestScore = p.Name, sc
 			}
 		}
 		if best != "" {
@@ -266,7 +275,7 @@ func formatTaskResult(t tasks.Task) string {
 	}
 }
 
-func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string) (tasks.Task, bool, error) {
+func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string, scout bool) (tasks.Task, bool, error) {
 	if strings.TrimSpace(instruction) == "" {
 		return tasks.Task{}, false, errors.New("empty instruction")
 	}
@@ -324,6 +333,11 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	depth := env.Depth + 1
 	if leaf && depth > MaxDepth {
 		depth = MaxDepth // a leaf request never deepens the tree beyond its limit
+	}
+	if scout && !leaf && depth <= MaxDepth {
+		if brief := e.scout(ctx, env, p, instruction, title, depth); brief != "" {
+			instruction += "\n\n[Recon] A scout took a quick read-only look just before you started. Treat it as a hint, verify what matters:\n" + brief
+		}
 	}
 	pid := env.TaskID
 	var parent *int64

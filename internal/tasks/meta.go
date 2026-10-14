@@ -15,6 +15,7 @@ type Meta struct {
 	RatingNote  string `json:"rating_note,omitempty"`
 	Audit       string `json:"audit,omitempty"` // "" | ok | problem
 	AuditNote   string `json:"audit_note,omitempty"`
+	Handover    string `json:"handover,omitempty"`
 }
 
 func (s *Store) SetCriteria(ctx context.Context, id int64, criteria string) {
@@ -45,7 +46,11 @@ func (s *Store) Rate(ctx context.Context, id int64, rating int, note string) err
 
 func (s *Store) MetaOf(ctx context.Context, id int64) Meta {
 	var m Meta
-	_ = s.db.QueryRow(ctx, `SELECT criteria, criteria_met, criteria_gap, rating, rating_note, audit, audit_note FROM task_meta WHERE task_id=$1`, id).
-		Scan(&m.Criteria, &m.CriteriaMet, &m.Gap, &m.Rating, &m.RatingNote, &m.Audit, &m.AuditNote)
+	_ = s.db.QueryRow(ctx, `SELECT criteria, criteria_met, criteria_gap, rating, rating_note, audit, audit_note, handover FROM task_meta WHERE task_id=$1`, id).
+		Scan(&m.Criteria, &m.CriteriaMet, &m.Gap, &m.Rating, &m.RatingNote, &m.Audit, &m.AuditNote, &m.Handover)
 	return m
+}
+
+func (s *Store) SetHandover(ctx context.Context, id int64, note string) {
+	_, _ = s.db.Exec(ctx, `INSERT INTO task_meta (task_id, handover) VALUES ($1,$2) ON CONFLICT (task_id) DO UPDATE SET handover=$2`, id, strings.TrimSpace(note))
 }

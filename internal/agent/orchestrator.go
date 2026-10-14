@@ -808,6 +808,7 @@ type TaskOpts struct {
 	ParentRun  int64
 	Leaf       bool // a colleague's one-off help: no further delegation
 	Restricted bool // inherited from a probationary requester
+	Scout      bool // a read-only recon before the real run (see nature.go)
 }
 
 // RunTask executes a claimed (running) task to completion and records the outcome.
@@ -871,6 +872,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
+	if !o.Scout {
+		input += e.antibodyNote(tctx, p, input)
+	}
 	rbState, rb := "", Runbook{}
 	onMain := true
 	if routineTask(t) {
@@ -897,7 +901,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		prov = "system"
 	}
 	spec := RunSpec{Profile: p, Session: sess, Task: &t, Input: input, Provenance: prov, Tainted: o.Tainted, Leaf: o.Leaf, Restricted: o.Restricted,
-		Channel: "task", Interactive: t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram"), Depth: t.Depth, ParentRun: o.ParentRun}
+		Channel: "task", Interactive: t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram"), Depth: t.Depth, ParentRun: o.ParentRun, ReadOnly: o.Scout}
 	if t.Depth > 0 { // a delegated task can be redirected by whoever delegated it (task_steer)
 		steerCh := make(chan string, 8)
 		spec.Steer, spec.SteerFrom = steerCh, t.FromName
@@ -961,6 +965,12 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	if rbState != "" {
 		e.afterRoutine(ctx, out, rbState, rb, onMain)
 	}
+	if !o.Scout {
+		go e.learnFromOutcome(context.WithoutCancel(ctx), out) // trails and trust
+		if out.Status == tasks.Partial || out.Status == tasks.Failed || out.Status == tasks.WaitingInput {
+			go e.writeHandover(context.WithoutCancel(ctx), out)
+		}
+	}
 	e.reopenPromiseIfNotDone(ctx, out)
 	if out.Status == tasks.Done && reviewsPromises(out) { // did the agent do what it said it did (or would do)?
 		go e.ReviewPromises(context.WithoutCancel(ctx), out)
@@ -971,7 +981,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	// autonomous top-level tasks report back to the user unless the agent stays silent
 	if t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system") && res.NeedsInput == "" {
 		txt := strings.TrimSpace(res.Text)
-		if txt != "" && !strings.HasPrefix(txt, "[partial") && e.worthTelling(ctx, t, txt) {
+		if txt != "" && !strings.HasPrefix(txt, "[partial") && (t.FromName == "repair" || e.worthTelling(ctx, t, txt)) {
 			e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic})
 		}
 	}

@@ -61,6 +61,9 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 			sb.WriteString("\n## What you always know about the user (core memory)\n" + core + "\n")
 		}
 	}
+	if ch := e.charterText(ctx); ch != "" {
+		sb.WriteString("\n## How we work here (the team charter)\n" + ch + "\n")
+	}
 	if p.Role == RoleEntry {
 		sb.WriteString(e.catalog(ctx))
 	} else if len(p.Team) > 0 && active["delegate"] {
