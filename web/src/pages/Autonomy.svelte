@@ -171,7 +171,10 @@
   <div class="ctl">
     <Switch bind:checked={cfg.enabled} label="autonomy" onchange={saveCfg} />
     <Switch bind:checked={cfg.dream_enabled} label="dreams" onchange={saveCfg} title="Oneiros reflects daily and prepares briefings" />
-    <Switch bind:checked={cfg.auto_evolve} label="auto-apply soul evolution" tone="attn" onchange={saveCfg} title="Otherwise proposals wait for your review" />
+    <span class="sm mute" title="How far PRISM may change itself without asking. SAFE: every proposal waits for you. GUARDED: small, low-risk changes are applied and watched (a clear drop in results rolls them back); the rest wait. ARMED: everything is applied, watched and undoable. Staff and Atlas always wait in GUARDED.">evolution</span>
+    <Segmented size="sm" value={cfg.evolve_mode || (cfg.auto_evolve ? 'armed' : 'safe')} options={[{ value: 'safe', label: 'safe' }, { value: 'guarded', label: 'guarded', tone: 'attn' }, { value: 'armed', label: 'armed', tone: 'warn' }]} onchange={(v) => { cfg.evolve_mode = v; cfg.auto_evolve = false; saveCfg(); }} />
+    <span class="sm mute" title="The same dial for scheduled jobs: near-duplicate jobs merged, a job that keeps failing rewritten from the evidence. GUARDED applies small rewrites, merges wait; ARMED applies all. Every change keeps the old version for undo.">jobs</span>
+    <Segmented size="sm" value={cfg.jobs_mode || 'safe'} options={[{ value: 'safe', label: 'safe' }, { value: 'guarded', label: 'guarded', tone: 'attn' }, { value: 'armed', label: 'armed', tone: 'warn' }]} onchange={(v) => { cfg.jobs_mode = v; saveCfg(); }} />
     <Hint title="Schedule, intent, watch, tracker — what's the difference?">
       <table class="cmp"><tbody>{#each AUTONOMY_HELP.compare as [n, k, t]}<tr><td><b>{n}</b><br /><span class="mute">{k}</span></td><td>{t}</td></tr>{/each}</tbody></table>
     </Hint>

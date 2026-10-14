@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/scheduler"
 )
 
 // Team practices: runbooks, decisions, the reviewer's log, standups, ratings and model health (see internal/agent/runbooks.go,
@@ -118,4 +119,36 @@ func (s *Server) registerTeam() {
 		return true, a.Engine.DeleteAntibody(ctx, r.ID)
 	})
 	rpc(s, "person.refresh", func(ctx context.Context, _ none) (string, error) { return a.Engine.RefreshPersonModel(ctx) })
+
+	// the autonomy dial: what PRISM changed in itself, and the proposals waiting
+	rpc(s, "evolution.watches", func(ctx context.Context, _ none) ([]agent.EvolutionWatchRow, error) {
+		return a.Engine.EvolutionWatches(ctx), nil
+	})
+	rpc(s, "evolution.undo", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.UndoEvolution(ctx, r.ID)
+	})
+	jobs := func() *scheduler.Service { return a.Ext.Sched }
+	rpc(s, "jobs.proposals", func(ctx context.Context, r struct {
+		Status string `json:"status"`
+	}) ([]scheduler.JobProposal, error) {
+		return jobs().JobProposals(ctx, r.Status)
+	})
+	rpc(s, "jobs.review", func(ctx context.Context, _ none) (int, error) { return jobs().ReviewJobs(ctx) })
+	rpc(s, "jobs.apply", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, jobs().ApplyJobProposal(ctx, r.ID, false)
+	})
+	rpc(s, "jobs.dismiss", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, jobs().DismissJobProposal(ctx, r.ID)
+	})
+	rpc(s, "jobs.undo", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, jobs().UndoJobProposal(ctx, r.ID)
+	})
 }

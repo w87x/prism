@@ -128,6 +128,13 @@ func (a *App) GetToday(ctx context.Context) Today {
 			}
 		}
 	}
+	if a.Ext.Sched != nil {
+		if jps, err := a.Ext.Sched.JobProposals(ctx, "pending"); err == nil {
+			for _, jp := range jps {
+				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "jobprop", Title: jp.Title, Sub: trim(jp.Rationale, 160), Ref: fmt.Sprintf("jobprop:%d", jp.ID), At: jp.CreatedAt})
+			}
+		}
+	}
 	if profiles, err := a.Profiles.List(ctx); err == nil {
 		for _, p := range profiles {
 			if p.Probation {

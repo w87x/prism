@@ -150,9 +150,35 @@ type Autonomy struct {
 	// RunbooksOff stops the learning of runbooks (the default is on: a routine job runs on the main model until it has succeeded
 	// twice, the main model writes down how, and the small model follows that from then on, going back to the main model when it
 	// fails). AuditOneIn: how often the main model silently re-checks a small-model run: one in N (0 → 8, negative → never).
-	RunbooksOff bool `json:"runbooks_off"`
-	AuditOneIn  int  `json:"audit_one_in"`
+	// EvolveMode / JobsMode are the autonomy dial for changes PRISM proposes to itself: agents' souls, tools and traits (EvolveMode) and
+	// the scheduled jobs (JobsMode: merging near-duplicates, rewriting one that keeps failing). "" or "safe": every change waits for
+	// you; "guarded": small, low-risk changes are applied and watched (and rolled back if results get worse), the rest wait;
+	// "armed": every change is applied, watched, and undoable. The older AutoEvolve switch means armed for EvolveMode.
+	EvolveMode  string `json:"evolve_mode"`
+	JobsMode    string `json:"jobs_mode"`
+	RunbooksOff bool   `json:"runbooks_off"`
+	AuditOneIn  int    `json:"audit_one_in"`
 }
+
+// DialLevel normalises a dial setting to safe | guarded | armed.
+func DialLevel(mode string) string {
+	switch mode {
+	case "guarded", "armed":
+		return mode
+	}
+	return "safe"
+}
+
+// EvolveLevel is the effective dial for agent evolution.
+func (a Autonomy) EvolveLevel() string {
+	if a.EvolveMode == "" && a.AutoEvolve {
+		return "armed"
+	}
+	return DialLevel(a.EvolveMode)
+}
+
+// JobsLevel is the effective dial for scheduled-job changes.
+func (a Autonomy) JobsLevel() string { return DialLevel(a.JobsMode) }
 
 // AuditEvery is the effective sampling rate: 0 means never.
 func (a Autonomy) AuditEvery() int {

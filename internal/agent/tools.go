@@ -1030,17 +1030,15 @@ func (e *Engine) toolEvolvePropose() *tools.Tool {
 				return "", err
 			}
 			ev := map[string]any{"id": id, "agent": p.Name, "kind": kind, "rationale": brief(a.Rationale, 300)}
-			var auto struct {
-				AutoEvolve bool `json:"auto_evolve"`
-			}
-			_, _ = e.Settings.Get(ctx, "autonomy", &auto)
-			if auto.AutoEvolve {
+			if apply, why := e.autoApply(ctx, p, kind, body); apply { // the autonomy dial (evolve.go)
+				e.startWatch(ctx, id, p, kind)
 				if err := e.Profiles.Decide(ctx, id, true); err != nil {
+					_, _ = e.DB.Exec(ctx, `DELETE FROM evolution_watch WHERE proposal_id=$1`, id)
 					return "", err
 				}
 				ev["applied"] = true
 				e.Emit("evolution.proposal", ev)
-				return fmt.Sprintf("Proposal #%d (%s) applied automatically (auto-evolve on); the previous soul is kept in history.", id, kind), nil
+				return fmt.Sprintf("Proposal #%d (%s) was applied automatically (%s). It is watched: if %s's results get clearly worse it is rolled back, and the previous version is kept.", id, kind, why, p.Name), nil
 			}
 			e.Emit("evolution.proposal", ev)
 			return fmt.Sprintf("Proposal #%d (%s) recorded and awaiting the user's review.", id, kind), nil

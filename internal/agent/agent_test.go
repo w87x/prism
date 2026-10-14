@@ -2670,9 +2670,12 @@ func TestAutonomousRepliesOnlyDeliverNews(t *testing.T) {
 	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Shopper", Soul: "You are Shopper.", Enabled: true, MaxIterations: 6}, ""); err != nil {
 		t.Fatal(err)
 	}
+	var mu sync.Mutex // background work (runbook writing, audits) also calls the model while the test changes `reply`
 	var reply string
 	var sawRule bool
 	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		mu.Lock()
+		defer mu.Unlock()
 		_, sys, _ := msgAt(req, 0)
 		role, content, _ := msgAt(req, -1)
 		if strings.Contains(sys, "deserves to interrupt them") {
@@ -2688,7 +2691,9 @@ func TestAutonomousRepliesOnlyDeliverNews(t *testing.T) {
 	}
 	notices := func() int { return h.events.count("notice") }
 	run := func(text string) int {
+		mu.Lock()
 		reply = text
+		mu.Unlock()
 		before := notices()
 		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "ads", ToAgent: "Shopper", Title: "watch ads", Input: "look at the ads; tell me when a price is under 100"}, true)
 		if err != nil {
@@ -2700,7 +2705,10 @@ func TestAutonomousRepliesOnlyDeliverNews(t *testing.T) {
 	if n := run("we have looked and found no price under the threshold NO_REPLY"); n != 0 {
 		t.Fatalf("a stray NO_REPLY must silence the reply (%d notices)", n)
 	}
-	if !sawRule {
+	mu.Lock()
+	rule := sawRule
+	mu.Unlock()
+	if !rule {
 		t.Fatal("a cron run is told the reporting rule")
 	}
 	if n := run("Checked 12 ads — no ads under 100 euro right now."); n != 0 {

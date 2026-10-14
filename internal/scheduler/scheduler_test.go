@@ -43,6 +43,11 @@ func (r *rec) has(sub string) bool {
 }
 
 func setup(t *testing.T) (*Service, *rec) {
+	s, rc, _ := setupFake(t)
+	return s, rc
+}
+
+func setupFake(t *testing.T) (*Service, *rec, *testutil.FakeLLM) {
 	d := testutil.DB(t)
 	fake := testutil.NewFakeLLM(t)
 	r, st := testutil.Setup(t, d, fake)
@@ -54,7 +59,7 @@ func setup(t *testing.T) (*Service, *rec) {
 		t.Fatal(err)
 	}
 	_ = st.Set(context.Background(), settings.KeyAutonomy, settings.Autonomy{Enabled: true, DreamEnabled: true})
-	return &Service{DB: d.Pool, Engine: e, Settings: st, Emit: rc.emit, Env: Env{LLM: r}}, rc
+	return &Service{DB: d.Pool, Engine: e, Settings: st, Emit: rc.emit, Env: Env{LLM: r}}, rc, fake
 }
 
 func TestCronEnqueuesAndWatchesNotify(t *testing.T) {
@@ -416,3 +421,88 @@ func TestCronUpdateFinishAndDuplicateGuard(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.T) {
+	s, _, fake := setupFake(t)
+	ctx := context.Background()
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		switch {
+		case strings.Contains(sys, "ONE kind of check"):
+			return testutil.Reply{Content: `{"same":true,"prompt":"Check Avito prices for X, Y and Z; reply NO_REPLY when none is under its limit.","expr":"@hourly","why":"the same check over three items"}`}
+		case strings.Contains(sys, "review one scheduled job"):
+			return testutil.Reply{Content: `{"revise":true,"prompt":"Check the Haunted Hotel torrent on the mobile site; reply NO_REPLY when nothing new.","why":"the desktop site blocked three runs"}`}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	mk := func(name, prompt string) int64 {
+		id, err := s.SaveCron(ctx, Cron{Name: name, Agent: "Atlas", Expr: "@daily", Prompt: prompt, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := mk("avito x", "Check Avito price for the FEVM X box and tell me if it is under 700000. Reply NO_REPLY if nothing.")
+	b := mk("avito y", "Check Avito price for the FEVM Y box and tell me if it is under 800000. Reply NO_REPLY if nothing.")
+	c := mk("avito z", "Check Avito price for the FEVM Z box and tell me if it is under 900000. Reply NO_REPLY if nothing.")
+	w := mk("film", "Watch rutracker for the Haunted Hotel torrent and download it when it appears.")
+	for i := 0; i < 3; i++ {
+		_, _ = s.DB.Exec(ctx, `INSERT INTO tasks (from_kind, from_name, to_agent, title, input, status, error, depth, root_id) VALUES ('cron','film','Atlas','film','x','failed','blocked by the desktop site',0,0)`)
+	}
+	n, err := s.ReviewJobs(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("a merge and a rewrite expected: %d %v", n, err)
+	}
+	ps, _ := s.JobProposals(ctx, "pending")
+	if len(ps) != 2 {
+		t.Fatalf("safe (default): both wait: %+v", ps)
+	}
+	var merge JobProposal
+	for _, p := range ps {
+		if p.Kind == "merge" {
+			merge = p
+		}
+	}
+	if len(merge.CronIDs) != 3 || !strings.Contains(merge.NewPrompt, "X, Y and Z") {
+		t.Fatalf("the three similar jobs are one proposal: %+v", merge)
+	}
+	if err := s.ApplyJobProposal(ctx, merge.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := s.Crons(ctx)
+	live, finished := 0, 0
+	for _, x := range cs {
+		if x.ID == a || x.ID == b || x.ID == c {
+			if x.FinishedAt != nil {
+				finished++
+			} else if x.Enabled && strings.Contains(x.Prompt, "X, Y and Z") && x.Expr == "@hourly" {
+				live++
+			}
+		}
+	}
+	if live != 1 || finished != 2 {
+		t.Fatalf("one job survives with the merged prompt, two are finished: live=%d finished=%d", live, finished)
+	}
+	if err := s.UndoJobProposal(ctx, merge.ID); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = s.Crons(ctx)
+	for _, x := range cs {
+		if (x.ID == a || x.ID == b || x.ID == c) && (!x.Enabled || x.FinishedAt != nil || strings.Contains(x.Prompt, "X, Y and Z")) {
+			t.Fatalf("undo puts all three back: %+v", x)
+		}
+	}
+	// guarded: a small rewrite goes through, and armed applies everything
+	_ = s.Settings.Set(ctx, settings.KeyAutonomy, settings.Autonomy{Enabled: true, JobsMode: "armed"})
+	_, _ = s.DB.Exec(ctx, `UPDATE job_proposals SET status='dismissed', decided_at=now()-interval '30 days' WHERE status='pending'`)
+	if n, _ := s.ReviewJobs(ctx); n < 1 {
+		t.Fatal("armed: the review proposes again")
+	}
+	cs, _ = s.Crons(ctx)
+	for _, x := range cs {
+		if x.ID == w && !strings.Contains(x.Prompt, "mobile site") {
+			t.Fatalf("armed applies the rewrite by itself: %q", x.Prompt)
+		}
+	}
+}

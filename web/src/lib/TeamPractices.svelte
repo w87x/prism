@@ -13,6 +13,20 @@
   import Empty from './ui/Empty.svelte';
 
   let view = $state('standup');
+  $effect(() => { if (S.teamView) { view = S.teamView; S.teamView = null; } });
+
+  // ── autonomy dial: what changed by itself, and scheduled-job proposals ──
+  let watches = $state([]);
+  let jprops = $state([]);
+  let reviewing = $state(false);
+  const loadDial = async () => { watches = (await call('evolution.watches', {}, { quiet: true })) || []; jprops = (await call('jobs.proposals', { status: '' }, { quiet: true })) || []; };
+  async function undoEvo(w) { if (await confirmBox({ title: 'Undo change', text: `Put ${w.agent} back as it was before evolution #${w.proposal_id}?`, ok: 'Undo' })) { if (await call('evolution.undo', { id: w.proposal_id })) { toast('Rolled back'); loadDial(); } } }
+  async function reviewJobs() { reviewing = true; const n = await call('jobs.review', {}); reviewing = false; if (n !== null && n !== undefined) { toast(n ? `${n} proposal${n === 1 ? '' : 's'} made` : 'Nothing to merge or rewrite right now'); loadDial(); } }
+  async function jApply(p) { if (await call('jobs.apply', { id: p.id })) { toast('Done — the old version is kept'); loadDial(); } }
+  async function jDismiss(p) { await call('jobs.dismiss', { id: p.id }); loadDial(); }
+  async function jUndo(p) { if (await call('jobs.undo', { id: p.id })) { toast('Put back as it was'); loadDial(); } }
+  const wtone = (s) => ({ watching: 'attn', kept: 'ok', rolled_back: 'err', undone: 'mute' })[s] || 'mute';
+  const jtone = (s) => ({ pending: 'attn', applied: 'ok', dismissed: 'mute', undone: 'mute' })[s] || 'mute';
 
   // ── tools paused, ant trails ──
   let paused = $state([]);
@@ -80,7 +94,7 @@
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((l, i) => ({ value: String(i), label: l }));
 
   $effect(() => {
-    loadBooks(); loadRv(); loadUps(); loadHealth(); loadTrust(); loadLessons(); loadProfile();
+    loadBooks(); loadRv(); loadUps(); loadHealth(); loadTrust(); loadLessons(); loadProfile(); loadDial();
     loadSetting('charter', { text: '' }).then((c) => (charter = { text: c.text || '' }));
     loadSetting('autonomy', { runbooks_off: false, audit_one_in: 0 }).then((c) => (auto = { runbooks_off: !!c.runbooks_off, audit_one_in: c.audit_one_in || 0 }));
     loadSetting('review', { enabled: false, always_ask: [] }).then((c) => (rv = { enabled: !!c.enabled, always_ask: c.always_ask || [] }));
@@ -90,7 +104,7 @@
 </script>
 
 <div class="body scroll">
-  <Segmented size="sm" bind:value={view} options={[{ value: 'standup', label: 'Standup' }, { value: 'runbooks', label: 'Runbooks' }, { value: 'decisions', label: 'Decisions' }, { value: 'review', label: 'Reviewer' }, { value: 'trust', label: 'Trust' }, { value: 'health', label: 'Tools & trails' }, { value: 'lessons', label: 'Lessons' }, { value: 'charter', label: 'Charter & you' }]} />
+  <Segmented size="sm" bind:value={view} options={[{ value: 'standup', label: 'Standup' }, { value: 'dial', label: 'Self-changes' }, { value: 'jobs', label: 'Jobs' }, { value: 'runbooks', label: 'Runbooks' }, { value: 'decisions', label: 'Decisions' }, { value: 'review', label: 'Reviewer' }, { value: 'trust', label: 'Trust' }, { value: 'health', label: 'Tools & trails' }, { value: 'lessons', label: 'Lessons' }, { value: 'charter', label: 'Charter & you' }]} />
 
   {#if view === 'standup'}
     <div class="sm mute" style="margin:8px 0">Once a week the team reports like a team: what each agent got done, what failed, what you rated down, which runbooks changed, how long the models were out, which decisions are due for another look. A pattern of thumbs-down on one agent's results (rate them in Tasks) puts a review on Metis's desk.</div>
@@ -105,6 +119,32 @@
     {#each ups as u (u.id)}
       <div class="card"><div class="sm mute">{stamp(u.created_at)} · {u.stats?.tasks ?? 0} tasks</div><div class="pre">{u.text}</div></div>
     {:else}<Empty>No standup yet — the first one is written on the chosen day, or write one now.</Empty>{/each}
+
+  {:else if view === 'dial'}
+    <div class="sm mute" style="margin:8px 0">PRISM proposes changes to itself — to agents' souls, tools and traits, and to scheduled jobs. The dials in Autonomy (evolution, jobs) set how far it may go without asking: <b>safe</b> everything waits for you; <b>guarded</b> small, low-risk changes go through and are watched; <b>armed</b> everything goes through and is watched. A watched change is judged by how the agent's tasks fared afterwards — a clear drop rolls it back by itself — and any of them can be undone here.</div>
+    {#each watches as w (w.proposal_id)}
+      <div class="card">
+        <div class="row wrap gap-8"><b>{w.agent}</b><Badge tone="mute">{w.kind}</Badge><Badge tone={wtone(w.status)}>{w.status === 'rolled_back' ? 'rolled back' : w.status}</Badge><span class="sm mute">{stamp(w.applied_at)} · results before {w.before} · after {w.after}</span><span class="grow"></span>
+          {#if w.status === 'watching' || w.status === 'kept'}<Button size="sm" variant="ghost" onclick={() => undoEvo(w)}>Undo</Button>{/if}</div>
+        {#if w.why}<div class="sm dim">{w.why}</div>{/if}
+        {#if w.note}<div class="sm mute">{w.note}</div>{/if}
+      </div>
+    {:else}<Empty>Nothing has been applied automatically yet. With the evolution dial on safe, that is expected.</Empty>{/each}
+
+  {:else if view === 'jobs'}
+    <div class="sm mute" style="margin:8px 0">Agents create scheduled jobs one at a time, and nobody reads them together: “check price X”, “…Y”, “…Z” run as three jobs; a job whose approach keeps failing runs unchanged although memory knows what works. The weekly review proposes merging near-duplicates and rewriting a failing job from the evidence of its runs, its lessons and what memory knows. What happens to a proposal follows the jobs dial in Autonomy.</div>
+    <div class="row wrap gap-8" style="margin-bottom:8px"><span class="grow"></span><Button variant="primary" loading={reviewing} onclick={reviewJobs}>Review jobs now</Button></div>
+    {#each jprops as p (p.id)}
+      <div class="card">
+        <div class="row wrap gap-8"><b>{p.title}</b><Badge tone={jtone(p.status)}>{p.status}{p.auto ? ' · by itself' : ''}</Badge><span class="sm mute">{stamp(p.created_at)}</span><span class="grow"></span>
+          {#if p.status === 'pending'}<Button size="sm" variant="accent" onclick={() => jApply(p)}>Apply</Button><Button size="sm" variant="ghost" onclick={() => jDismiss(p)}>Dismiss</Button>{/if}
+          {#if p.status === 'applied'}<Button size="sm" variant="ghost" onclick={() => jUndo(p)}>Undo</Button>{/if}</div>
+        <div class="sm mute">{(p.names || []).join(' · ')}</div>
+        {#if p.rationale}<div class="sm">{p.rationale}</div>{/if}
+        {#if p.old_prompt}<details class="fold"><summary>Before</summary><div class="pre">{p.old_prompt}</div></details>{/if}
+        <details class="fold" open={p.status === 'pending'}><summary>After</summary><div class="pre">{p.new_prompt}</div>{#if p.new_expr}<div class="sm mute">schedule: {p.new_expr}</div>{/if}</details>
+      </div>
+    {:else}<Empty>No proposals. Run the review to look for jobs to merge or rewrite.</Empty>{/each}
 
   {:else if view === 'runbooks'}
     <div class="sm mute" style="margin:8px 0">Small models drift; a real team solves that with a procedure. A routine job (schedule, standing watch) runs on the main model until it has succeeded twice; then the main model writes down how, and the small model follows that from then on. Two failures in a row send the job back to the main model, which rewrites the runbook. Now and then the main model quietly re-checks a small-model run.</div>

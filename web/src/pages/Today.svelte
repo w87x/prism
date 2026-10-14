@@ -32,7 +32,7 @@
   // whole-page layout: the panels ("cards") or one list with a header per section — remembered per browser
   let layout = $state((() => { try { return localStorage.getItem('prism.todayLayout') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } })());
   $effect(() => { try { localStorage.setItem('prism.todayLayout', layout); } catch {} });
-  const kindLabel = { waiting_input: 'Waiting for your answer', promise: 'Promised, not done', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', plugin: 'New tools to review', ingest: 'Documents to learn' };
+  const kindLabel = { waiting_input: 'Waiting for your answer', promise: 'Promised, not done', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', jobprop: 'Scheduled jobs to improve', plugin: 'New tools to review', ingest: 'Documents to learn' };
   const attnGroups = $derived.by(() => {
     const m = new Map();
     for (const it of d?.needs_attention || []) { if (!m.has(it.kind)) m.set(it.kind, []); m.get(it.kind).push(it); }
@@ -51,7 +51,7 @@
   let reviewId = $state(0);
   let answerId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
-  const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
+  const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', jobprop: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 
   function openProject(p) { S.memoryBank = p.bank_id; go('memory'); }
 
@@ -80,6 +80,10 @@
         {#if it.kind === 'promise'}
           <Button size="sm" variant="accent" title="Ask the agent to do it now, or to set up what will do it later" onclick={async (e) => { e.stopPropagation(); const id = Number(it.ref.slice(8)); if (await call('promises.fix', { id })) { toast(`${it.agent} was asked to make it happen`); load(); } }}>Make it happen</Button>
           <Button size="sm" variant="ghost" title="Not needed — drop it from this list" onclick={async (e) => { e.stopPropagation(); if (await call('promises.dismiss', { id: Number(it.ref.slice(8)) })) load(); }}>Dismiss</Button>
+        {/if}
+        {#if it.kind === 'jobprop'}
+          <Button size="sm" variant="accent" title="Apply the change; the old version is kept so you can undo it" onclick={async (e) => { e.stopPropagation(); if (await call('jobs.apply', { id: Number(it.ref.slice(8)) })) { toast('Job changed — undo it in Autonomy → Team → Jobs'); load(); } }}>Apply</Button>
+          <Button size="sm" variant="ghost" onclick={async (e) => { e.stopPropagation(); if (await call('jobs.dismiss', { id: Number(it.ref.slice(8)) })) load(); }}>Dismiss</Button>
         {/if}
         {#if it.kind === 'waiting_input'}
           <Button size="sm" variant="accent" onclick={(e) => { e.stopPropagation(); answerId = Number(it.ref.slice(5)); }}>Answer</Button>

@@ -168,6 +168,7 @@ func (s *Service) tick(ctx context.Context) {
 	}
 	s.tickCrons(ctx)
 	s.tickIntents(ctx)
+	go s.maybeReviewJobs(context.WithoutCancel(ctx))
 }
 
 // ── crons ───────────────────────────────────────────────────────────────────
@@ -248,7 +249,7 @@ func (s *Service) UpdateCron(ctx context.Context, id int64, p CronPatch) (Cron, 
 	if p.Enabled != nil {
 		c.Enabled = *p.Enabled
 	}
-	if _, err := s.SaveCron(ctx, *c); err != nil {
+	if _, err := s.SaveCronWhy(ctx, *c, "changed by an agent or a job proposal"); err != nil {
 		return *c, err
 	}
 	return *c, nil
@@ -268,6 +269,11 @@ func (s *Service) FinishCron(ctx context.Context, id int64, note string) error {
 }
 
 func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
+	return s.SaveCronWhy(ctx, c, "edited")
+}
+
+// SaveCronWhy is SaveCron that records, when it changes an existing job, what the job was before and why it changed.
+func (s *Service) SaveCronWhy(ctx context.Context, c Cron, why string) (int64, error) {
 	sched, err := cron.Parse(c.Expr)
 	if err != nil {
 		return 0, err
@@ -283,6 +289,9 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 			c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, c.System, next, topic, nullIfZero(bankID)).Scan(&id)
 	} else {
 		id = c.ID
+		if _, herr := s.recordHistory(ctx, c.ID, why); herr != nil && !strings.Contains(herr.Error(), "no rows") {
+			s.logf("warn", "cron history: %v", herr)
+		}
 		// a job whose prompt or agent changed is a different job: what the runbook learned no longer applies
 		_, _ = s.DB.Exec(ctx, `DELETE FROM runbooks WHERE key IN (SELECT 'cron:'||name FROM crons WHERE id=$1 AND (prompt<>$2 OR agent<>$3 OR name<>$4))`, c.ID, c.Prompt, c.Agent, c.Name)
 		_, err = s.DB.Exec(ctx, `UPDATE crons SET name=$2,agent=$3,expr=$4,prompt=$5,enabled=$6,next_run=$7, finished_at=CASE WHEN $6 THEN NULL ELSE finished_at END WHERE id=$1`, c.ID, c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, next)
