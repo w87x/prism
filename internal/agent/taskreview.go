@@ -74,7 +74,7 @@ func (e *Engine) ReviewTask(ctx context.Context, id int64) (*TaskReview, error) 
 		}
 	}
 	if e.LLM != nil && e.LLM.RoleRef(ctx, "fast") != "" {
-		if out, lerr := e.LLM.Complete(ctx, "role:fast", taskReviewPrompt, sb.String(), true); lerr == nil {
+		if out, lerr := e.LLM.Complete(ctx, e.LLM.ActionRef(ctx, "task_review", "fast"), taskReviewPrompt, sb.String(), true); lerr == nil {
 			var p struct {
 				Cause   string         `json:"cause"`
 				Summary string         `json:"summary"`

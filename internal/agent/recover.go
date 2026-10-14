@@ -61,7 +61,7 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 		return plan
 	}
 	var p recovery
-	if err := e.LLM.CompleteJSON(ctx, "role:fast", recoverPrompt, sb.String(), &p); err != nil {
+	if err := e.LLM.CompleteJSON(ctx, e.LLM.ActionRef(ctx, "recover", "fast"), recoverPrompt, sb.String(), &p); err != nil {
 		plan.Prompt = fallback
 		return plan
 	}

@@ -73,7 +73,7 @@ func (s *Service) rerank(ctx context.Context, query string, cands []cand, sc []s
 		fmt.Fprintf(&sb, "%d: %s\n", c.id, t)
 		pos[c.id] = i
 	}
-	out, err := s.llm.Complete(ctx, "role:fast", rerankPrompt, sb.String(), true)
+	out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_rerank", "fast"), rerankPrompt, sb.String(), true)
 	if err != nil {
 		return sc
 	}

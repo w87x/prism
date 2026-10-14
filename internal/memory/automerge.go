@@ -58,7 +58,7 @@ func (s *Service) SuggestBankMerges(ctx context.Context, kind string) ([]MergeGr
 	if n < 2 {
 		return nil, nil
 	}
-	out, err := s.llm.Complete(ctx, "role:fast", mergePrompt, sb.String(), true)
+	out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_banks", "fast"), mergePrompt, sb.String(), true)
 	if err != nil {
 		return nil, err
 	}

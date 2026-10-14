@@ -142,10 +142,7 @@ func (s *Service) AnalyzePooled(ctx context.Context, bankIDs []int64, force bool
 	}
 	sb.WriteString("\nCARD:\n(not used for several banks)\n")
 	var parsed analysisParsed
-	role := "role:chat"
-	if s.llm.RoleRef(ctx, "chat") == "" {
-		role = "role:fast"
-	}
+	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
 	if err := s.llm.CompleteJSON(ctx, role, analyzePrompt+poolNote, s.guidance(ctx)+"Banks: "+res.Bank+"\n\n"+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("pooled analysis: %w", err)
 	}

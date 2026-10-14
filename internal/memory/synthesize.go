@@ -181,10 +181,7 @@ func (s *Service) Synthesize(ctx context.Context, level int, force bool, minNew 
 		res.Skipped = fmt.Sprintf("only %d new level-%d items", since, level-1)
 		return res, nil
 	}
-	role := "role:chat"
-	if s.llm.RoleRef(ctx, "chat") == "" {
-		role = "role:fast"
-	}
+	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
 	prompt, capConf := synthPrompt, maxSynthConf
 	known := synthTypes
 	if level == 3 {

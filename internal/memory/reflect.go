@@ -158,7 +158,7 @@ func (s *Service) Reflect(ctx context.Context, bankID int64, force bool, minNew 
 			Confidence float64 `json:"confidence"`
 		} `json:"changes"`
 	}
-	if err := s.llm.CompleteJSON(ctx, "role:fast", reflectPrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
+	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "memory_reflect", "fast"), reflectPrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("reflection: %w", err)
 	}
 	if len(parsed.Changes) > 5 {

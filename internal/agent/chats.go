@@ -290,7 +290,7 @@ func (e *Engine) nameChat(ctx context.Context, topic string) {
 		Project    string `json:"project"`
 		NewProject string `json:"new_project"`
 	}
-	if err := e.LLM.CompleteJSON(ctx, "role:fast", nameChatPrompt, sb.String(), &out); err != nil {
+	if err := e.LLM.CompleteJSON(ctx, e.LLM.ActionRef(ctx, "chat_naming", "fast"), nameChatPrompt, sb.String(), &out); err != nil {
 		return
 	}
 	if t := strings.TrimSpace(out.Title); t != "" && autoTitle {
@@ -351,7 +351,7 @@ func (e *Engine) summariseChat(ctx context.Context, title, topic string) string 
 	}
 	gist := ""
 	if e.LLM != nil && e.LLM.RoleRef(ctx, "fast") != "" {
-		if out, err := e.LLM.Complete(ctx, "role:fast", mergeSummaryPrompt, sb.String(), false); err == nil {
+		if out, err := e.LLM.Complete(ctx, e.LLM.ActionRef(ctx, "chat_naming", "fast"), mergeSummaryPrompt, sb.String(), false); err == nil {
 			gist = strings.TrimSpace(out)
 		}
 	}

@@ -3,21 +3,22 @@ package settings
 // Well-known keys and their value shapes. Every one of these is editable in the UI.
 
 const (
-	KeyGeneral    = "general"
-	KeyModelRoles = "models.roles"
-	KeyContext    = "context"
-	KeyWeb        = "web"
-	KeyTelegram   = "telegram"
-	KeyObsidian   = "obsidian"
-	KeyMacOS      = "macos"
-	KeyBrowser    = "browser"
-	KeyAutonomy   = "autonomy"
-	KeyOnboarding = "onboarding"
-	KeyMemory     = "memory"
-	KeyRuntime    = "runtime"
-	KeyElevenLabs = "elevenlabs"
-	KeyGuardrails = "guardrails"
-	KeyConsult    = "consult"
+	KeyGeneral      = "general"
+	KeyModelRoles   = "models.roles"
+	KeyContext      = "context"
+	KeyWeb          = "web"
+	KeyTelegram     = "telegram"
+	KeyObsidian     = "obsidian"
+	KeyMacOS        = "macos"
+	KeyBrowser      = "browser"
+	KeyAutonomy     = "autonomy"
+	KeyModelActions = "model_actions"
+	KeyOnboarding   = "onboarding"
+	KeyMemory       = "memory"
+	KeyRuntime      = "runtime"
+	KeyElevenLabs   = "elevenlabs"
+	KeyGuardrails   = "guardrails"
+	KeyConsult      = "consult"
 )
 
 type General struct {
@@ -25,6 +26,16 @@ type General struct {
 	Timezone string `json:"timezone"` // IANA, empty → system
 	Language string `json:"language"` // preferred reply language, free text
 	Locale   string `json:"locale"`
+	// PlannerOff turns off the structured front door (classify, decompose, memory lookups, questions) for chat messages;
+	// RoutingOff keeps messages in the chat they were typed in instead of taking them to the chat of the project they are about.
+	PlannerOff bool `json:"planner_off"`
+	RoutingOff bool `json:"routing_off"`
+}
+
+// ModelActions lets the user re-assign which model a behind-the-scenes action uses: id → "main" (the chat model) or "aux" (the fast
+// model); an action with no entry uses its default (see llm.Actions).
+type ModelActions struct {
+	Choice map[string]string `json:"choice"`
 }
 
 // ModelRoles maps roles to a model or model-list name.

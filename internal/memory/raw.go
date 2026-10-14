@@ -399,7 +399,7 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 			Object     string   `json:"object"`
 		} `json:"facts"`
 	}
-	if err := s.llm.CompleteJSON(ctx, "role:fast", extractPrompt, sb.String(), &parsed); err != nil {
+	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "memory_extract", "fast"), extractPrompt, sb.String(), &parsed); err != nil {
 		return 0, 0, fmt.Errorf("memory extraction: %w", err)
 	}
 	ids := make([]int64, len(raws))

@@ -89,10 +89,7 @@ func (s *Service) RefreshModel(ctx context.Context, id int64) (*Model, error) {
 		Scan(&m.ID, &m.Name, &m.Query, &m.BankID, &m.Body, &m.Sources, &m.RefreshedAt, &m.CreatedAt, &m.Fresh); err != nil {
 		return nil, errors.New("model not found")
 	}
-	role := "role:chat"
-	if s.llm.RoleRef(ctx, "chat") == "" {
-		role = "role:fast"
-	}
+	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
 	if s.llm.RoleRef(ctx, strings.TrimPrefix(role, "role:")) == "" {
 		return nil, errors.New("no model configured")
 	}

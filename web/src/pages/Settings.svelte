@@ -8,6 +8,7 @@
   import Input from '../lib/ui/Input.svelte';
   import Select from '../lib/ui/Select.svelte';
   import Switch from '../lib/ui/Switch.svelte';
+  import Segmented from '../lib/ui/Segmented.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Led from '../lib/ui/Led.svelte';
   import Modal from '../lib/ui/Modal.svelte';
@@ -25,7 +26,12 @@
   let tab = $state('general');
 
   // ── general ──
-  let gen = $state({ user_name: '', timezone: '', language: '', locale: '' });
+  // which model each behind-the-scenes action uses: '' = its default, 'main' = the chat model, 'aux' = the fast model
+  let modelActions = $state({ choice: {} });
+  let actionCatalog = $state([]);
+  const actionGroups = $derived([...new Set(actionCatalog.map((a) => a.group))].map((g) => ({ g, items: actionCatalog.filter((a) => a.group === g) })));
+  function setAction(id, v) { if (v) modelActions.choice[id] = v; else delete modelActions.choice[id]; saveSetting('model_actions', modelActions, 'Saved'); }
+  let gen = $state({ user_name: '', timezone: '', language: '', locale: '', planner_off: false, routing_off: false });
   let ctx = $state({ compact_at: 0.8, target: 0.2 });
   let mem = $state({ process_every_s: 300, raw_batch: 40, reflect_off: false, reflect_after: 8, auto_merge_off: false, hints: '', process_min: 6, entities_off: false, entities_after: 8, analyze_off: false, analyze_after: 12, synth_off: false, synth_after: 6, bookmarks_off: false, digest_off: false, digest_days: 7, verify_off: false, auto_ingest_off: false });
   let rt = $state({ llm_concurrency: 4 });
@@ -77,6 +83,8 @@
   $effect(() => {
     untrack(() => {
       loadSetting('general', gen).then((v) => (gen = v));
+      loadSetting('model_actions', { choice: {} }).then((v) => (modelActions = { choice: v.choice || {} }));
+      call('models.actions', {}, { quiet: true }).then((r) => (actionCatalog = r || []));
       loadSetting('context', ctx).then((v) => (ctx = v));
       loadSetting('memory', mem).then((v) => {
         // 0 means "use the built-in default" on the server; show the real number instead
@@ -293,6 +301,8 @@
           <Field label="Name"><Input bind:value={gen.user_name} placeholder="how agents address you" /></Field>
           <Field label="Reply language" hint="preferred language for replies, free text (e.g. Russian, English)"><Input bind:value={gen.language} /></Field>
           <Field label="Timezone" hint="cron schedules, reminders and agents' clock"><Select bind:value={gen.timezone} options={zoneOpts} searchable /></Field>
+          <Checkbox checked={!gen.planner_off} onchange={(v) => (gen.planner_off = !v)} label="plan messages first — a quick pass classifies each message, splits real work into steps, looks up the memory they need and asks what only you can decide, before Atlas starts" />
+          <Checkbox checked={!gen.routing_off} onchange={(v) => (gen.routing_off = !v)} label="take messages to their project's chat — a message about a project goes to that project's chat (asking when unsure)" />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('general', gen, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Theme">
@@ -308,6 +318,18 @@
         </Panel>
       </div>
     {:else if tab === 'models'}
+      <Panel title="Which model does what">
+        <div class="sm mute">Everything PRISM asks a model to do behind the scenes. “main” is the chat model, “aux” the fast one; “default” is what PRISM does unless you say otherwise. An agent's own answers use the model set on its profile.</div>
+        {#each actionGroups as grp (grp.g)}
+          <div class="gk" style="margin-top:8px">{grp.g}</div>
+          {#each grp.items as a (a.id)}
+            <div class="row wrap gap-8 actrow">
+              <span class="grow">{a.label}</span>
+              <Segmented size="sm" value={modelActions.choice[a.id] || ''} options={[{ value: '', label: `default (${a.default})` }, { value: 'main', label: 'main' }, { value: 'aux', label: 'aux' }]} onchange={(v) => setAction(a.id, v)} />
+            </div>
+          {/each}
+        {/each}
+      </Panel>
       <Panel title="Model roles">
         <div class="roles">
           {#each [['chat', 'Chat model', 'default for every agent (each agent can override)', chatOpts], ['fast', 'Fast model', 'summaries, extraction, tool selection, judging — small & cheap', chatOpts], ['embedding', 'Embedding model', 'memory & semantic search', embOpts]] as [r, label, hint, opts]}
@@ -740,4 +762,6 @@
   .topics { max-height: 90px; overflow: auto; border: 1px solid var(--line); padding: 3px 6px; }
   .w { width: 160px; }
   tr.off td { opacity: 0.5; }
+  .actrow { padding: 3px 0; border-bottom: 1px solid var(--line-2); align-items: center; }
+  .gk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); }
 </style>

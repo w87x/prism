@@ -69,7 +69,7 @@ func (x *Extractor) extractPage(ctx context.Context, page *Page, instruction, sc
 	var parts []any
 	for i, ch := range chunks {
 		user := fmt.Sprintf("Instruction: %s\nBase URL: %s\nFragment %d of %d:\n%s", instruction, page.FinalURL, i+1, len(chunks), ch)
-		out, err := x.LLM.Complete(ctx, "role:fast", sys, user, true)
+		out, err := x.LLM.Complete(ctx, x.LLM.ActionRef(ctx, "web_extract", "fast"), sys, user, true)
 		if err != nil {
 			return nil, fmt.Errorf("extraction failed on fragment %d: %w", i+1, err)
 		}

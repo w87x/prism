@@ -139,7 +139,7 @@ func (e *Engine) summarize(ctx context.Context, msgs []Msg) (string, bool) {
 	for _, m := range msgs {
 		tainted = tainted || m.Tainted
 	}
-	ref := "role:fast"
+	ref := e.LLM.ActionRef(ctx, "compaction", "fast")
 	window := e.LLM.Window(ctx, ref)
 	chunkChars := window * 3 / 2 // ~60% of the window in chars (≈4 chars/token)
 	if chunkChars < 6000 {

@@ -108,7 +108,7 @@ func (s *Service) dedupeEntities(ctx context.Context, bankID int64) int {
 			Drop []int64 `json:"drop"`
 		} `json:"merges"`
 	}
-	if err := s.llm.CompleteJSON(ctx, "role:fast", entityDedupPrompt, sb.String(), &parsed); err != nil {
+	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "entities", "fast"), entityDedupPrompt, sb.String(), &parsed); err != nil {
 		return 0
 	}
 	if len(parsed.Merges) > maxEntityDedupeGroups {
@@ -259,7 +259,7 @@ func (s *Service) ExtractEntities(ctx context.Context, bankID int64, force bool)
 			Facts []int64 `json:"facts"`
 		} `json:"relations"`
 	}
-	if err := s.llm.CompleteJSON(ctx, "role:fast", entityPrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
+	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "entities", "fast"), entityPrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("entity extraction: %w", err)
 	}
 	if len(parsed.Entities) > maxEntityItems {

@@ -2911,3 +2911,138 @@ func TestPromiseReviewEndsWhenTheFollowUpDoes(t *testing.T) {
 		t.Fatalf("a failed follow-up leaves the review open: %s", got)
 	}
 }
+
+// The front door: a message is classified and decomposed before Atlas starts. One that is about a project goes to that project's
+// chat (asking first when unsure), the memory its steps need is looked up, and what only the user can decide is asked up front.
+func TestFrontDoorRoutesToProjectChatAndPreparesThePlan(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Memory.Store(ctx, memory.StoreReq{Bank: "project:homelab", Text: "The Synology NAS downloads go to /volume1/video/movies", Source: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	var planJSON string
+	var atlasInput []string
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		_, content, _ := msgAt(req, -1)
+		switch {
+		case strings.Contains(sys, "front door of a personal assistant"):
+			return testutil.Reply{Content: planJSON}
+		case strings.Contains(sys, "You are Atlas"):
+			atlasInput = append(atlasInput, content)
+			return testutil.Reply{Content: "on it"}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	idle := func(topic string) {
+		t.Helper()
+		waitFor(t, 20*time.Second, func() bool { return !h.e.ChatBusy(ChatKey("web", topic)) && len(atlasInput) > 0 })
+	}
+	reset := func() { atlasInput = nil }
+
+	// 1. confident: the message is taken to the project's chat, which is created; the plan and the memory reach Atlas
+	planJSON = `{"class":"task","project":"homelab","confidence":"high","tasks":[{"title":"Download the movies onto the Synology","mem":["Synology downloads folder"],"subtasks":[{"title":"Pick the target folder"}]}],"asks":[]}`
+	if err := h.e.UserMessage(ctx, UserMsg{Text: "Get the Guy Ritchie movies and download them onto the Synology"}); err != nil {
+		t.Fatal(err)
+	}
+	var dest string
+	waitFor(t, 20*time.Second, func() bool {
+		cs, _ := h.e.Chats(ctx, false)
+		for _, c := range cs {
+			if c.Topic != "" && c.Project == "project:homelab" {
+				dest = c.Topic
+			}
+		}
+		return dest != "" && h.events.count("chat.routed") == 1
+	})
+	idle(dest)
+	if len(atlasInput) == 0 || !strings.Contains(atlasInput[0], "[Plan prepared") || !strings.Contains(atlasInput[0], "1.1. Pick the target folder") || !strings.Contains(atlasInput[0], "/volume1/video/movies") {
+		t.Fatalf("Atlas must receive the plan with the looked-up memory: %v", atlasInput)
+	}
+	moved, _ := h.e.ChatHistory(ctx, "web", dest, 20)
+	main, _ := h.e.ChatHistory(ctx, "web", "", 20)
+	hasUser := func(ms []ChatMsg) bool {
+		for _, m := range ms {
+			if m.Role == "user" && strings.Contains(m.Text, "Guy Ritchie") {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasUser(moved) || hasUser(main) {
+		t.Fatalf("the message must live in the project chat only: moved=%v main=%v", hasUser(moved), hasUser(main))
+	}
+
+	// 2. unsure: the user is asked; "stay here" keeps it in the main chat
+	reset()
+	planJSON = `{"class":"task","project":"homelab","confidence":"low","tasks":[],"asks":[]}`
+	if err := h.e.UserMessage(ctx, UserMsg{Text: "What is a good way to back up my photos every week?"}); err != nil {
+		t.Fatal(err)
+	}
+	var ask map[string]any
+	waitFor(t, 20*time.Second, func() bool {
+		for _, a := range h.e.PendingAsks() {
+			ask = a
+		}
+		return ask != nil
+	})
+	if !strings.Contains(fmt.Sprint(ask["text"]), "homelab") {
+		t.Fatalf("the doubt is put to the user: %v", ask)
+	}
+	h.e.AnswerAsk(ask["id"].(int64), "Stay in this chat")
+	idle("")
+	if h.events.count("chat.routed") != 1 {
+		t.Fatal("staying put must not route")
+	}
+
+	// 3. what only the user can decide is asked before Atlas starts; the answer reaches Atlas
+	reset()
+	ask = nil
+	planJSON = `{"class":"task","project":"","confidence":"high","tasks":[{"title":"Download the movies"}],"asks":[{"question":"Which resolution?","options":["1080p","4K"]}]}`
+	if err := h.e.UserMessage(ctx, UserMsg{Text: "Download the new Guy Ritchie movies for me please"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, func() bool {
+		for _, a := range h.e.PendingAsks() {
+			ask = a
+		}
+		return ask != nil
+	})
+	if len(atlasInput) != 0 {
+		t.Fatal("Atlas must not start before the user answered")
+	}
+	h.e.AnswerAsk(ask["id"].(int64), "4K")
+	idle("")
+	if !strings.Contains(atlasInput[0], "answered") || !strings.Contains(atlasInput[0], "4K") {
+		t.Fatalf("the answer must be in Atlas's input: %v", atlasInput)
+	}
+}
+
+// Each behind-the-scenes action runs on its default model class until the user assigns another; the per-action choice also governs
+// routine jobs.
+func TestModelActionsOverrideTheDefaults(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	r := h.e.LLM
+	if got := r.ActionRef(ctx, "plan", "fast"); got != "role:fast" {
+		t.Fatalf("default for the planner: %q", got)
+	}
+	if got := r.ActionRef(ctx, "memory_analyze", "chat"); got != "role:chat" {
+		t.Fatalf("default for deep analysis: %q", got)
+	}
+	if err := h.e.Settings.Set(ctx, settings.KeyModelActions, settings.ModelActions{Choice: map[string]string{"plan": "main", "memory_analyze": "aux", "routine": "main"}}); err != nil {
+		t.Fatal(err)
+	}
+	if r.ActionRef(ctx, "plan", "fast") != "role:chat" || r.ActionRef(ctx, "memory_analyze", "chat") != "role:fast" || r.ActionRef(ctx, "icons", "fast") != "role:fast" {
+		t.Fatal("a choice replaces the default for that action only")
+	}
+	cron, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "x", ToAgent: "Atlas", Title: "x", Input: "x"}, true)
+	if got := h.e.routineModelRef(ctx, cron); got != "" {
+		t.Fatalf("routine=main in the per-action list means no override: %q", got)
+	}
+	for _, a := range llm.Actions {
+		if a.Default != "main" && a.Default != "aux" || a.Label == "" {
+			t.Fatalf("a malformed action: %+v", a)
+		}
+	}
+}

@@ -258,10 +258,7 @@ func (s *Service) analyzeWindow(ctx context.Context, bankID int64, force bool, m
 	}
 	fmt.Fprintf(&sb, "\nCARD:\n%s\n", strings.TrimSpace(card))
 	var parsed analysisParsed
-	role := "role:chat"
-	if s.llm.RoleRef(ctx, "chat") == "" {
-		role = "role:fast"
-	}
+	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
 	if err := s.llm.CompleteJSON(ctx, role, analyzePrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("analysis: %w", err)
 	}

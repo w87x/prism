@@ -20,7 +20,7 @@ export const S = $state({
   runs: {}, // run id → live run
   askTrail: [], // finished ask_colleague requests, kept a few seconds so the graph can show the answer coming back
   chats: [], // the user's web chats (main first); see loadChats
-  chatTopic: '', // single-chat mode: always the main thread
+  chatTopic: lsGet('prism.chatTopic', ''), // the chat shown on the Chat page ('' = main)
   chatBusy: {}, // topic -> an Atlas turn is running in that chat
   chatUnread: {}, // topic -> new messages seen while another chat was open
   chatRead: lsGet('prism.chatRead', {}), // topic -> id of the last message the user has seen
@@ -275,6 +275,11 @@ function wire() {
   });
   on('chat.cleared', (e) => { if (e.channel === 'web' && (e.topic || '') === S.chatTopic) S.chat = []; });
   on('chats.update', () => loadChats());
+  // the front door took a message to a project's chat: follow it, if the user is looking at the chat they typed it in
+  on('chat.routed', async (e) => {
+    await loadChats();
+    if ((e.from || '') === S.chatTopic) { await selectChat(e.to); toast(`Taken to the “${e.project}” chat`, 'info'); }
+  });
   on('chat.reload', async (e) => { if ((e.topic || '') === S.chatTopic) { const h = await call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }); if (h && S.chatTopic === (e.topic || '')) S.chat = h; } });
   on('notice', (n) => { if (n.level === 'attention' || n.level === 'warning' || n.level === 'error') toast(`${n.agent}: ${short(n.text, 140)}`, n.level === 'attention' ? 'attn' : n.level === 'warning' ? 'warn' : 'err', 9000); });
   on('log', (l) => { if (l.level === 'error') toast(`${l.source}: ${short(l.message, 160)}`, 'err', 8000); });
@@ -350,18 +355,39 @@ export async function refreshAll() {
   loadProposals();
 }
 
-// ── the one chat (single-chat mode: S.chatTopic is always '') ──
+// ── the web chats: Main plus one chat per project (messages are routed to them, see agent/planner.go) ──
 export function markRead(topic, id) {
   S.chatUnread[topic] = 0;
   if (id && (S.chatRead[topic] || 0) < id) { S.chatRead[topic] = id; lsSet('prism.chatRead', $state.snapshot(S.chatRead)); }
 }
-// still one call: chats.list also carries the main chat's own settings (title, project focus, remember) that
-// ChatHeader reads and updates via chats.update.
 export async function loadChats() {
   const r = await call('chats.list', {}, { quiet: true });
   if (!r) return;
   S.chats = r;
   for (const c of r) if (c.busy) S.chatBusy[c.topic] = true;
+  if (!r.find((c) => c.topic === S.chatTopic)) S.chatTopic = ''; // the open chat was deleted
+}
+/** A chat other than the open one has something the user has not seen yet. */
+export function chatHasNew(c) {
+  if (c.topic === S.chatTopic) return false;
+  if ((S.chatUnread[c.topic] || 0) > 0) return true;
+  const seen = S.chatRead[c.topic];
+  return seen !== undefined && c.last_msg_id > seen;
+}
+export async function selectChat(topic) {
+  if (topic === S.chatTopic) return;
+  S.chatTopic = topic;
+  lsSet('prism.chatTopic', topic);
+  S.chat = [];
+  const hist = await call('chat.history', { limit: 120, topic }, { quiet: true });
+  if (S.chatTopic !== topic) return; // the user moved on while it loaded
+  S.chat = hist || [];
+  markRead(topic, S.chat.length ? S.chat[S.chat.length - 1].id : 0);
+}
+export async function newChat(title = '', projectBankId = 0) {
+  const c = await call('chats.create', { title, project_bank_id: projectBankId });
+  if (c) { await loadChats(); await selectChat(c.topic); }
+  return c;
 }
 
 export async function loadNotifs() {

@@ -610,7 +610,7 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 			valid[n.c.id] = true
 			lines = append(lines, fmt.Sprintf(`%d: %s`, n.c.id, n.c.text))
 		}
-		out, err := s.llm.Complete(ctx, "role:fast", `You maintain a memory of facts. Given NEW and existing OLD facts, decide for each OLD fact its relation to NEW:
+		out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_dedupe", "fast"), `You maintain a memory of facts. Given NEW and existing OLD facts, decide for each OLD fact its relation to NEW:
 "same" (NEW adds nothing), "update" (NEW replaces or corrects OLD, e.g. a changed preference), "contradiction" (both cannot be true, NEW is more recent) or "unrelated".
 Answer JSON only: {"relations":[{"id":<old id>,"relation":"same|update|contradiction|unrelated"}]}`,
 			"NEW: "+r.Text+"\nOLD:\n"+strings.Join(lines, "\n"), true)

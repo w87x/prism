@@ -712,7 +712,7 @@ func (e *Engine) toolEscalate() *tools.Tool {
 			}
 			escalateUse[key]++
 			escalateMu.Unlock()
-			out, err := e.LLM.Complete(ctx, "role:chat", "You are the senior model helping a smaller assistant that does routine background work. Answer the question directly and concisely, using only the material given; say plainly if it is not enough to decide.", "QUESTION:\n"+a.Question+"\n\nDETAILS:\n"+brief(a.Details, 12000), false)
+			out, err := e.LLM.Complete(ctx, e.LLM.ActionRef(ctx, "escalate", "chat"), "You are the senior model helping a smaller assistant that does routine background work. Answer the question directly and concisely, using only the material given; say plainly if it is not enough to decide.", "QUESTION:\n"+a.Question+"\n\nDETAILS:\n"+brief(a.Details, 12000), false)
 			if err != nil {
 				return "", err
 			}

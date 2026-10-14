@@ -77,7 +77,7 @@ func (e *Engine) SummarizeTask(ctx context.Context, id int64) (bool, error) {
 		return false, nil
 	}
 	var parsed struct{ Title, Goal, Decisions, Attempts, Outcome, Unfinished string }
-	if err := e.LLM.CompleteJSON(ctx, "role:fast", summaryPrompt, text, &parsed); err != nil {
+	if err := e.LLM.CompleteJSON(ctx, e.LLM.ActionRef(ctx, "task_summary", "fast"), summaryPrompt, text, &parsed); err != nil {
 		return false, fmt.Errorf("task summary: %w", err)
 	}
 	title := strings.TrimSpace(parsed.Title)

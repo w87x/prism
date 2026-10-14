@@ -303,7 +303,7 @@ func (s *Service) SuggestSplit(ctx context.Context, id int64) ([]SplitGroup, err
 		}
 		fmt.Fprintf(&sb, "%d: %s\n", f.ID, t)
 	}
-	out, err := s.llm.Complete(ctx, "role:fast", splitPrompt, "Bank: "+b.Label()+"\n\n"+sb.String(), true)
+	out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_banks", "fast"), splitPrompt, "Bank: "+b.Label()+"\n\n"+sb.String(), true)
 	if err != nil {
 		return nil, err
 	}

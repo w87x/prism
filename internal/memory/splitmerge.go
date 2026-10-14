@@ -25,7 +25,7 @@ func (s *Service) SplitFact(ctx context.Context, id int64) ([]Fact, error) {
 	if s.llm.RoleRef(ctx, "fast") == "" {
 		return nil, errors.New("no model configured")
 	}
-	out, err := s.llm.Complete(ctx, "role:fast",
+	out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_dedupe", "fast"),
 		`Break the given fact into separate atomic facts, one independent claim per item, each still a self-contained sentence in third person. `+
 			`If it is already a single atomic claim, return it unchanged as the only item.
 Answer JSON only: {"facts":["...","..."]}`,
@@ -147,7 +147,7 @@ func similarity(a, b cand) float64 {
 // classifyRelation is Store's near-duplicate classifier, factored out so DedupeFacts can ask the same
 // question about two already-stored facts instead of a new one against its neighbours.
 func (s *Service) classifyRelation(ctx context.Context, newText, oldText string) (string, error) {
-	out, err := s.llm.Complete(ctx, "role:fast", `You maintain a memory of facts. Given NEW and OLD, decide OLD's relation to NEW:
+	out, err := s.llm.Complete(ctx, s.llm.ActionRef(ctx, "memory_dedupe", "fast"), `You maintain a memory of facts. Given NEW and OLD, decide OLD's relation to NEW:
 "same" (NEW adds nothing), "update" (NEW replaces or corrects OLD), "contradiction" (both cannot be true) or "unrelated".
 Answer JSON only: {"relation":"same|update|contradiction|unrelated"}`,
 		"NEW: "+newText+"\nOLD: "+oldText, true)

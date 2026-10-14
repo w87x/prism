@@ -147,7 +147,7 @@ func (e *Engine) restartReview(ctx context.Context, t tasks.Task, findings strin
 	defer cancel()
 	var v restartVerdict
 	in := "TASK: " + brief(t.Input, 600) + "\n\nEVIDENCE:\n" + brief(findings, 5000)
-	if err := e.LLM.CompleteJSON(rctx, "role:fast", restartReviewPrompt, in, &v); err != nil {
+	if err := e.LLM.CompleteJSON(rctx, e.LLM.ActionRef(rctx, "restart_review", "fast"), restartReviewPrompt, in, &v); err != nil {
 		return nil
 	}
 	switch strings.ToLower(strings.TrimSpace(v.Verdict)) {

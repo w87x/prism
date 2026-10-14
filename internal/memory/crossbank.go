@@ -144,10 +144,7 @@ func (s *Service) AnalyzeAcross(ctx context.Context, force bool, minNew int) (Cr
 			Confidence float64 `json:"confidence"`
 		} `json:"connections"`
 	}
-	role := "role:chat"
-	if s.llm.RoleRef(ctx, "chat") == "" {
-		role = "role:fast"
-	}
+	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
 	if err := s.llm.CompleteJSON(ctx, role, crossPrompt, s.guidance(ctx)+sb.String(), &parsed); err != nil {
 		return res, fmt.Errorf("cross-bank analysis: %w", err)
 	}

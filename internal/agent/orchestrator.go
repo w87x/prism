@@ -342,7 +342,7 @@ func (e *Engine) UserMessage(ctx context.Context, m UserMsg) error {
 	e.mu.Lock()
 	working := e.chatRun[key] != nil
 	e.mu.Unlock()
-	e.logChatFull(ctx, "user", "", m.Text, m.Channel, m.Topic, 0, imageIDs, working)
+	userMsg := e.logChatFull(ctx, "user", "", m.Text, m.Channel, m.Topic, 0, imageIDs, working)
 	e.touchChat(ctx, m.Channel, m.Topic)
 	if m.Channel == "web" && m.Topic != "" && m.Text != "" { // a provisional title straight from the first message; a model refines it later
 		if r, err := e.DB.Exec(ctx, `UPDATE chats SET title=$2 WHERE topic=$1 AND auto_title AND title=''`, m.Topic, briefText(m.Text, 40)); err == nil && r.RowsAffected() > 0 {
@@ -388,18 +388,34 @@ func (e *Engine) UserMessage(ctx context.Context, m UserMsg) error {
 	ar.Info = RunInfo{ID: e.runSeq.Add(1), Agent: atlas.Name, SessionID: sess.ID, IsChat: true, ChatTopic: m.Topic, ChatChannel: m.Channel}
 	e.chatRun[key] = ar
 	e.mu.Unlock()
-	go e.chatLoop(context.WithoutCancel(ctx), m, imageIDs, key, atlas, sess, ar)
+	go e.chatLoop(context.WithoutCancel(ctx), m, imageIDs, key, atlas, sess, ar, userMsg.ID)
 	return nil
 }
 
-func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key string, atlas *Profile, sess *Session, ar *activeRun) {
+func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key string, atlas *Profile, sess *Session, ar *activeRun, msgID int64) {
 	input := m.Text
+	// the front door: classify and decompose the message, take it to its project's chat, ask what only the user can decide
+	note := ""
+	if fd := e.frontDoor(ctx, m, msgID, ar); fd.Topic != m.Topic || fd.Note != "" {
+		if fd.Topic != m.Topic {
+			m.Topic, key = fd.Topic, ChatKey(m.Channel, fd.Topic)
+			ar.Info.ChatTopic = fd.Topic
+			if ns, err := e.Sessions.Chat(ctx, atlas.Name, key); err == nil {
+				sess = ns
+			}
+		}
+		note = fd.Note
+	}
 	for {
 		task, terr := e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: atlas.Name, Input: input, SessionID: &sess.ID}, true)
 		ar.Info.TaskID = task.ID
 		ar.Info.Title = task.Title
 		ar.task.Store(brief(input, 90))
-		spec := RunSpec{Profile: atlas, Session: sess, Input: input, InputImages: images, Provenance: "user", Channel: m.Channel, Topic: m.Topic,
+		runInput := input
+		if note != "" { // the plan goes to the first turn only; a later turn is a steering message
+			runInput, note = input+note, ""
+		}
+		spec := RunSpec{Profile: atlas, Session: sess, Input: runInput, InputImages: images, Provenance: "user", Channel: m.Channel, Topic: m.Topic,
 			Interactive: true, Steer: ar.steer, Run: ar}
 		if terr == nil {
 			spec.Task = &task
@@ -945,6 +961,12 @@ func (e *Engine) routineModelRef(ctx context.Context, t tasks.Task) string {
 		return ""
 	}
 	ref := settings.Load(ctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).RoutineModelRef()
+	switch settings.Load(ctx, e.Settings, settings.KeyModelActions, settings.ModelActions{}).Choice["routine"] { // the per-action list wins when it says something
+	case "main":
+		return ""
+	case "aux":
+		ref = "role:fast"
+	}
 	if ref == "role:fast" && e.LLM.RoleRef(ctx, "fast") == "" {
 		return "" // no fast model configured: nothing cheaper to use
 	}
@@ -983,7 +1005,7 @@ func (e *Engine) worthTelling(ctx context.Context, t tasks.Task, txt string) boo
 	}
 	cctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	if err := e.LLM.CompleteJSON(cctx, "role:fast", worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+brief(t.Input, 700)+"\n\nMESSAGE:\n"+brief(txt, 1500), &out); err != nil || out.Tell == nil {
+	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "notice_filter", "fast"), worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+brief(t.Input, 700)+"\n\nMESSAGE:\n"+brief(txt, 1500), &out); err != nil || out.Tell == nil {
 		return true
 	}
 	return *out.Tell

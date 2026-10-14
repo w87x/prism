@@ -390,7 +390,7 @@ func (x *Extractor) onePage(ctx context.Context, page *Page, o ExtractOpts) (any
 				Data     any  `json:"data"`
 				Complete bool `json:"complete"`
 			}
-			if err := x.LLM.CompleteJSON(ctx, "role:fast", sys, user, &parsed); err == nil && !emptyData(parsed.Data) {
+			if err := x.LLM.CompleteJSON(ctx, x.LLM.ActionRef(ctx, "web_extract", "fast"), sys, user, &parsed); err == nil && !emptyData(parsed.Data) {
 				data, sn, missing := applySchema(parsed.Data, o.Schema, base)
 				good := parsed.Complete && missing < 0.5
 				if good || o.Source == "structured" {

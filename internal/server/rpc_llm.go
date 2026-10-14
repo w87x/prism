@@ -75,6 +75,8 @@ func (s *Server) registerLLM() {
 		defer cancel()
 		return a.LLM.Client().ListModels(cctx, base, key)
 	})
+	// the behind-the-scenes actions whose model can be chosen (main / aux), with their defaults; the choices live in the "model_actions" setting
+	rpc(s, "models.actions", func(ctx context.Context, _ none) ([]llm.Action, error) { return llm.Actions, nil })
 	rpc(s, "models.list", func(ctx context.Context, _ none) ([]llm.Model, error) { return st().Models(ctx) })
 	rpc(s, "models.save", func(ctx context.Context, m llm.Model) (int64, error) {
 		if strings.TrimSpace(m.Name) == "" || m.ModelID == "" || m.ProviderID == 0 {
