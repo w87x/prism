@@ -29,6 +29,13 @@
 
   const agents = $derived(S.agents);
   const runs = $derived(activeRuns());
+  // requests between colleagues, for the 3D graph (the 2D one reads the same runs while drawing)
+  const asks3d = $derived.by(() => {
+    const by = Object.fromEntries(runs.map((r) => [r.id, r.agent])); const out = [];
+    for (const r of runs) if (r.kind === 'ask' && !r.done && by[r.parent_run]) out.push({ a: by[r.parent_run], b: r.agent, live: true, ok: true });
+    for (const tr of S.askTrail) out.push({ a: tr.from, b: tr.to, live: false, ok: tr.ok });
+    return out;
+  });
   const activeNames = $derived(new Set(runs.map((r) => r.agent)));
   // for the 3D view: agents Atlas is delegating to right now, and the ones blocked on the user
   const liveNames = $derived.by(() => {
@@ -583,7 +590,7 @@
   {#if view === 'graph'}
     <div class="graph" bind:this={graphEl} bind:clientWidth={w} bind:clientHeight={h}>
       {#if layout === '3d'}
-        <Graph3D {agents} {activeNames} {liveNames} {blockedNames} {heatOf} {match} {iconOf} {drift} nonce={shuffleN} selectedId={S.selectedAgent} onselect={(id) => (S.selectedAgent = id)} />
+        <Graph3D asks={asks3d} {agents} {activeNames} {liveNames} {blockedNames} {heatOf} {match} {iconOf} {drift} nonce={shuffleN} selectedId={S.selectedAgent} onselect={(id) => (S.selectedAgent = id)} />
       {:else}
       <canvas bind:this={canvas} style="width:{w}px;height:{h}px" onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp} onpointercancel={onUp} onpointerleave={() => { hoverId = null; tip = null; }} aria-label="agent orbits"></canvas>
       {/if}

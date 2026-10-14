@@ -129,7 +129,7 @@
   let replying = $state(false);
   // b.kind === 'question' is the reliable signal (memory analysis explicitly raised it); the old body-sniffing
   // heuristic stays as a fallback for anything else that happens to read as a question (e.g. a dream briefing).
-  const asks = (b) => b.kind === 'question' || b.questions?.length > 0 || (!b.reply && /\?/.test(b.body));
+  const asks = (b) => !b.reply && (b.kind === 'question' || b.questions?.length > 0);
   async function sendReply(text = replyText) {
     replying = true;
     const ok = await call('briefings.reply', { id: readB.id, text });

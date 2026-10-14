@@ -578,6 +578,7 @@ func (s *Service) check(ctx context.Context, i Intent) {
 // ── briefings ───────────────────────────────────────────────────────────────
 
 func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, error) {
+	s.closeSettledQuestions(ctx)
 	rows, err := s.DB.Query(ctx, `SELECT id,agent,title,body,importance,status,created_at,reply,replied_at,kind,questions FROM briefings WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 200`, status)
 	if err != nil {
 		return nil, err
@@ -594,6 +595,16 @@ func (s *Service) Briefings(ctx context.Context, status string) ([]Briefing, err
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// closeSettledQuestions dismisses question briefings whose question is no longer open in memory: it was answered, confirmed or
+// rejected on the Memory page, or analysis retired or revised it. Only a reply typed into the briefing itself used to close one,
+// so a question answered anywhere else kept nagging from Today for ever.
+func (s *Service) closeSettledQuestions(ctx context.Context) {
+	_, _ = s.DB.Exec(ctx, `UPDATE briefings b SET status='dismissed'
+		WHERE b.kind='question' AND b.status<>'dismissed' AND b.reply=''
+		  AND NOT EXISTS (SELECT 1 FROM memory_facts f WHERE f.kind='conclusion' AND f.valid_to IS NULL
+		                  AND f.text = split_part(b.body, E'\n\nBased on:', 1))`)
 }
 
 // Briefing fetches a single briefing by id (for the "save to Obsidian" / "read" actions).

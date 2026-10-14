@@ -301,3 +301,39 @@ func TestHeartbeatKeepsItsCronInLineWithTheChecklist(t *testing.T) {
 		t.Fatalf("state: %+v", st)
 	}
 }
+
+// A question briefing closes when its question is settled anywhere (answered on the Memory page, retired by analysis), not
+// only when it is replied to in the briefing itself.
+func TestQuestionBriefingClosesWhenTheInsightIsSettled(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	var bank int64
+	if err := s.DB.QueryRow(ctx, `INSERT INTO memory_banks (kind, name, owner) VALUES ('project','qtest','') RETURNING id`).Scan(&bank); err != nil {
+		t.Fatal(err)
+	}
+	q := "Is the alert threshold intentional?"
+	var fact int64
+	if err := s.DB.QueryRow(ctx, `INSERT INTO memory_facts (bank_id, text, kind, tags) VALUES ($1,$2,'conclusion','{insight,question}') RETURNING id`, bank, q).Scan(&fact); err != nil {
+		t.Fatalf("cannot seed an insight: %v", err)
+	}
+	id, err := s.AddQuestion(ctx, "Mnemosyne", "Question — "+q, q+"\n\nBased on:\n- something", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func() bool {
+		bs, _ := s.Briefings(ctx, "")
+		for _, b := range bs {
+			if b.ID == id {
+				return b.Status != "dismissed"
+			}
+		}
+		return false
+	}
+	if !open() {
+		t.Fatal("the question is open while its insight is")
+	}
+	_, _ = s.DB.Exec(ctx, `UPDATE memory_facts SET valid_to=now() WHERE id=$1`, fact)
+	if open() {
+		t.Fatal("answering the insight elsewhere must close the briefing")
+	}
+}

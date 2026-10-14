@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"prism/internal/memory"
@@ -119,8 +118,10 @@ func (a *App) GetToday(ctx context.Context) Today {
 	if a.Ext.Sched != nil {
 		if briefs, err := a.Ext.Sched.Briefings(ctx, ""); err == nil {
 			for _, b := range briefs {
-				// unread ones, and ones that ask a question nobody answered yet; reading (or answering) clears the rest
-				if b.Status == "dismissed" || (b.Status != "new" && !(b.Reply == "" && strings.Contains(b.Body, "?"))) {
+				// unread ones, and ones that really ask (a question briefing or a form of questions) nobody answered yet; reading (or
+				// answering) clears the rest. A stray "?" in an ordinary briefing's text no longer keeps it here for ever.
+				asks := b.Kind == "question" || len(b.Questions) > 0
+				if b.Status == "dismissed" || (b.Status != "new" && !(b.Reply == "" && asks)) {
 					continue
 				}
 				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt})

@@ -6,7 +6,7 @@
   // button to pan; click an agent to open it. three.js is loaded only when this layout is chosen.
   import { onMount } from 'svelte';
   let { agents = [], activeNames = new Set(), liveNames = new Set(), blockedNames = new Set(), heatOf = () => 0, selectedId = null,
-        onselect = () => {}, match = () => true, iconOf = () => '', drift = true, nonce = 0 } = $props();
+        onselect = () => {}, match = () => true, iconOf = () => '', drift = true, nonce = 0, asks = [] } = $props();
 
   let host = $state();
   let tip = $state(null);
@@ -64,7 +64,7 @@
     let group = new THREE.Group(); scene.add(group);
     let items = [];   // {a, sprite, halo, glow, label, base: Vector3, ph, size, isHub?}
     let hubs = [];    // {key, label, base, sprite(label), mesh, members}
-    let lineBase, lineLive, lineBlocked, posAttr = {}; let segs = [];
+    let lineBase, lineLive, lineBlocked, lineAsk, askDots, posAttr = {}; let segs = [];
     let order = new Map(), radius = 200, built = false;
 
     const fib = (i, n, yMin = -1) => { // i-th of n points evenly spread over a sphere (or a cap, down to yMin)
@@ -146,12 +146,22 @@
         });
       });
       if (atlasItem) hubs.forEach((h) => segs.push({ hub: h, it: null }));
-      const mkLines = (color, opacity, dashed) => {
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(600 * 6), 3)); g.setDrawRange(0, 0);
-        const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
+      // dashed lines march along their direction (like the 2D graph): the dash pattern is driven by a per-vertex distance that
+      // is shifted every frame
+      const mkLines = (color, opacity, dashed, cap = 600) => {
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cap * 6), 3)); g.setDrawRange(0, 0);
+        let mat;
+        if (dashed) { g.setAttribute('lineDistance', new THREE.BufferAttribute(new Float32Array(cap * 2), 1)); mat = new THREE.LineDashedMaterial({ color, transparent: true, opacity, depthWrite: false, dashSize: dashed[0], gapSize: dashed[1] }); }
+        else mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+        const l = new THREE.LineSegments(g, mat);
         l.frustumCulled = false; group.add(l); return l;
       };
-      lineBase = mkLines(C.line, 0.75); lineLive = mkLines(C.hi, 1); lineBlocked = mkLines(C.err, 0.9);
+      lineBase = mkLines(C.line, 0.75); lineLive = mkLines(C.hi, 1, [7, 5]); lineBlocked = mkLines(C.err, 0.9); lineAsk = mkLines(C.attn, 0.95, [3, 6], 1200);
+      { // dots travelling toward the colleague being asked
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(16 * 3), 3)); g.setDrawRange(0, 0);
+        askDots = new THREE.Points(g, new THREE.PointsMaterial({ color: C.attn, size: 9, sizeAttenuation: false, transparent: true, depthWrite: false }));
+        askDots.frustumCulled = false; askDots.renderOrder = 4; group.add(askDots);
+      }
       api.atlasItem = atlasItem;
       if (!built) { resetView(false); built = true; } // the camera is only reset on the first build, not on every roster change
     }
@@ -249,16 +259,45 @@
         h.label.material.opacity = h.lab < 0.03 ? 0 : h.lab; h.label.position.copy(h.pos).add(tmp.set(0, 12, 0));
       }
       // lines: Atlas → hub → member; the ones carrying a live delegation (or a blocked agent) light up
-      let nb = 0, nl = 0, nr = 0;
-      const put = (l, n, a, b) => { const arr = l.geometry.attributes.position.array; if (n * 6 + 5 >= arr.length) return n; arr[n * 6] = a.x; arr[n * 6 + 1] = a.y; arr[n * 6 + 2] = a.z; arr[n * 6 + 3] = b.x; arr[n * 6 + 4] = b.y; arr[n * 6 + 5] = b.z; return n + 1; };
+      let nb = 0, nl = 0, nr = 0, na = 0;
+      const ph = t / 28; // dash phase, in world units
+      const put = (l, n, a, b) => {
+        const arr = l.geometry.attributes.position.array; if (n * 6 + 5 >= arr.length) return n;
+        arr[n * 6] = a.x; arr[n * 6 + 1] = a.y; arr[n * 6 + 2] = a.z; arr[n * 6 + 3] = b.x; arr[n * 6 + 4] = b.y; arr[n * 6 + 5] = b.z;
+        const d = l.geometry.attributes.lineDistance; if (d) { d.array[n * 2] = -ph; d.array[n * 2 + 1] = a.distanceTo(b) - ph; }
+        return n + 1;
+      };
       const atlas = api.atlasItem, ap = atlas ? atlas.sprite.position : null;
       for (const sg of segs) {
         if (!sg.it) { if (!ap) continue; const liveHub = items.some((i) => i.hub === sg.hub && liveNames.has(i.a.name)); if (liveHub) nl = put(lineLive, nl, ap, sg.hub.pos); else nb = put(lineBase, nb, ap, sg.hub.pos); continue; }
         if (liveNames.has(sg.it.a.name)) nl = put(lineLive, nl, sg.hub.pos, sg.it.sprite.position); else nb = put(lineBase, nb, sg.hub.pos, sg.it.sprite.position);
         if (ap && blockedNames.has(sg.it.a.name)) nr = put(lineBlocked, nr, sg.it.sprite.position, ap);
       }
-      for (const [l, n] of [[lineBase, nb], [lineLive, nl], [lineBlocked, nr]]) { l.geometry.setDrawRange(0, n * 2); l.geometry.attributes.position.needsUpdate = true; }
-      lineLive.material.opacity = 0.65 + 0.35 * Math.sin(t / 160);
+      // requests between colleagues: an amber dashed arc with a dot travelling toward the one asked (lingering finished ones are solid-ish and dimmer)
+      let nd = 0;
+      const dots = askDots.geometry.attributes.position.array;
+      const byName = new Map(items.map((i) => [i.a.name, i]));
+      for (const k of asks) {
+        const A = byName.get(k.a), B = byName.get(k.b); if (!A || !B || A === B) continue;
+        const pa = A.sprite.position, pb = B.sprite.position, len = pa.distanceTo(pb);
+        const mid = tmp.copy(pa).add(pb).multiplyScalar(0.5); mid.y += len * 0.22; // lift the middle so the arc clears the spokes
+        const N = 14; let prev = pa.clone();
+        for (let i = 1; i <= N; i++) {
+          const u = i / N, q = 1 - u;
+          const pt = new THREE.Vector3(q * q * pa.x + 2 * q * u * mid.x + u * u * pb.x, q * q * pa.y + 2 * q * u * mid.y + u * u * pb.y, q * q * pa.z + 2 * q * u * mid.z + u * u * pb.z);
+          na = put(lineAsk, na, prev, pt); prev = pt;
+        }
+        if (k.live && nd < 16) {
+          const u = (t / 1500) % 1, q = 1 - u;
+          dots[nd * 3] = q * q * pa.x + 2 * q * u * mid.x + u * u * pb.x; dots[nd * 3 + 1] = q * q * pa.y + 2 * q * u * mid.y + u * u * pb.y; dots[nd * 3 + 2] = q * q * pa.z + 2 * q * u * mid.z + u * u * pb.z; nd++;
+        }
+      }
+      askDots.geometry.setDrawRange(0, nd); askDots.geometry.attributes.position.needsUpdate = true;
+      for (const [l, n] of [[lineBase, nb], [lineLive, nl], [lineBlocked, nr], [lineAsk, na]]) {
+        l.geometry.setDrawRange(0, n * 2); l.geometry.attributes.position.needsUpdate = true;
+        if (l.geometry.attributes.lineDistance) l.geometry.attributes.lineDistance.needsUpdate = true;
+      }
+      lineLive.material.opacity = 0.7 + 0.3 * Math.sin(t / 160);
       controls.autoRotate = spin && !reduced && !down; controls.update();
       renderer.render(scene, camera);
     }
