@@ -154,6 +154,15 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 					return "", err
 				}
 			}
+			// models often name a role ("web-search specialist") instead of an agent: a name that matches no agent is treated as
+			// a description of who is wanted, and the best-matching specialist is asked instead
+			prefix := ""
+			if _, perr := e.Profiles.Get(ctx, name); perr != nil && strings.TrimSpace(a.Agent) != "" {
+				if best, berr := e.bestSpecialist(ctx, a.Agent+" "+a.Request, env.Agent); berr == nil {
+					prefix = fmt.Sprintf("(There is no agent called %q; %s was asked instead.)\n", a.Agent, best)
+					name = best
+				}
+			}
 			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true)
 			if err != nil {
 				return "", err
@@ -161,7 +170,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			if tainted && env.Taint != nil {
 				env.Taint()
 			}
-			return formatDelegated(t), nil
+			return prefix + formatDelegated(t), nil
 		},
 	}
 }

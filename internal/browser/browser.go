@@ -18,7 +18,9 @@ import (
 	"time"
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
@@ -725,9 +727,19 @@ func (m *Manager) RegisterTools(reg *tools.Registry) {
 				}
 				tctx, cancel := context.WithTimeout(tab, 30*time.Second)
 				defer cancel()
-				acts := []chromedp.Action{chromedp.Focus(s, chromedp.ByQuery), chromedp.SetValue(s, "", chromedp.ByQuery), chromedp.SendKeys(s, a.Text, chromedp.ByQuery)}
+				// Focus the field and clear it through the page (SetValue fails on a wrapper element or a contenteditable, which is
+				// most modern search boxes), then insert the text into whatever has focus: it fires the input events frameworks listen to.
+				var status string
+				selJSON, _ := json.Marshal(s)
+				if err := chromedp.Run(tctx, chromedp.Evaluate(fmt.Sprintf(focusAndClearJS, selJSON), &status)); err != nil {
+					return "", err
+				}
+				if status != "ok" {
+					return "", fmt.Errorf("cannot type into that element (%s): pick the input field itself from the snapshot", status)
+				}
+				acts := []chromedp.Action{chromedp.ActionFunc(func(c context.Context) error { return input.InsertText(a.Text).Do(c) })}
 				if a.Submit {
-					acts = append(acts, chromedp.SendKeys(s, kb.Enter, chromedp.ByQuery), waitAfter(a.WaitSelector, a.WaitMS, 1200*time.Millisecond))
+					acts = append(acts, chromedp.KeyEvent(kb.Enter), waitAfter(a.WaitSelector, a.WaitMS, 1200*time.Millisecond))
 				}
 				if err := chromedp.Run(tctx, acts...); err != nil {
 					return "", err
@@ -875,7 +887,7 @@ func (m *Manager) RegisterTools(reg *tools.Registry) {
 		},
 		&tools.Tool{
 			Name: "browser_eval", Category: "browser", Risk: tools.RiskExec, Untrusted: true,
-			Description: "Evaluate a JavaScript expression in a tab and return the JSON result (for scraping data the snapshot does not expose).",
+			Description: "Evaluate JavaScript in a tab and return the JSON result (for scraping data the snapshot does not expose). An expression works, and so does a function body that ends in return; promises are awaited.",
 			Params:      tools.Obj("js", tools.Str("js", "JavaScript expression"), tabParam()),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
@@ -892,7 +904,13 @@ func (m *Manager) RegisterTools(reg *tools.Registry) {
 				tctx, cancel := context.WithTimeout(tab, 30*time.Second)
 				defer cancel()
 				var res any
-				if err := chromedp.Run(tctx, chromedp.Evaluate(a.JS, &res)); err != nil {
+				await := func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }
+				err = chromedp.Run(tctx, chromedp.Evaluate(a.JS, &res, await))
+				if err != nil && strings.Contains(err.Error(), "Illegal return statement") {
+					// a script written as a function body ("return document.title"): run it as one
+					err = chromedp.Run(tctx, chromedp.Evaluate("(async function(){\n"+a.JS+"\n})()", &res, await))
+				}
+				if err != nil {
 					return "", err
 				}
 				b, _ := json.Marshal(res)
@@ -959,3 +977,12 @@ func completedDownload(dir string) string {
 	}
 	return ""
 }
+
+// focusAndClearJS focuses the text field a selector points at (or the field inside a wrapper) and empties it the way a user would, so
+// the page's own listeners see it. It answers "ok" or why that element cannot take text.
+const focusAndClearJS = `(function(sel){var el=document.querySelector(sel);if(!el)return "no element matches";var t=el;
+if(!t.matches('input,textarea,[contenteditable=""],[contenteditable="true"]')){var inner=el.querySelector('input,textarea,[contenteditable=""],[contenteditable="true"]');if(inner)t=inner}
+t.scrollIntoView({block:"center"});t.focus();
+if('value' in t){var proto=t instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(proto,'value');if(d&&d.set)d.set.call(t,'');else t.value='';t.dispatchEvent(new Event('input',{bubbles:true}));return "ok"}
+if(t.isContentEditable){t.textContent='';t.dispatchEvent(new Event('input',{bubbles:true}));return "ok"}
+return "it is a "+t.tagName.toLowerCase()+", not a text field"})(%s)`

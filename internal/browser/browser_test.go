@@ -444,3 +444,55 @@ fetch('/stream/master.m3u8').then(r=>r.text()); // what hls.js does: the player 
 		t.Fatalf("captured media = %v requests=%d", cp.Media, cp.Requests)
 	}
 }
+
+// browser_type works on a plain input, on a wrapper around one and on a contenteditable (SetValue failed on the last two);
+// browser_eval accepts a function body that returns, and awaits promises.
+func TestBrowserTypeAndEvalAcceptModernPages(t *testing.T) {
+	d := testutil.DB(t)
+	st := settings.New(d.Pool)
+	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
+	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
+	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	if !m.Available() {
+		t.Skip("no Chrome installed")
+	}
+	defer m.Stop()
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<title>T</title><body>
+		<input id="plain"><div id="wrap"><span>search</span><input id="inner"></div>
+		<div id="ce" contenteditable="true" style="min-height:20px">old text</div><p id="nope">not a field</p>
+		<script>var seen=[];document.getElementById('plain').addEventListener('input',function(e){seen.push(e.target.value)});</script></body>`)
+	}))
+	defer site.Close()
+	reg := tools.NewRegistry(d.Pool)
+	m.RegisterTools(reg)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	env := &tools.Env{Agent: "t", TaskID: 702}
+	run := func(name string, args any) (string, error) {
+		tool, _ := reg.Get(name)
+		b, _ := json.Marshal(args)
+		return tool.Run(ctx, env, b)
+	}
+	if _, err := run("browser_open", map[string]any{"url": site.URL}); err != nil {
+		t.Fatal(err)
+	}
+	for sel, want := range map[string]string{"#plain": "hello there", "#wrap": "inside a wrapper", "#ce": "typed into an editable"} {
+		if _, err := run("browser_type", map[string]any{"selector": sel, "text": want}); err != nil {
+			t.Fatalf("typing into %s: %v", sel, err)
+		}
+	}
+	got, err := run("browser_eval", map[string]any{"js": `return [document.getElementById('plain').value, document.getElementById('inner').value, document.getElementById('ce').textContent, seen.length > 0]`})
+	if err != nil {
+		t.Fatalf("a function body with return must work: %v", err)
+	}
+	if got != `["hello there","inside a wrapper","typed into an editable",true]` {
+		t.Fatalf("typed text: %s", got)
+	}
+	if out, err := run("browser_eval", map[string]any{"js": `new Promise(function(r){setTimeout(function(){r(42)},50)})`}); err != nil || strings.TrimSpace(out) != "42" {
+		t.Fatalf("a promise is awaited: %q %v", out, err)
+	}
+	if _, err := run("browser_type", map[string]any{"selector": "#nope", "text": "x"}); err == nil || !strings.Contains(err.Error(), "not a text field") {
+		t.Fatalf("a paragraph cannot take text and the error says so: %v", err)
+	}
+}

@@ -141,7 +141,7 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				var origins []string
 				for _, u := range a.URLs {
 					if env.Sources == nil || !env.Sources.Has(u) {
-						return "", fmt.Errorf("%s was not read in this task: only cite pages you fetched", u)
+						return "", fmt.Errorf("%s was not read in this task: only cite pages you actually fetched. Fetch it with web_fetch first, then cite it — or, if you cannot read it, give verdict \"unclear\" instead", u)
 					}
 					if o, ok := tools.Origin(u); ok {
 						origins = append(origins, o)

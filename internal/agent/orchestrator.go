@@ -733,7 +733,12 @@ func (e *Engine) StartDispatcher(ctx context.Context, maxRuns int) {
 	go func() {
 		tick := time.NewTicker(2 * time.Second)
 		defer tick.Stop()
+		lastReap := time.Now()
 		for {
+			if time.Since(lastReap) > time.Minute {
+				lastReap = time.Now()
+				e.ReapLostTasks(ctx)
+			}
 			for {
 				select {
 				case sem <- struct{}{}:
@@ -761,6 +766,42 @@ func (e *Engine) StartDispatcher(ctx context.Context, maxRuns int) {
 	}()
 }
 
+// ReapLostTasks fails tasks the database calls running while nothing in this process is working on them — a run that ended
+// without recording its outcome. Called periodically by the dispatcher; the grace period keeps it from touching a task that was
+// only just claimed.
+func (e *Engine) ReapLostTasks(ctx context.Context) int {
+	rows, err := e.DB.Query(ctx, `SELECT id FROM tasks WHERE status='running' AND COALESCE(started_at,created_at) < now()-interval '3 minutes'`)
+	if err != nil {
+		return 0
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	n := 0
+	for _, id := range ids {
+		e.mu.Lock()
+		_, working := e.cancels[id]
+		for _, ar := range e.runs { // any run registered for it counts: sub-tasks, chat turns, quick asks
+			if ar.Info.TaskID == id {
+				working = true
+			}
+		}
+		e.mu.Unlock()
+		if working {
+			continue
+		}
+		if err := e.Tasks.Finish(ctx, id, tasks.Failed, "", "lost: its run ended without recording a result", ""); err == nil {
+			n++
+		}
+	}
+	return n
+}
+
 type TaskOpts struct {
 	Input      string // overrides t.Input for this turn (multi-turn continuation)
 	Tainted    bool
@@ -771,7 +812,10 @@ type TaskOpts struct {
 
 // RunTask executes a claimed (running) task to completion and records the outcome.
 func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Task {
-	tctx, cancel := context.WithCancel(ctx)
+	tctx, cancel := context.WithCancel(ctx) // the run itself stops when the caller's context does...
+	// ...but its outcome must still be recorded: writing the final status with an already-cancelled caller context failed silently
+	// and left the task "running" for ever (a colleague's help outliving the parent's tool timeout was the usual way in)
+	ctx = context.WithoutCancel(ctx)
 	e.mu.Lock()
 	e.cancels[t.ID] = cancel
 	e.mu.Unlock()

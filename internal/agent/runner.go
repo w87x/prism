@@ -1164,12 +1164,14 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		runCtx = context.WithoutCancel(ctx)
 	}
 	var cancel context.CancelFunc
-	if tool.Name != "delegate" && tool.Name != "ask_user" {
+	// delegating or asking a colleague is waiting for another agent's whole run, which has its own iteration budget and model
+	// timeouts: a fixed tool timeout here only killed long but healthy helpers (and, derived from ctx, it also undid the detaching above)
+	if tool.Name != "delegate" && tool.Name != "ask_user" && tool.Name != "ask_colleague" {
 		limit := tool.Timeout
 		if limit <= 0 {
 			limit = defaultToolTimeout * 3
 		}
-		runCtx, cancel = context.WithTimeout(ctx, limit)
+		runCtx, cancel = context.WithTimeout(runCtx, limit)
 		defer cancel()
 	}
 	var out string

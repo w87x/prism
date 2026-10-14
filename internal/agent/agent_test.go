@@ -3046,3 +3046,67 @@ func TestModelActionsOverrideTheDefaults(t *testing.T) {
 		}
 	}
 }
+
+// A task the database calls running while nothing works on it (its run ended without recording a result) is failed by the reaper,
+// and a task whose caller's context is cancelled still records its outcome instead of staying "running" for ever.
+func TestLostTasksAreReapedAndOutcomesSurviveACancelledCaller(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Slowpoke", Soul: "You are Slowpoke.", Enabled: true, MaxIterations: 6}, ""); err != nil {
+		t.Fatal(err)
+	}
+	// a lost task: running for ten minutes with no run behind it
+	lost, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "x", ToAgent: "Slowpoke", Title: "lost", Input: "x", Depth: 1}, true)
+	if _, err := h.e.DB.Exec(ctx, `UPDATE tasks SET started_at=now()-interval '10 minutes' WHERE id=$1`, lost.ID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "x", ToAgent: "Slowpoke", Title: "fresh", Input: "x", Depth: 1}, true)
+	if n := h.e.ReapLostTasks(ctx); n != 1 {
+		t.Fatalf("reaped %d, want the one lost task", n)
+	}
+	if got, _ := h.e.Tasks.Get(ctx, lost.ID); got.Status != tasks.Failed || !strings.Contains(got.Error, "lost") {
+		t.Fatalf("the lost task must be failed: %+v", got)
+	}
+	if got, _ := h.e.Tasks.Get(ctx, fresh.ID); got.Status != tasks.Running {
+		t.Fatalf("a task just started must be left alone: %s", got.Status)
+	}
+	// the caller gives up (its context is cancelled) while the task runs: the outcome is still recorded
+	started := make(chan struct{})
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		close(started)
+		time.Sleep(300 * time.Millisecond)
+		return testutil.Reply{Content: "finished anyway"}
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	task, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "x", ToAgent: "Slowpoke", Title: "outlives its caller", Input: "do it", Depth: 1}, true)
+	go func() { <-started; cancel() }()
+	h.e.RunTask(cctx, task, TaskOpts{})
+	got, _ := h.e.Tasks.Get(ctx, task.ID)
+	if got.Status == tasks.Running {
+		t.Fatalf("a task whose caller gave up must not stay running: %+v", got)
+	}
+}
+
+// A model that names a role instead of an agent ("web-search specialist") is not refused: the best-matching specialist is asked.
+func TestAskColleagueWithAnInventedNameAsksTheBestMatch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.Tools.Register(&tools.Tool{Name: "page_web_search", Description: "search the web for pages and read them", Risk: tools.RiskRead, Params: tools.Obj(""),
+		Run: func(context.Context, *tools.Env, json.RawMessage) (string, error) { return "", nil }})
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Scout", Group: "Web", Description: "web search and page reading specialist", Traits: []string{"web search", "research"}, Tools: []string{"page_web_search"}, Soul: "You are Scout.", Role: RoleWorker, Enabled: true, MaxIterations: 4}, ""); err != nil {
+		t.Fatal(err)
+	}
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		if strings.Contains(sys, "You are Scout") {
+			return testutil.Reply{Content: "found it"}
+		}
+		return testutil.Reply{Content: "?"}
+	}
+	tool, _ := h.e.Tools.Get("ask_colleague")
+	b, _ := json.Marshal(map[string]any{"agent": "web-search specialist", "request": "search the web for red pandas"})
+	out, err := tool.Run(ctx, &tools.Env{Agent: "Someone", Depth: 1, Taint: func() {}}, b)
+	if err != nil || !strings.Contains(out, "There is no agent called") || !strings.Contains(out, "Scout was asked instead") || !strings.Contains(out, "found it") {
+		t.Fatalf("an invented name must fall back to the best match: %q %v", out, err)
+	}
+}
