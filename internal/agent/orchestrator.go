@@ -888,6 +888,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
 	}
 	out, _ := e.Tasks.Get(ctx, t.ID)
+	e.reopenPromiseIfNotDone(ctx, out)
 	if out.Status == tasks.Done && reviewsPromises(out) { // did the agent do what it said it did (or would do)?
 		go e.ReviewPromises(context.WithoutCancel(ctx), out)
 	}
@@ -1003,4 +1004,13 @@ func (e *Engine) autonomousRoot(ctx context.Context, taskID int64) (tasks.Task, 
 		return t, true
 	}
 	return tasks.Task{}, false
+}
+
+// reopenPromiseIfNotDone: a promise-review follow-up that ended without getting done leaves its review open again.
+func (e *Engine) reopenPromiseIfNotDone(ctx context.Context, t tasks.Task) {
+	if t.FromName != promiseReviewName || t.Status == tasks.Done || !t.Terminal() || e.DB == nil {
+		return
+	}
+	_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status='open' WHERE fix_task_id=$1 AND status='fixing'`, t.ID)
+	e.Emit("promise.update", nil)
 }

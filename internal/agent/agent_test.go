@@ -2796,3 +2796,118 @@ func TestRoutineJobsUseSmallModelEscalateAndStayQuiet(t *testing.T) {
 		t.Fatalf("news, a warning and a user task's message are delivered (got %d)", got)
 	}
 }
+
+// A model that writes a tool call as text ("[Tool: clock] → noon") and invents the result is sent back to make the real call; the
+// run only ends with an answer built on a real result. It is nudged at most twice, and prose that merely mentions a tool is fine.
+func TestTextWrittenToolCallsAreSentBackForTheRealCall(t *testing.T) {
+	h := newHarness(t)
+	var calls []string
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		role, content, _ := msgAt(req, -1)
+		switch {
+		case role == "user" && strings.Contains(content, "written out as text"):
+			calls = append(calls, "nudged")
+			return testutil.Reply{Tools: []llm.ToolCall{tc("c1", "clock", map[string]any{})}}
+		case role == "tool":
+			calls = append(calls, "real result")
+			return testutil.Reply{Content: "It is " + content[:min(len(content), 8)] + " — confirmed by the real call."}
+		case role == "user":
+			return testutil.Reply{Content: "Checking the time...\n[Tool: clock] → 12:00 noon\nIt is noon."}
+		}
+		return testutil.Reply{Content: "?"}
+	}
+	res, err := runWorker(t, h, "Faker", []string{"clock"}, "what time is it?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "confirmed by the real call") || strings.Join(calls, ",") != "nudged,real result" {
+		t.Fatalf("the text-written call must be replaced by a real one: %q calls=%v", res.Text, calls)
+	}
+	// prose that mentions a tool, or a model that keeps faking, does not loop for ever
+	if h.e.pseudoToolCall("You could use the clock tool for that.") != "" || h.e.pseudoToolCall("clock(") == "" {
+		t.Fatal("detection: a mention is not a call, a line starting with name( is")
+	}
+	h2 := newHarness(t)
+	n := 0
+	h2.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		n++
+		return testutil.Reply{Content: "[Tool: clock] → noon"}
+	}
+	r2, err := runWorker(t, h2, "Stubborn", []string{"clock"}, "what time is it?")
+	if err != nil || n != 3 || !strings.Contains(r2.Text, "noon") { // the first reply plus two nudges, then it is let through
+		t.Fatalf("at most two nudges: calls=%d %q %v", n, r2.Text, err)
+	}
+}
+
+// A promise review follows its follow-up to the end: kept → done; broken again → superseded by the new review; never finished → open again.
+func TestPromiseReviewEndsWhenTheFollowUpDoes(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Cinephile", Soul: "You are Cinephile.", Enabled: true, MaxIterations: 6}, ""); err != nil {
+		t.Fatal(err)
+	}
+	verdict := `{"commitments":[{"text":"download it","status":"not_done","evidence":"no call","fix":"download"}]}`
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		if strings.Contains(sys, "You audit one run") {
+			return testutil.Reply{Content: verdict}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	cronTask := func() tasks.Task {
+		sess, _ := h.e.Sessions.Create(ctx, "Cinephile", "task", "", 0)
+		tk, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "movies", ToAgent: "Cinephile", Title: "movie watch", Input: "check the movie", SessionID: &sess.ID}, true)
+		_ = h.e.Tasks.Finish(ctx, tk.ID, tasks.Done, "I will download the movie when it is out, promise.", "", "")
+		tk, _ = h.e.Tasks.Get(ctx, tk.ID)
+		return tk
+	}
+	statusOf := func(id int64) string {
+		var s string
+		_ = h.e.DB.QueryRow(ctx, `SELECT status FROM promise_reviews WHERE id=$1`, id).Scan(&s)
+		return s
+	}
+	finishFix := func(rowID int64, status string) tasks.Task {
+		rows, _ := h.e.PromiseReviews(ctx, "")
+		var fixID int64
+		for _, r := range rows {
+			if r.ID == rowID {
+				fixID = *r.FixTaskID
+			}
+		}
+		sess, _ := h.e.Sessions.Create(ctx, "Cinephile", "task", "", 0)
+		_, _ = h.e.DB.Exec(ctx, `UPDATE tasks SET session_id=$2 WHERE id=$1`, fixID, sess.ID)
+		_ = h.e.Tasks.Finish(ctx, fixID, status, "Started the download of the movie and created a watch for the release.", "", "")
+		tk, _ := h.e.Tasks.Get(ctx, fixID)
+		return tk
+	}
+	// kept
+	h.e.ReviewPromises(ctx, cronTask())
+	rows, _ := h.e.PromiseReviews(ctx, "")
+	first := rows[0].ID
+	verdict = `{"commitments":[{"text":"download it","status":"done","evidence":"download call","fix":""}]}`
+	h.e.ReviewPromises(ctx, finishFix(first, tasks.Done))
+	if got := statusOf(first); got != "done" {
+		t.Fatalf("a kept promise closes its review: %s", got)
+	}
+	// broken again
+	verdict = `{"commitments":[{"text":"download it","status":"not_done","evidence":"no call","fix":"download"}]}`
+	h.e.ReviewPromises(ctx, cronTask())
+	rows, _ = h.e.PromiseReviews(ctx, "")
+	second := rows[0].ID
+	h.e.ReviewPromises(ctx, finishFix(second, tasks.Done))
+	if got := statusOf(second); got != "superseded" {
+		t.Fatalf("a follow-up that broke it again supersedes the review: %s", got)
+	}
+	// never finished (the follow-up failed): open again
+	h.e.ReviewPromises(ctx, cronTask())
+	rows, _ = h.e.PromiseReviews(ctx, "")
+	third := rows[0].ID
+	if got := statusOf(third); got != "fixing" {
+		t.Fatalf("setup: %s", got)
+	}
+	failed := finishFix(third, tasks.Failed)
+	h.e.reopenPromiseIfNotDone(ctx, failed)
+	if got := statusOf(third); got != "open" {
+		t.Fatalf("a failed follow-up leaves the review open: %s", got)
+	}
+}

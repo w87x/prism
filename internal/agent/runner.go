@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"prism/internal/textutil"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -420,6 +421,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	}
 	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort, failWarnAt: grCfg.ToolFailWarn, failBlockAt: grCfg.ToolFailBlock}
 	baseIter, extensions := maxIter, 0
+	pseudoNudges := 0 // times the model was sent back for writing a tool call as text instead of making it
 	calib := 1.0
 	compactedThisRun := 0
 	ctxCfg := settings.Load(ctx, e.Settings, settings.KeyContext, settings.DefaultContext())
@@ -517,6 +519,14 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		if len(resp.ToolCalls) == 0 {
 			if pending := drainPeek(spec.Steer); pending {
 				continue // a steering message arrived during generation: take another turn
+			}
+			// A model that cannot (or will not) use the tool-calling interface sometimes WRITES the call — "[Tool: x] → done" or a line
+			// "x(args)" — and then invents the result, ending the run with a report of things that never happened. Send it back, up
+			// to twice, to make the real call.
+			if name := e.pseudoToolCall(resp.Content); name != "" && pseudoNudges < 2 {
+				pseudoNudges++
+				_ = add(Msg{Message: llm.Message{Role: "user", Content: fmt.Sprintf("[system] Your reply contains a call to %s written out as text. Nothing was executed, so any result in it is invented. Make the call now through the tool-calling interface (not as text), wait for its real result, then continue. If you do not have that tool, say so plainly instead of pretending.", name)}, Provenance: "system"})
+				continue
 			}
 			if warn := guard.noteText(resp.Content); warn != "" {
 				_ = add(Msg{Message: llm.Message{Role: "user", Content: warn}, Provenance: "system"})
@@ -1360,4 +1370,28 @@ func (e *Engine) StalledRuns(idle time.Duration) []ActiveRun {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+var (
+	pseudoMarkerRe = regexp.MustCompile(`(?i)\[\s*tool(?:\s*call)?\s*:\s*([a-z][a-z0-9_]*)`)
+	pseudoLineRe   = regexp.MustCompile(`(?m)^[\s>*\-•]*([a-z][a-z0-9_]{3,})\(`)
+)
+
+// pseudoToolCall returns the name of a registered tool that text calls as if it were a tool call — a "[Tool: name]" marker, or a
+// line that starts with "name(" — or "" when there is none.
+func (e *Engine) pseudoToolCall(text string) string {
+	if strings.TrimSpace(text) == "" || e.Tools == nil {
+		return ""
+	}
+	if m := pseudoMarkerRe.FindStringSubmatch(text); m != nil {
+		if _, ok := e.Tools.Get(m[1]); ok {
+			return m[1]
+		}
+	}
+	for _, m := range pseudoLineRe.FindAllStringSubmatch(text, -1) {
+		if _, ok := e.Tools.Get(m[1]); ok {
+			return m[1]
+		}
+	}
+	return ""
 }

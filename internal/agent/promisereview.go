@@ -106,6 +106,15 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 			broken = append(broken, c)
 		}
 	}
+	// the review of a follow-up closes the review it was made for: kept → done; broken again → superseded by this new one
+	if t.FromName == promiseReviewName {
+		to := "done"
+		if len(broken) > 0 {
+			to = "superseded"
+		}
+		_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status=$2 WHERE fix_task_id=$1 AND status='fixing'`, t.ID, to)
+		e.Emit("promise.update", nil)
+	}
 	if len(broken) == 0 {
 		return
 	}
@@ -115,17 +124,24 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		return
 	}
 	e.Emit("promise.update", map[string]any{"id": id})
+	// the same job over and over: the cause is usually the model behind it, not bad luck
+	var earlier int
+	_ = e.DB.QueryRow(ctx, `SELECT count(*) FROM promise_reviews WHERE agent=$1 AND title=$2 AND id<>$3 AND created_at > now()-interval '7 days'`, t.ToAgent, t.Title, id).Scan(&earlier)
+	repeat := ""
+	if earlier >= 2 {
+		repeat = fmt.Sprintf("\nThis is the %s time in a week that %s's report has not matched what it did: its model may not be calling tools reliably (it writes the call as text). Consider giving it another model on the Agents page.", ordinal(earlier+1), t.ToAgent)
+	}
 	lines := make([]string, 0, len(broken))
 	for _, b := range broken {
 		lines = append(lines, "• "+b.Text)
 	}
 	if mode == "fix" && t.FromName != promiseReviewName { // one correction per run: the follow-up's own review only reports
 		if _, err := e.FixPromise(ctx, id); err == nil {
-			e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.", brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent)})
+			e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.%s", brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent, repeat)})
 			return
 		}
 	}
-	e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.", brief(t.Title, 60), strings.Join(lines, "\n"))})
+	e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", brief(t.Title, 60), strings.Join(lines, "\n"), repeat)})
 }
 
 // FixPromise asks the agent whose run left promises unkept to make them real: do the action now if its condition already holds,
@@ -193,4 +209,18 @@ func (e *Engine) DismissPromise(ctx context.Context, id int64) error {
 		e.Emit("promise.update", map[string]any{"id": id})
 	}
 	return err
+}
+
+func ordinal(n int) string {
+	switch {
+	case n%100 >= 11 && n%100 <= 13:
+		return fmt.Sprintf("%dth", n)
+	case n%10 == 1:
+		return fmt.Sprintf("%dst", n)
+	case n%10 == 2:
+		return fmt.Sprintf("%dnd", n)
+	case n%10 == 3:
+		return fmt.Sprintf("%drd", n)
+	}
+	return fmt.Sprintf("%dth", n)
 }
