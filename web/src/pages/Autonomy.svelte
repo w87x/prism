@@ -232,7 +232,7 @@
           <tbody>
             {#each crons as c (c.id)}
               <tr>
-                <td class="hi">{#if c.system}<Badge tone="accent">built-in</Badge> {/if}{c.name}{#if c.topic}<Badge tone={c.project_bank_id ? 'accent' : 'mute'} title={c.project_bank_id ? `Telegram: shares the ${c.topic} project's topic` : `Telegram topic: ${c.topic}`}>#{c.topic}</Badge>{/if}</td>
+                <td class="hi">{#if c.system}<Badge tone="accent">built-in</Badge> {/if}{#if c.finished_at}<Badge tone="mute" title={'Finished: ' + (c.finished_note || '')}>finished</Badge> {/if}{c.name}{#if c.topic}<Badge tone={c.project_bank_id ? 'accent' : 'mute'} title={c.project_bank_id ? `Telegram: shares the ${c.topic} project's topic` : `Telegram topic: ${c.topic}`}>#{c.topic}</Badge>{/if}</td>
                 <td class="dim">{c.agent}</td><td class="mute nowrap">{c.expr}</td>
                 <td class="dim sm"><Tip text={c.prompt} max={280} /></td>
                 <td class="mute sm">{c.enabled ? until(c.next_run) : '—'}</td><td class="mute sm">{ago(c.last_run)}</td>

@@ -39,6 +39,9 @@ type Cron struct {
 	// when created. See topics.go.
 	Topic         string `json:"topic,omitempty"`
 	ProjectBankID int64  `json:"project_bank_id,omitempty"`
+	// FinishedAt/FinishedNote: the job did what it was for (cron_finish); it is switched off but kept.
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	FinishedNote string     `json:"finished_note,omitempty"`
 }
 
 type Intent struct {
@@ -185,7 +188,83 @@ func (s *Service) Crons(ctx context.Context) ([]Cron, error) {
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if fr, err := s.DB.Query(ctx, `SELECT id, finished_at, finished_note FROM crons WHERE finished_at IS NOT NULL`); err == nil {
+		fin := map[int64]Cron{}
+		for fr.Next() {
+			var id int64
+			var c Cron
+			if fr.Scan(&id, &c.FinishedAt, &c.FinishedNote) == nil {
+				fin[id] = c
+			}
+		}
+		fr.Close()
+		for i := range out {
+			if f, ok := fin[out[i].ID]; ok {
+				out[i].FinishedAt, out[i].FinishedNote = f.FinishedAt, f.FinishedNote
+			}
+		}
+	}
+	return out, nil
+}
+
+// CronPatch is a partial edit of a job: only the fields that are set change.
+type CronPatch struct {
+	Name, Expr, Prompt, Agent *string
+	Enabled                   *bool
+}
+
+// UpdateCron edits a job in place (an agent that finds a similar job should change it, not create another). Built-in jobs are
+// edited from the settings page only. A changed prompt or agent makes the job's runbook start over (see SaveCron).
+func (s *Service) UpdateCron(ctx context.Context, id int64, p CronPatch) (Cron, error) {
+	cs, err := s.Crons(ctx)
+	if err != nil {
+		return Cron{}, err
+	}
+	var c *Cron
+	for i := range cs {
+		if cs[i].ID == id {
+			c = &cs[i]
+		}
+	}
+	if c == nil {
+		return Cron{}, fmt.Errorf("cron #%d does not exist", id)
+	}
+	if c.System {
+		return *c, errors.New("built-in schedules are changed from Autonomy → Schedules, not by agents")
+	}
+	if p.Name != nil {
+		c.Name = strings.TrimSpace(*p.Name)
+	}
+	if p.Expr != nil {
+		c.Expr = strings.TrimSpace(*p.Expr)
+	}
+	if p.Prompt != nil {
+		c.Prompt = strings.TrimSpace(*p.Prompt)
+	}
+	if p.Agent != nil {
+		c.Agent = strings.TrimSpace(*p.Agent)
+	}
+	if p.Enabled != nil {
+		c.Enabled = *p.Enabled
+	}
+	if _, err := s.SaveCron(ctx, *c); err != nil {
+		return *c, err
+	}
+	return *c, nil
+}
+
+// FinishCron marks a job as having done what it was for: switched off, kept in the list with the reason.
+func (s *Service) FinishCron(ctx context.Context, id int64, note string) error {
+	var sys bool
+	if err := s.DB.QueryRow(ctx, `SELECT system FROM crons WHERE id=$1`, id).Scan(&sys); err != nil {
+		return fmt.Errorf("cron #%d does not exist", id)
+	}
+	if sys {
+		return errors.New("built-in schedules cannot be finished (switch them off in Autonomy → Schedules)")
+	}
+	_, err := s.DB.Exec(ctx, `UPDATE crons SET enabled=false, finished_at=now(), finished_note=$2 WHERE id=$1`, id, strings.TrimSpace(note))
+	return err
 }
 
 func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
@@ -206,7 +285,7 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 		id = c.ID
 		// a job whose prompt or agent changed is a different job: what the runbook learned no longer applies
 		_, _ = s.DB.Exec(ctx, `DELETE FROM runbooks WHERE key IN (SELECT 'cron:'||name FROM crons WHERE id=$1 AND (prompt<>$2 OR agent<>$3 OR name<>$4))`, c.ID, c.Prompt, c.Agent, c.Name)
-		_, err = s.DB.Exec(ctx, `UPDATE crons SET name=$2,agent=$3,expr=$4,prompt=$5,enabled=$6,next_run=$7 WHERE id=$1`, c.ID, c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, next)
+		_, err = s.DB.Exec(ctx, `UPDATE crons SET name=$2,agent=$3,expr=$4,prompt=$5,enabled=$6,next_run=$7, finished_at=CASE WHEN $6 THEN NULL ELSE finished_at END WHERE id=$1`, c.ID, c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, next)
 	}
 	return id, err
 }

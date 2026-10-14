@@ -169,6 +169,9 @@ func IsWellKnown(name string) bool {
 	return false
 }
 
+// toolCompanions: tools that came later and belong with an older one, so agents that already hold it are not left without.
+var toolCompanions = map[string][]string{"cron_create": {"cron_update", "cron_finish"}}
+
 // seedToolsKey records, per built-in agent, which seed tools were already offered to it.
 const seedToolsKey = "seed_tools"
 
@@ -206,6 +209,33 @@ func (s *ProfileStore) Seed(ctx context.Context) error {
 		for _, t := range p.Tools {
 			if !slices.Contains(offered[p.Name], t) {
 				offered[p.Name] = append(offered[p.Name], t)
+			}
+		}
+	}
+	// companions: an agent that already holds a tool gets the tools that were added to go with it (once; one it drops stays dropped)
+	if all, err := s.List(ctx); err == nil {
+		for _, cur := range all {
+			var add []string
+			for have, extra := range toolCompanions {
+				if !slices.Contains(cur.Tools, have) {
+					continue
+				}
+				for _, t := range extra {
+					key := "companion:" + cur.Name
+					if !slices.Contains(cur.Tools, t) && !slices.Contains(offered[key], t) {
+						add = append(add, t)
+					}
+					if !slices.Contains(offered[key], t) {
+						offered[key] = append(offered[key], t)
+					}
+				}
+			}
+			if len(add) > 0 {
+				c := cur
+				c.Tools = append(append([]string{}, c.Tools...), add...)
+				if _, err := s.Save(ctx, c, "seed: companion tools "+strings.Join(add, ", ")); err != nil {
+					return err
+				}
 			}
 		}
 	}

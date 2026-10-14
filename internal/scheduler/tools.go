@@ -141,7 +141,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 		},
 		&tools.Tool{
 			Name: "cron_create", Category: "autonomy", Risk: tools.RiskWrite,
-			Description: "Schedule a recurring job: at each firing a fresh session of the agent runs the standing prompt. Cron syntax 'min hour day month weekday' (e.g. '0 8 * * 1-5'), or @daily, @hourly, '@every 2h'. Times are in the user's timezone.",
+			Description: "Before creating, look at cron_list: if a similar job exists, change it with cron_update (or fold the new item into it) instead of adding another. For a list of things to watch (prices, listings, releases) prefer ONE job — or a tracker with one row per item — over one job per item. Schedule a recurring job: at each firing a fresh session of the agent runs the standing prompt. Cron syntax 'min hour day month weekday' (e.g. '0 8 * * 1-5'), or @daily, @hourly, '@every 2h'. Times are in the user's timezone.",
 			Params: tools.Obj("name,expr,prompt", tools.Str("name", "short label"), tools.Str("expr", "cron expression"),
 				tools.Str("prompt", "standing prompt, self-contained; tell the agent to reply NO_REPLY when there is nothing to report"),
 				tools.Str("agent", "agent to run it (default: you)")),
@@ -153,6 +153,14 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if a.Agent == "" {
 					a.Agent = env.Agent
 				}
+				if cs, cerr := s.Crons(ctx); cerr == nil {
+					norm := func(x string) string { return strings.ToLower(strings.Join(strings.Fields(x), " ")) }
+					for _, c := range cs {
+						if !c.System && strings.EqualFold(c.Agent, a.Agent) && norm(c.Prompt) == norm(a.Prompt) {
+							return "", fmt.Errorf("cron #%d (%q) already does exactly this. Change it with cron_update instead of creating a second one", c.ID, c.Name)
+						}
+					}
+				}
 				id, err := s.SaveCron(ctx, Cron{Name: a.Name, Agent: a.Agent, Expr: a.Expr, Prompt: a.Prompt, Enabled: true})
 				if err != nil {
 					return "", err
@@ -163,7 +171,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 		},
 		&tools.Tool{
 			Name: "cron_list", Category: "autonomy", Risk: tools.RiskRead,
-			Description: "List scheduled jobs.",
+			Description: "List scheduled jobs with their prompts (look here before creating one: change a similar job instead of adding another).",
 			Params:      tools.Obj(""),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				cs, err := s.Crons(ctx)
@@ -176,9 +184,66 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					if c.NextRun != nil {
 						nx = c.NextRun.Format("2006-01-02 15:04")
 					}
-					fmt.Fprintf(&sb, "#%d %q [%s] agent=%s enabled=%v next=%s\n", c.ID, c.Name, c.Expr, c.Agent, c.Enabled, nx)
+					state := fmt.Sprintf("enabled=%v next=%s", c.Enabled, nx)
+					if c.FinishedAt != nil {
+						state = "FINISHED " + c.FinishedAt.Format("2006-01-02") + ": " + c.FinishedNote
+					}
+					if c.System {
+						state += " (built-in)"
+					}
+					pr := []rune(strings.Join(strings.Fields(c.Prompt), " "))
+					if len(pr) > 220 {
+						pr = append(pr[:220], '…')
+					}
+					fmt.Fprintf(&sb, "#%d %q [%s] agent=%s %s\n    prompt: %s\n", c.ID, c.Name, c.Expr, c.Agent, state, string(pr))
 				}
 				return sb.String(), nil
+			},
+		},
+		&tools.Tool{
+			Name: "cron_update", Category: "autonomy", Risk: tools.RiskWrite,
+			Description: "Change a scheduled job in place: any of name, expr (cron expression), prompt, agent, enabled. Only what you pass changes. Use it instead of creating a near-duplicate — e.g. add a new item to the prompt of the job that already checks the others. " +
+				"You may change jobs run by you; the entry agent may change any. Built-in jobs are not changeable by agents. A changed prompt makes the job relearn its routine.",
+			Params: tools.Obj("id", tools.Int("id", "cron id (cron_list)"), tools.Str("name", "new label"), tools.Str("expr", "new cron expression"),
+				tools.Str("prompt", "the complete new standing prompt (it replaces the old one)"), tools.Str("agent", "agent that runs it"), tools.Bool("enabled", "switch it on or off")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					ID                        int64
+					Name, Expr, Prompt, Agent *string
+					Enabled                   *bool
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				if err := s.mayChangeCron(ctx, env, a.ID); err != nil {
+					return "", err
+				}
+				c, err := s.UpdateCron(ctx, a.ID, CronPatch{Name: a.Name, Expr: a.Expr, Prompt: a.Prompt, Agent: a.Agent, Enabled: a.Enabled})
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("Cron #%d %q updated (agent %s, %s, enabled=%v).", c.ID, c.Name, c.Agent, c.Expr, c.Enabled), nil
+			},
+		},
+		&tools.Tool{
+			Name: "cron_finish", Category: "autonomy", Risk: tools.RiskWrite,
+			Description: "Mark a scheduled job as finished because it did what it was for (the thing it waited for happened, the task is complete, it was folded into another job). It is switched off and stays in the list with your note, so the user can see why and switch it on again. Prefer this to cron_delete; use cron_delete only for a job that was a mistake.",
+			Params:      tools.Obj("id,note", tools.Int("id", "cron id"), tools.Str("note", "why it is finished, in one sentence (e.g. 'merged into #12', 'film downloaded')")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					ID   int64
+					Note string
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				if strings.TrimSpace(a.Note) == "" {
+					return "", errors.New("say why it is finished")
+				}
+				if err := s.mayChangeCron(ctx, env, a.ID); err != nil {
+					return "", err
+				}
+				return "Finished.", s.FinishCron(ctx, a.ID, a.Note)
 			},
 		},
 		&tools.Tool{
@@ -322,4 +387,16 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 			},
 		},
 	)
+}
+
+// mayChangeCron: an agent changes jobs it runs itself; the entry agent may change any. Built-in jobs are refused by the callers.
+func (s *Service) mayChangeCron(ctx context.Context, env *tools.Env, id int64) error {
+	var agent string
+	if err := s.DB.QueryRow(ctx, `SELECT agent FROM crons WHERE id=$1`, id).Scan(&agent); err != nil {
+		return fmt.Errorf("cron #%d does not exist", id)
+	}
+	if env != nil && env.Agent != "Atlas" && !strings.EqualFold(env.Agent, agent) {
+		return fmt.Errorf("cron #%d belongs to %s: ask them, or ask Atlas to change it", id, agent)
+	}
+	return nil
 }

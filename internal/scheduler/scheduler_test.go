@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -337,3 +338,81 @@ func TestQuestionBriefingClosesWhenTheInsightIsSettled(t *testing.T) {
 		t.Fatal("answering the insight elsewhere must close the briefing")
 	}
 }
+
+func TestCronUpdateFinishAndDuplicateGuard(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	if err := s.SeedDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reg := tools.NewRegistry(s.DB)
+	s.RegisterTools(reg)
+	run := func(agent, name string, args map[string]any) (string, error) {
+		tl, ok := reg.Get(name)
+		if !ok {
+			t.Fatalf("no tool %s", name)
+		}
+		b, _ := json.Marshal(args)
+		return tl.Run(ctx, &tools.Env{Agent: agent}, b)
+	}
+	if _, err := run("Atlas", "cron_create", map[string]any{"name": "avito x", "expr": "@hourly", "prompt": "Check Avito price for X.", "agent": "Atlas"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("Atlas", "cron_create", map[string]any{"name": "avito x again", "expr": "@daily", "prompt": "check  avito price for x.", "agent": "Atlas"}); err == nil || !strings.Contains(err.Error(), "cron_update") {
+		t.Fatalf("an identical job must be refused with a pointer to cron_update: %v", err)
+	}
+	cs, _ := s.Crons(ctx)
+	var id int64
+	for _, c := range cs {
+		if c.Name == "avito x" {
+			id = c.ID
+		}
+	}
+	if _, err := run("Atlas", "cron_update", map[string]any{"id": id, "prompt": "Check Avito prices for X, Y and Z.", "name": "avito prices"}); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = s.Crons(ctx)
+	found := false
+	for _, c := range cs {
+		if c.ID == id && c.Name == "avito prices" && strings.Contains(c.Prompt, "X, Y and Z") && c.Enabled {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the job is changed in place: %+v", cs)
+	}
+	if _, err := run("Scout", "cron_update", map[string]any{"id": id, "enabled": false}); err == nil {
+		t.Fatal("another agent may not change a job it does not run")
+	}
+	var sysID int64
+	_ = s.DB.QueryRow(ctx, `SELECT id FROM crons WHERE system LIMIT 1`).Scan(&sysID)
+	if _, err := run("Atlas", "cron_update", map[string]any{"id": sysID, "enabled": false}); err == nil {
+		t.Fatal("built-in jobs are not changed by agents")
+	}
+	if _, err := run("Atlas", "cron_finish", map[string]any{"id": id}); err == nil {
+		t.Fatal("finishing needs a reason")
+	}
+	if _, err := run("Atlas", "cron_finish", map[string]any{"id": id, "note": "merged into the tracker"}); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = s.Crons(ctx)
+	for _, c := range cs {
+		if c.ID == id && (c.Enabled || c.FinishedAt == nil || c.FinishedNote != "merged into the tracker") {
+			t.Fatalf("finished means off, kept, with the reason: %+v", c)
+		}
+	}
+	if out, _ := run("Atlas", "cron_list", nil); !strings.Contains(out, "FINISHED") || !strings.Contains(out, "prompt:") {
+		t.Fatalf("the list shows finished jobs and prompts: %q", out)
+	}
+	if _, err := s.UpdateCron(ctx, id, CronPatch{Enabled: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = s.Crons(ctx)
+	for _, c := range cs {
+		if c.ID == id && c.FinishedAt != nil {
+			t.Fatal("switching a finished job on again clears 'finished'")
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
