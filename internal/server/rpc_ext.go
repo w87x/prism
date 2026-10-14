@@ -434,6 +434,12 @@ func (s *Server) registerAutonomy() {
 		}
 		return n, err
 	})
+	// heartbeat: the user's standing checklist, looked through quietly every so often
+	rpc(s, "heartbeat.get", func(ctx context.Context, _ none) (map[string]any, error) { return sc().HeartbeatState(ctx), nil })
+	rpc(s, "heartbeat.save", func(ctx context.Context, r settings.Heartbeat) (bool, error) {
+		return true, sc().SaveHeartbeat(ctx, r)
+	})
+	rpc(s, "heartbeat.run", func(ctx context.Context, _ none) (bool, error) { return true, sc().RunHeartbeatNow(ctx) })
 	rpc(s, "briefings.reply", func(ctx context.Context, r struct {
 		ID   int64  `json:"id"`
 		Text string `json:"text"`

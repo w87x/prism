@@ -14,6 +14,7 @@ const (
 	KeyAutonomy     = "autonomy"
 	KeyModelActions = "model_actions"
 	KeyModelChecks  = "model_checks"
+	KeyHeartbeat    = "heartbeat"
 	KeyOnboarding   = "onboarding"
 	KeyMemory       = "memory"
 	KeyRuntime      = "runtime"
@@ -31,6 +32,14 @@ type General struct {
 	// RoutingOff keeps messages in the chat they were typed in instead of taking them to the chat of the project they are about.
 	PlannerOff bool `json:"planner_off"`
 	RoutingOff bool `json:"routing_off"`
+}
+
+// Heartbeat is the user's standing checklist, looked through quietly every so often (see internal/scheduler/heartbeat.go).
+type Heartbeat struct {
+	Enabled   bool   `json:"enabled"`
+	EveryMin  int    `json:"every_min"` // 15 | 30 | 60 | 120 | 360; 0 → 30
+	Agent     string `json:"agent"`     // who works through the checklist; "" → Atlas
+	Checklist string `json:"checklist"` // free text, one item per line
 }
 
 // ModelActions lets the user re-assign which model a behind-the-scenes action uses: id → "main" (the chat model) or "aux" (the fast

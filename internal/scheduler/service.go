@@ -268,6 +268,9 @@ func (s *Service) fireCron(ctx context.Context, c Cron) error {
 	if c.System && c.Agent == "Oneiros" {
 		input += s.dismissedNote(ctx)
 	}
+	if c.System && c.Name == HeartbeatName {
+		input += s.heartbeatRecent(ctx)
+	}
 	_, err := s.Engine.Enqueue(ctx, tasks.Task{FromKind: "cron", FromName: c.Name, ToAgent: c.Agent, Title: c.Name, Input: input, Priority: priority, NotifyTopic: c.Topic})
 	return err
 }

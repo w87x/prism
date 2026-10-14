@@ -23,6 +23,13 @@
   import { AUTONOMY_HELP } from '../lib/help.js';
 
   let tab = $state('intents');
+  // ── heartbeat: one standing checklist, looked through quietly every so often ──
+  let hb = $state({ enabled: false, every_min: 30, agent: 'Atlas', checklist: '', beats: [], next_run: '' });
+  async function loadHb() { const r = await call('heartbeat.get', {}, { quiet: true }); if (r) hb = { ...hb, ...r, beats: r.beats || [] }; }
+  async function saveHb() { if (await call('heartbeat.save', { enabled: hb.enabled, every_min: Number(hb.every_min), agent: hb.agent, checklist: hb.checklist })) { toast('Heartbeat saved'); loadHb(); } }
+  async function beatNow() { if (await call('heartbeat.run', {})) { toast('A beat is running'); setTimeout(loadHb, 4000); } }
+  $effect(() => { if (tab === 'heartbeat') loadHb(); });
+  $effect(() => listen('task.update', () => { if (tab === 'heartbeat') loadHb(); }));
   $effect(() => { loadModels(); });
   let cfg = $state({ enabled: true, dream_enabled: true, auto_evolve: false, hire_limit: 3, promise_review: 'fix', notice_filter: 'smart', routine_model: '' });
   $effect(() => { loadSetting('autonomy', { enabled: true, dream_enabled: true, auto_evolve: false }).then((c) => (cfg = c)); });
@@ -178,7 +185,7 @@
   </div>
   <Tabs tabs={[{ id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
     { id: 'brief', label: 'Briefings', badge: briefBadge }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
-    { id: 'audit', label: 'Audit' }]} bind:active={tab} />
+    { id: 'heartbeat', label: 'Heartbeat' }, { id: 'audit', label: 'Audit' }]} bind:active={tab} />
 
   {#if tab === 'intents'}
     <div class="bar"><span class="sm mute">“Tell me when X ships.” Checked on a cadence; when it holds, the owner agent is woken with the evidence. Watches just track progress and notify.</span><span class="grow"></span><Button size="sm" onclick={newIntent}><Icon name="plus" size={11} /> New</Button></div>
@@ -288,6 +295,24 @@
       {/each}
     </div>
     {/if}
+  {:else if tab === 'heartbeat'}
+    <div class="body scroll">
+      <div class="sm mute">One checklist, looked through every so often by a cheap model — and silent unless an item needs you. Write what you want watched, one item per line ("new episode of X out?", "anything urgent in my mail?", "is the NAS reachable?"). Each beat is told what you were already told, so the same news is not repeated.</div>
+      <div class="row wrap gap-8" style="margin:8px 0">
+        <Switch bind:checked={hb.enabled} label="heartbeat on" onchange={saveHb} />
+        <span class="sm mute">every</span>
+        <Select size="sm" value={String(hb.every_min)} options={[{ value: '15', label: '15 minutes' }, { value: '30', label: '30 minutes' }, { value: '60', label: 'hour' }, { value: '120', label: '2 hours' }, { value: '360', label: '6 hours' }]} onchange={(v) => { hb.every_min = Number(v); }} />
+        <span class="sm mute">worked through by</span>
+        <Select size="sm" value={hb.agent} options={S.agents.filter((a) => a.enabled && a.role !== 'maint').map((a) => ({ value: a.name, label: a.name }))} onchange={(v) => { hb.agent = v; }} />
+        {#if hb.next_run && hb.enabled}<span class="sm mute">next beat {until(hb.next_run)}</span>{/if}
+      </div>
+      <Textarea bind:value={hb.checklist} rows={9} mono={false} placeholder={'- Is there a new episode of Haunted Hotel S02 on RuTracker?\n- Any unread mail that needs a reply today?\n- Is the Synology NAS reachable and under 90% full?'} />
+      <div class="row end" style="margin-top:6px"><Button variant="ghost" onclick={beatNow}>Beat now</Button><Button variant="primary" onclick={saveHb}>Save</Button></div>
+      <h4>Recent beats</h4>
+      {#each hb.beats as b (b.id)}
+        <div class="row wrap gap-8 sm"><Badge tone={b.silent ? 'mute' : b.status === 'done' ? 'attn' : 'err'}>{b.silent ? 'quiet' : b.status === 'done' ? 'told you' : b.status}</Badge><span class="mute">{ago(b.at)}</span>{#if !b.silent}<span class="grow">{b.result}</span>{/if}</div>
+      {:else}<div class="sm mute">no beats yet</div>{/each}
+    </div>
   {:else if tab === 'audit'}
     <div class="bar"><span class="sm mute">Everything autonomy did on its own — schedules, standing intents, watches and dreams — newest first. Nothing here is a separate log; it is read straight from the tasks, intents and briefings it already produced.</span><span class="grow"></span><Button size="sm" variant="ghost" onclick={loadAudit}><Icon name="refresh" size={11} /> Refresh</Button></div>
     <Panel flush grow>

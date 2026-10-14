@@ -246,3 +246,58 @@ func TestIntentRedispatchesWhenAgentIsGone(t *testing.T) {
 		t.Fatalf("intent should have redispatched to Builder and fired: %+v", got)
 	}
 }
+
+// The heartbeat is a system cron kept in line with a checklist setting: created on first save, rescheduled, disabled with the switch,
+// and each beat is told what the previous ones already reported.
+func TestHeartbeatKeepsItsCronInLineWithTheChecklist(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := setup(t)
+	if err := svc.SaveHeartbeat(ctx, settings.Heartbeat{Enabled: true, EveryMin: 15, Checklist: "- is the NAS reachable?\n- new episode of Foo?"}); err != nil {
+		t.Fatal(err)
+	}
+	var expr, prompt, topic string
+	var enabled, system bool
+	read := func() {
+		if err := svc.DB.QueryRow(ctx, `SELECT expr, prompt, enabled, system, topic FROM crons WHERE name=$1`, HeartbeatName).Scan(&expr, &prompt, &enabled, &system, &topic); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read()
+	if expr != "*/15 * * * *" || !enabled || !system || topic != "" || !strings.Contains(prompt, "new episode of Foo") || !strings.Contains(prompt, "NO_REPLY") {
+		t.Fatalf("the cron must mirror the setting: %q enabled=%v system=%v topic=%q", expr, enabled, system, topic)
+	}
+	if err := svc.SaveHeartbeat(ctx, settings.Heartbeat{Enabled: true, EveryMin: 120, Checklist: "- one item"}); err != nil {
+		t.Fatal(err)
+	}
+	read()
+	if expr != "0 */2 * * *" || strings.Contains(prompt, "Foo") {
+		t.Fatalf("a changed interval and checklist are applied: %q", expr)
+	}
+	if err := svc.SaveHeartbeat(ctx, settings.Heartbeat{Enabled: true, Checklist: "  "}); err == nil {
+		t.Fatal("an empty checklist cannot be enabled")
+	}
+	if err := svc.SaveHeartbeat(ctx, settings.Heartbeat{Enabled: false, EveryMin: 30, Checklist: "- one item"}); err != nil {
+		t.Fatal(err)
+	}
+	read()
+	if enabled {
+		t.Fatal("switching it off disables the cron")
+	}
+	if heartbeatExpr(0) != "*/30 * * * *" || heartbeatExpr(60) != "0 * * * *" || heartbeatExpr(360) != "0 */6 * * *" {
+		t.Fatal("interval to cron expression")
+	}
+	// what earlier beats reported is handed to the next one; silent beats are not
+	mk := func(result string) {
+		_, _ = svc.DB.Exec(ctx, `INSERT INTO tasks(from_kind,from_name,to_agent,title,input,status,result) VALUES('cron',$1,'Atlas','Heartbeat','x','done',$2)`, HeartbeatName, result)
+	}
+	mk("NO_REPLY")
+	mk("The NAS has been unreachable since 14:10.")
+	recent := svc.heartbeatRecent(ctx)
+	if !strings.Contains(recent, "unreachable since 14:10") || strings.Contains(recent, "NO_REPLY") {
+		t.Fatalf("recent news only: %q", recent)
+	}
+	st := svc.HeartbeatState(ctx)
+	if st["every_min"] != 30 || len(st["beats"].([]HeartbeatBeat)) != 2 {
+		t.Fatalf("state: %+v", st)
+	}
+}
