@@ -739,7 +739,7 @@ func (e *Engine) StartDispatcher(ctx context.Context, maxRuns int) {
 				lastReap = time.Now()
 				e.ReapLostTasks(ctx)
 			}
-			for {
+			for !e.LLMDown() { // no model to run anything on: leave the queue alone until one answers (see incident.go)
 				select {
 				case sem <- struct{}{}:
 				default:
@@ -871,12 +871,21 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
+	rbState, rb := "", Runbook{}
+	onMain := true
 	if routineTask(t) {
 		if settings.Load(tctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy()).QuietNotices() {
 			input += reportingRule
 		}
-		if p.Model == "" && e.routineModelRef(tctx, t) == "role:fast" {
+		if p.Model == "" {
+			rbState, rb = e.runbookGate(tctx, t)
+			onMain = e.routineModelRef(tctx, t) != "role:fast"
+		}
+		if !onMain {
 			input += escalationHint
+		}
+		if rbState == "active" && rb.Steps != "" {
+			input += runbookNoteHead + rb.Steps
 		}
 	}
 	if t.WakeAt != nil || t.WakeNote != "" { // it went to sleep earlier: this run is its wake-up, in the same session
@@ -922,6 +931,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		recov = &plan
 		e.learnFromStall(ctx, t, p, res, plan)
 	}
+	res = e.checkAcceptance(tctx, spec, res)
 	if _, declined := notCapable(res.Text); e.Memory != nil && t.FromKind == "agent" && !declined { // a declination is not knowledge
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: t.FromName, To: p.Name, Text: t.Input, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: p.Name, To: t.FromName, Text: res.Text, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
@@ -948,6 +958,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
 	}
 	out, _ := e.Tasks.Get(ctx, t.ID)
+	if rbState != "" {
+		e.afterRoutine(ctx, out, rbState, rb, onMain)
+	}
 	e.reopenPromiseIfNotDone(ctx, out)
 	if out.Status == tasks.Done && reviewsPromises(out) { // did the agent do what it said it did (or would do)?
 		go e.ReviewPromises(context.WithoutCancel(ctx), out)
@@ -999,8 +1012,9 @@ func routineTask(t tasks.Task) bool {
 	return t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent")
 }
 
-// routineModelRef is the model a routine job runs on (see settings.Autonomy.RoutineModel), "" meaning the agent's default.
-func (e *Engine) routineModelRef(ctx context.Context, t tasks.Task) string {
+// routineBaseRef is the model a routine job would run on by the user's settings alone (see settings.Autonomy.RoutineModel), ""
+// meaning the agent's default.
+func (e *Engine) routineBaseRef(ctx context.Context, t tasks.Task) string {
 	if !routineTask(t) || e.LLM == nil {
 		return ""
 	}
@@ -1013,6 +1027,18 @@ func (e *Engine) routineModelRef(ctx context.Context, t tasks.Task) string {
 	}
 	if ref == "role:fast" && e.LLM.RoleRef(ctx, "fast") == "" {
 		return "" // no fast model configured: nothing cheaper to use
+	}
+	return ref
+}
+
+// routineModelRef is the model a routine job runs on now: the base choice, except that the small model only takes over once a
+// runbook exists for the job (see runbooks.go); until then, and after the runbook failed, the main model does it.
+func (e *Engine) routineModelRef(ctx context.Context, t tasks.Task) string {
+	ref := e.routineBaseRef(ctx, t)
+	if ref == "role:fast" {
+		if state, _ := e.runbookGate(ctx, t); state == "learning" || state == "stale" {
+			return ""
+		}
 	}
 	return ref
 }

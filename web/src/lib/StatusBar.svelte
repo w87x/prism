@@ -26,7 +26,7 @@
   <div class="leds">
     {#each st?.leds || [] as l (l.id)}
       <button class="led" title="{l.label}{l.detail ? ' — ' + l.detail : ''}" onclick={() => (l.id === 'ask' ? go('chat') : l.id === 'telegram' || l.id === 'browser' || l.id === 'obsidian' ? go('settings') : l.id === 'mcp' ? go('tools') : l.id === 'auto' ? go('autonomy') : null)}>
-        <Led state={l.id === 'llm' && S.llm.active > 0 ? 'ok' : l.state} pulse={l.state === 'attention'} live={l.id === 'llm' && (S.llm.active > 0 || l.detail === 'generating')} size={8} /><span>{l.label}</span>
+        <Led state={l.id === 'llm' && S.llm.down ? 'error' : l.id === 'llm' && S.llm.active > 0 ? 'ok' : l.state} pulse={l.state === 'attention'} live={l.id === 'llm' && (S.llm.active > 0 || l.detail === 'generating')} size={8} /><span>{l.label}</span>
       </button>
     {/each}
   </div>

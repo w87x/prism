@@ -296,7 +296,7 @@ func (s *Server) registerCore() {
 		if err != nil {
 			return nil, err
 		}
-		out := map[string]any{"task": t}
+		out := map[string]any{"task": t, "meta": a.Tasks.MetaOf(ctx, t.ID)}
 		if b := a.Tasks.Breakdown(ctx, t.ID); b != nil {
 			out["breakdown"] = b
 		}

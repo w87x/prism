@@ -56,7 +56,18 @@
   const agentOpts = $derived([{ value: '', label: 'all agents' }, ...S.agents.map((a) => ({ value: a.name, label: a.name, hint: brief(a) }))]);
   const statusOpts = ['', 'queued', 'running', 'waiting_input', 'partial', 'done', 'failed', 'cancelled'].map((s) => ({ value: s, label: s || 'all statuses' }));
 
+  // thumbs up/down on a finished result (feeds the weekly standup and, after a pattern of thumbs-down, Metis)
+  let downNote = $state('');
+  let askNote = $state(false);
+  async function rate(t, r, note = '') {
+    if (await call('tasks.rate', { id: t.id, rating: r, note })) {
+      detail.meta = { ...(detail.meta || {}), rating: r, rating_note: note };
+      askNote = false; downNote = '';
+      toast(r > 0 ? 'Thanks — noted' : r < 0 ? 'Noted — the team will look at it' : 'Rating cleared');
+    }
+  }
   async function open(t) {
+    askNote = false; downNote = '';
     detail = await call('tasks.get', { id: t.id });
     if (detail) detailOpen = true;
   }
@@ -175,6 +186,19 @@
       {:else if rerunnable(t)}<span class="grow"></span><Button size="sm" variant="primary" onclick={(e) => rerun(t, e)}>Rerun</Button>
       {:else if t.status === 'done' && t.to_agent !== 'Daedalus'}<span class="grow"></span><Button size="sm" variant="ghost" onclick={(e) => saveRoutine(t, e)}>Save as routine</Button>{/if}
     </div>
+    {#if t.status === 'done' || t.status === 'partial'}
+      <div class="row wrap gap-8 sm" style="margin:4px 0">
+        <span class="dim">Was this result good?</span>
+        <Button size="sm" variant={detail.meta?.rating === 1 ? 'accent' : 'ghost'} title="Good" onclick={() => rate(t, detail.meta?.rating === 1 ? 0 : 1)}>👍</Button>
+        <Button size="sm" variant={detail.meta?.rating === -1 ? 'accent' : 'ghost'} title="Not good" onclick={() => (detail.meta?.rating === -1 ? rate(t, 0) : (askNote = true))}>👎</Button>
+        {#if detail.meta?.rating === -1 && detail.meta?.rating_note}<span class="dim">“{detail.meta.rating_note}”</span>{/if}
+        {#if detail.meta?.criteria}<Badge tone={detail.meta.criteria_met === false ? 'err' : detail.meta.criteria_met ? 'ok' : 'mute'} title={'Done meant: ' + detail.meta.criteria + (detail.meta.criteria_gap ? '\nMissing: ' + detail.meta.criteria_gap : '')}>{detail.meta.criteria_met === false ? 'criteria not met' : detail.meta.criteria_met ? 'criteria met' : 'criteria set'}</Badge>{/if}
+        {#if detail.meta?.audit}<Badge tone={detail.meta.audit === 'ok' ? 'ok' : 'err'} title={detail.meta.audit_note || 'The main model re-checked this routine run'}>{detail.meta.audit === 'ok' ? 'audited: ok' : 'audit: problem'}</Badge>{/if}
+      </div>
+      {#if askNote}
+        <div class="row gap-8" style="margin-bottom:6px"><input class="grow" bind:value={downNote} placeholder="What was wrong? (optional)" onkeydown={(e) => e.key === 'Enter' && rate(t, -1, downNote)} /><Button size="sm" variant="primary" onclick={() => rate(t, -1, downNote)}>Send</Button></div>
+      {/if}
+    {/if}
     <Breakdown b={detail.breakdown} />
     <Field label="Input"><pre>{t.input}</pre></Field>
     {#if t.question}<Field label="Waiting for"><pre class="attn">{t.question}</pre></Field>{/if}

@@ -39,6 +39,7 @@ func New(a *app.App, h *hub.Hub, ui fs.FS) *Server {
 	s.registerTools()
 	s.registerMisc()
 	s.registerExtensions()
+	s.registerTeam()
 	h.OnConnect = func(c *hub.Client) {
 		c.Send("status", a.Status(context.Background()))
 		// A connection from this same machine (the user's own browser) is the normal case and would be

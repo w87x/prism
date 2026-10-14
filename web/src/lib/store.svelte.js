@@ -46,7 +46,7 @@ export const S = $state({
   quickChatOpen: false, // send-a-message-from-anywhere overlay (Cmd+J) — see QuickChat.svelte
   shortcutsOpen: false, // keyboard shortcuts cheatsheet (Cmd+/) — see ShortcutsHelp.svelte
   notifs: { items: [], unread: 0 },
-  llm: { active: 0 }, // model calls in flight (any caller)
+  llm: { active: 0, down: false, reason: '' }, // model calls in flight (any caller)
   peekRun: null, // run whose live view is open (held by reference, so it outlives its removal from `runs`)
   onboardingOpen: false,
   skipOnboarding: lsGet('prism.skipOnboarding', false),
@@ -82,7 +82,7 @@ memory.entity_graph memory.export memory.fact memory.facts memory.find memory.fu
 memory.stats models.list notifications.list obsidian.status onboarding.state onboarding.templates ops.dashboard ops.delegation plugins.get
 plugins.info plugins.list plugins.status processes.list processes.log providers.list roles.get runs.snapshot search.all settings.get setup.info
 shortcuts.list skills.get skills.hubs skills.list tasks.get tasks.list tasks.tree telegram.status today.get tools.list trackers.get trackers.list
-web.providers`.split(/\s+/));
+web.providers runbooks.list decisions.list review.log standup.list llm.health`.split(/\s+/));
 setRpcGuard((method) => (S.editor.editor || READ_ONLY_OK.has(method) ? '' : 'This tab is view-only — another window is the master. Use the badge in the corner to make this one the master.'));
 export function takeOver() { return rpc('editor.claim'); }
 // A keyboard shortcut that writes (e.g. quick chat) is a deliberate "I want to act from here" — same
@@ -198,6 +198,7 @@ function wire() {
     if (!document.hidden && !S.editor.editor && !S.editor.taken) rpc('editor.claim').catch(() => {});
   });
   on('llm.busy', (e) => { S.llm.active = e.active || 0; });
+  on('llm.health', (e) => { S.llm.down = !!e.down; S.llm.reason = e.reason || ''; });
   on('status', (st) => { S.status = st; });
   // start-up progress while PRISM opens its database and starts services (see ConnectingSplash)
   on('startup', (e) => {
@@ -333,6 +334,7 @@ export function modelOptions(kind = 'chat') {
 export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
   if (st) { S.status = st; S.startup = st.startup ? { ...st.startup, _at: Date.now() } : null; }
+  call('llm.health', {}, { quiet: true }).then((h) => { if (h) { S.llm.down = !!h.down; S.llm.reason = h.reason || ''; } });
   if (!st || st.setup || st.starting) return; // starting: the splash shows progress; a `startup` event brings us back here when ready
   await loadChats();
   const [hist, snap] = await Promise.all([call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }), call('runs.snapshot', {}, { quiet: true })]);

@@ -1137,6 +1137,28 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 			needConfirm = false
 		}
 		if needConfirm {
+			if !tainted { // the second pair of eyes (review.go): never while untrusted content is in play
+				request := spec.Input
+				if env.TaskID != 0 {
+					if cur, terr := e.Tasks.Get(ctx, env.TaskID); terr == nil {
+						request = cur.Input
+						if cur.RootID != 0 && cur.RootID != cur.ID {
+							if root, rerr := e.Tasks.Get(ctx, cur.RootID); rerr == nil && root.Input != "" {
+								request = root.Input + "\n\n(this step: " + cur.Input + ")"
+							}
+						}
+					}
+				}
+				switch verdict, reason := e.preReview(ctx, env, tool, tc.Name, tc.Arguments, request); verdict {
+				case "approve":
+					needConfirm = false
+				case "deny":
+					emit("denied", false, "refused by the reviewer: "+reason)
+					return toolResult{text: "Error: the reviewer refused " + tc.Name + ": " + reason + " Do not retry it; find another way or explain to the user."}
+				}
+			}
+		}
+		if needConfirm {
 			why := "tool is in SAFE mode"
 			if tainted && st.Armed {
 				why = "untrusted content (web/mcp/file) is in this turn's context"

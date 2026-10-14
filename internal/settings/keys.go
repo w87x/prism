@@ -15,6 +15,8 @@ const (
 	KeyModelActions = "model_actions"
 	KeyModelChecks  = "model_checks"
 	KeyHeartbeat    = "heartbeat"
+	KeyReview       = "review"
+	KeyStandup      = "standup"
 	KeyOnboarding   = "onboarding"
 	KeyMemory       = "memory"
 	KeyRuntime      = "runtime"
@@ -144,6 +146,37 @@ type Autonomy struct {
 	// the small, cheap fast model, which may call the escalate tool to ask the main model when it is unsure; "main": the main
 	// chat model like any other task; or the name of a specific model. An agent whose profile pins a model keeps it.
 	RoutineModel string `json:"routine_model"`
+	// RunbooksOff stops the learning of runbooks (the default is on: a routine job runs on the main model until it has succeeded
+	// twice, the main model writes down how, and the small model follows that from then on, going back to the main model when it
+	// fails). AuditOneIn: how often the main model silently re-checks a small-model run: one in N (0 → 8, negative → never).
+	RunbooksOff bool `json:"runbooks_off"`
+	AuditOneIn  int  `json:"audit_one_in"`
+}
+
+// AuditEvery is the effective sampling rate: 0 means never.
+func (a Autonomy) AuditEvery() int {
+	switch {
+	case a.AuditOneIn < 0:
+		return 0
+	case a.AuditOneIn == 0:
+		return 8
+	}
+	return a.AuditOneIn
+}
+
+// Review is the four-eyes setting: with Enabled, a tool call that would ask the user for approval is first judged by the main
+// model, which approves what clearly follows from the request, refuses what clearly does not and leaves the rest to the user.
+// Untrusted content in the turn, and tools that send, delete or pay, always go to the user (see agent/review.go).
+type Review struct {
+	Enabled   bool     `json:"enabled"`
+	AlwaysAsk []string `json:"always_ask"` // extra tool names that always go to the user
+}
+
+// Standup is the weekly digest of what the team did. Off turns it off; Weekday is 0 (Sunday) to 6, Hour 0-23 in the user's time zone.
+type Standup struct {
+	Off     bool `json:"off"`
+	Weekday int  `json:"weekday"`
+	Hour    int  `json:"hour"`
 }
 
 // RoutineModelRef is the model reference for routine jobs, or "" to leave the agent's own choice alone.

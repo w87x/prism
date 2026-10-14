@@ -32,6 +32,8 @@ type Router struct {
 	usage   func(model string, u Usage)
 	onCall  func(Call)
 
+	health health
+
 	active atomic.Int32                   // completions in flight (any caller: agents, memory, knowledge base…)
 	busy   func(active int, model string) // notified when the count changes
 }
@@ -348,6 +350,9 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 	}
 	started := time.Now()
 	defer func() {
+		if ctx.Err() == nil {
+			r.noteResult(callErr)
+		}
 		if r.onCall == nil || ctx.Err() != nil {
 			return // nobody is counting, or the caller gave up (a stop button is not a failure)
 		}

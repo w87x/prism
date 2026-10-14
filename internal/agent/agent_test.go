@@ -140,7 +140,7 @@ func TestAtlasDelegatesAndSynthesizes(t *testing.T) {
 	// Atlas must have stayed lean: only its handful of tools were offered (its own: delegate, agent_find, task_status,
 	// task_steer, task_cancel — its soul tells it to steer and cancel — plus the six chat basics).
 	for _, c := range h.fake.Recorded() {
-		if strings.Contains(c.Messages[0].Content, "You are Atlas") && len(c.Tools) > 12 {
+		if strings.Contains(c.Messages[0].Content, "You are Atlas") && len(c.Tools) > 13 {
 			t.Fatalf("Atlas got %d tools", len(c.Tools))
 		}
 	}
@@ -2735,8 +2735,14 @@ func TestRoutineJobsUseSmallModelEscalateAndStayQuiet(t *testing.T) {
 	}
 	cron, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "ads", ToAgent: "Atlas", Title: "ads", Input: "watch the ads"}, true)
 	user, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: "Atlas", Title: "x", Input: "x"}, true)
+	if got := h.e.routineModelRef(ctx, cron); got != "" {
+		t.Fatalf("a job without a runbook is learned on the main model first: %q", got)
+	}
+	if _, err := h.e.DB.Exec(ctx, `INSERT INTO runbooks (key,agent,title,steps,status) VALUES ('cron:ads','Atlas','ads','1. look','active')`); err != nil {
+		t.Fatal(err)
+	}
 	if got := h.e.routineModelRef(ctx, cron); got != "role:fast" {
-		t.Fatalf("a cron job runs on the fast model by default: %q", got)
+		t.Fatalf("a cron job with a runbook runs on the fast model: %q", got)
 	}
 	if got := h.e.routineModelRef(ctx, user); got != "" {
 		t.Fatalf("a user's task keeps the default model: %q", got)

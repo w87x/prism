@@ -262,6 +262,13 @@ func (a *App) build(ctx context.Context) error {
 	}
 	a.Engine.SetLLMConcurrency(settings.Load(ctx, a.Settings, settings.KeyRuntime, settings.DefaultRuntime()).LLMConcurrency)
 	a.Engine.StartDispatcher(ctx, 6)
+	a.Engine.StartIncidentWatch(ctx)
+	a.Engine.StartStandups(ctx, func(c context.Context) *time.Location {
+		if a.Ext.Sched != nil {
+			return a.Ext.Sched.Loc(c)
+		}
+		return time.Local
+	})
 	a.startupStage("Starting background workers", "")
 	go a.memoryLoop(ctx)
 	go a.cleanupLoop(ctx)

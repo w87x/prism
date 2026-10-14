@@ -38,6 +38,7 @@ func (e *Engine) RegisterTools(reg *tools.Registry) {
 		e.toolReportBlocked(),
 		e.toolEvolvePropose(),
 		e.toolAskColleague(),
+		e.toolDecisions(),
 		e.toolAgentPerformance(),
 		e.toolEvolutionAudit(),
 		e.toolTaskTranscript(),
@@ -53,6 +54,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("agent", "agent name (see the specialists list or agent_find); leave out and the best-matching specialist is chosen"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
+			tools.Str("done_when", "what 'done' means for this item — concrete, checkable acceptance criteria (e.g. 'a file saved, its path reported, at least 5 entries'). The result is checked against it before it comes back to you; leave out for trivial work"),
 			tools.IntList("refs", "artifact ids with material the agent needs (artifact_save / scratchpad_share first) — hand over bulky material by reference, not pasted"),
 			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
@@ -61,6 +63,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 					Agent       string  `json:"agent"`
 					Instruction string  `json:"instruction"`
 					Title       string  `json:"title"`
+					DoneWhen    string  `json:"done_when"`
 					TaskID      int64   `json:"task_id"`
 					Refs        []int64 `json:"refs"`
 				} `json:"tasks"`
@@ -98,7 +101,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 							return
 						}
 					}
-					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false)
+					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, it.DoneWhen)
 					tainted[i] = tn
 					if err != nil {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
@@ -130,10 +133,12 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			"The maintenance staff can be asked too, each in their own field (Mnemosyne: memory — moving, merging or retiring facts, by id; Forge: designing agents; Metis: improving an agent; Oneiros: reflection and briefings; Daedalus: turning a finished task into a skill; Sentinel: monitors on a page, download, process or file). They review the request and may refuse it.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),
 			tools.Str("agent", "the specialist to ask (optional)"),
+			tools.Str("done_when", "optional: what 'done' means — checkable acceptance criteria the answer is checked against before it comes back to you"),
 			tools.IntList("refs", "artifact ids with the material the request is about (artifact_save / scratchpad_share first) — pass bulky material by reference, not pasted")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Request, Agent string
+				DoneWhen       string `json:"done_when"`
 				Refs           []int64
 			}](raw)
 			if err != nil {
@@ -163,7 +168,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 					name = best
 				}
 			}
-			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true)
+			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen)
 			if err != nil {
 				return "", err
 			}
@@ -261,7 +266,7 @@ func formatTaskResult(t tasks.Task) string {
 	}
 }
 
-func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool) (tasks.Task, bool, error) {
+func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string) (tasks.Task, bool, error) {
 	if strings.TrimSpace(instruction) == "" {
 		return tasks.Task{}, false, errors.New("empty instruction")
 	}
@@ -313,6 +318,9 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	if leaf && p.Role != RoleWorker && p.Role != RoleMaint {
 		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff, not a specialist: ask a specialist instead", p.Name)
 	}
+	if c := strings.TrimSpace(criteria); c != "" {
+		instruction += "\n\n[Done means] " + c + "\nYour report is checked against this before it goes back; say plainly what you did for each point."
+	}
 	depth := env.Depth + 1
 	if leaf && depth > MaxDepth {
 		depth = MaxDepth // a leaf request never deepens the tree beyond its limit
@@ -331,6 +339,7 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	if err != nil {
 		return t, false, err
 	}
+	e.Tasks.SetCriteria(ctx, t.ID, criteria)
 	return e.finishSub(ctx, t, opts)
 }
 

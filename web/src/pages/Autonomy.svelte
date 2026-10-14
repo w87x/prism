@@ -21,6 +21,7 @@
   import Hint from '../lib/ui/Hint.svelte';
   import Tip from '../lib/ui/Tip.svelte';
   import { AUTONOMY_HELP } from '../lib/help.js';
+  import TeamPractices from '../lib/TeamPractices.svelte';
 
   let tab = $state('intents');
   // ── heartbeat: one standing checklist, looked through quietly every so often ──
@@ -185,7 +186,7 @@
   </div>
   <Tabs tabs={[{ id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
     { id: 'brief', label: 'Briefings', badge: briefBadge }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
-    { id: 'heartbeat', label: 'Heartbeat' }, { id: 'audit', label: 'Audit' }]} bind:active={tab} />
+    { id: 'heartbeat', label: 'Heartbeat' }, { id: 'team', label: 'Team' }, { id: 'audit', label: 'Audit' }]} bind:active={tab} />
 
   {#if tab === 'intents'}
     <div class="bar"><span class="sm mute">“Tell me when X ships.” Checked on a cadence; when it holds, the owner agent is woken with the evidence. Watches just track progress and notify.</span><span class="grow"></span><Button size="sm" onclick={newIntent}><Icon name="plus" size={11} /> New</Button></div>
@@ -313,6 +314,8 @@
         <div class="row wrap gap-8 sm"><Badge tone={b.silent ? 'mute' : b.status === 'done' ? 'attn' : 'err'}>{b.silent ? 'quiet' : b.status === 'done' ? 'told you' : b.status}</Badge><span class="mute">{ago(b.at)}</span>{#if !b.silent}<span class="grow">{b.result}</span>{/if}</div>
       {:else}<div class="sm mute">no beats yet</div>{/each}
     </div>
+  {:else if tab === 'team'}
+    <TeamPractices />
   {:else if tab === 'audit'}
     <div class="bar"><span class="sm mute">Everything autonomy did on its own — schedules, standing intents, watches and dreams — newest first. Nothing here is a separate log; it is read straight from the tasks, intents and briefings it already produced.</span><span class="grow"></span><Button size="sm" variant="ghost" onclick={loadAudit}><Icon name="refresh" size={11} /> Refresh</Button></div>
     <Panel flush grow>

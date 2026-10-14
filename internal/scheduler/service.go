@@ -117,6 +117,9 @@ func (s *Service) logf(level, format string, args ...any) {
 	}
 }
 
+// Loc is the user's time zone.
+func (s *Service) Loc(ctx context.Context) *time.Location { return s.loc(ctx) }
+
 func (s *Service) loc(ctx context.Context) *time.Location {
 	g := settings.Load(ctx, s.Settings, settings.KeyGeneral, settings.General{})
 	if g.Timezone != "" {
@@ -201,6 +204,8 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 			c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, c.System, next, topic, nullIfZero(bankID)).Scan(&id)
 	} else {
 		id = c.ID
+		// a job whose prompt or agent changed is a different job: what the runbook learned no longer applies
+		_, _ = s.DB.Exec(ctx, `DELETE FROM runbooks WHERE key IN (SELECT 'cron:'||name FROM crons WHERE id=$1 AND (prompt<>$2 OR agent<>$3 OR name<>$4))`, c.ID, c.Prompt, c.Agent, c.Name)
 		_, err = s.DB.Exec(ctx, `UPDATE crons SET name=$2,agent=$3,expr=$4,prompt=$5,enabled=$6,next_run=$7 WHERE id=$1`, c.ID, c.Name, c.Agent, c.Expr, c.Prompt, c.Enabled, next)
 	}
 	return id, err
@@ -317,6 +322,10 @@ func (s *Service) tickCrons(ctx context.Context) {
 		next := sched.Next(now.In(loc))
 		_, _ = s.DB.Exec(ctx, `UPDATE crons SET last_run=now(), next_run=$2 WHERE id=$1`, c.ID, next)
 		if c.System && c.Agent == "Oneiros" && !au.DreamEnabled {
+			continue
+		}
+		if s.Engine.LLMDown() { // no model is reachable: skip this run rather than queue one more failure (see agent/incident.go)
+			s.Engine.NoteSkipped(ctx)
 			continue
 		}
 		// a schedule missed by more than its own period (machine asleep) fires once, not repeatedly
