@@ -26,6 +26,15 @@
   let tab = $state('general');
 
   // ── general ──
+  // model check: probes of what PRISM leans on (plain answers, JSON, real tool calls, staying silent), per model
+  let chk = $state({ ref: 'role:chat', busy: false, report: null, err: '', saved: {} });
+  const checkOpts = $derived([{ value: 'role:chat', label: 'the main (chat) model' }, { value: 'role:fast', label: 'the aux (fast) model' }, ...modelOptions('chat')]);
+  async function runCheck() {
+    chk.busy = true; chk.report = null; chk.err = '';
+    const r = await call('llm.check', { ref: chk.ref }, { quiet: true, throw: true }).catch((e) => ({ error: e.message }));
+    chk.busy = false;
+    if (r?.error) chk.err = r.error; else { chk.report = r; chk.saved[chk.ref] = r; }
+  }
   // which model each behind-the-scenes action uses: '' = its default, 'main' = the chat model, 'aux' = the fast model
   let modelActions = $state({ choice: {} });
   let actionCatalog = $state([]);
@@ -83,6 +92,7 @@
   $effect(() => {
     untrack(() => {
       loadSetting('general', gen).then((v) => (gen = v));
+      loadSetting('model_checks', { checks: {} }).then((v) => (chk.saved = v.checks || {}));
       loadSetting('model_actions', { choice: {} }).then((v) => (modelActions = { choice: v.choice || {} }));
       call('models.actions', {}, { quiet: true }).then((r) => (actionCatalog = r || []));
       loadSetting('context', ctx).then((v) => (ctx = v));
@@ -318,6 +328,28 @@
         </Panel>
       </div>
     {:else if tab === 'models'}
+      <Panel title="Model check">
+        <div class="sm mute">Tries a model on what PRISM relies on — a plain answer, valid JSON, a real tool call (not one written out as text) and staying silent when told to — and says what it is fit for. It takes up to a minute or two on a local model.</div>
+        <div class="row wrap gap-8" style="margin-top:6px">
+          <div class="grow"><Select bind:value={chk.ref} options={checkOpts} searchable /></div>
+          <Button variant="primary" loading={chk.busy} onclick={runCheck}>Check</Button>
+        </div>
+        {#if chk.err}<div class="err sm">{chk.err}</div>{/if}
+        {#if chk.report}
+          {@const r = chk.report}
+          <div class="verdict" class:bad={r.role === 'none'}><b>{r.model}</b> — {r.verdict}</div>
+          {#each r.probes as p (p.id)}
+            <div class="row wrap gap-8 actrow"><span class={p.ok ? 'ok' : 'err'}>{p.ok ? '✓' : '✗'}</span><span class="grow">{p.label}{#if p.note}<span class="mute sm"> — {p.note}</span>{/if}</span><span class="mute sm">{(p.ms / 1000).toFixed(1)} s</span></div>
+          {/each}
+          <div class="sm mute">context window {r.window?.toLocaleString?.() || r.window} tokens{#if r.tokens_per_sec} · about {Math.round(r.tokens_per_sec)} tokens/s{/if}</div>
+        {/if}
+        {#if Object.keys(chk.saved).length}
+          <div class="gk" style="margin-top:8px">last checks</div>
+          {#each Object.entries(chk.saved) as [ref, r] (ref)}
+            <div class="sm"><b>{r.model || ref}</b> <span class="mute">({ref}, {ago(r.at)})</span> — {r.verdict}</div>
+          {/each}
+        {/if}
+      </Panel>
       <Panel title="Which model does what">
         <div class="sm mute">Everything PRISM asks a model to do behind the scenes. “main” is the chat model, “aux” the fast one; “default” is what PRISM does unless you say otherwise. An agent's own answers use the model set on its profile.</div>
         {#each actionGroups as grp (grp.g)}
@@ -762,6 +794,8 @@
   .topics { max-height: 90px; overflow: auto; border: 1px solid var(--line); padding: 3px 6px; }
   .w { width: 160px; }
   tr.off td { opacity: 0.5; }
+  .verdict { margin: 8px 0 4px; padding: 6px 8px; border: 1px solid var(--accent-dim); background: var(--bg-2); }
+  .verdict.bad { border-color: var(--err); }
   .actrow { padding: 3px 0; border-bottom: 1px solid var(--line-2); align-items: center; }
   .gk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); }
 </style>

@@ -133,6 +133,25 @@ func (s *Server) registerLLM() {
 		a.LLM.Invalidate()
 		return true, a.Settings.Set(ctx, settings.KeyModelRoles, r)
 	})
+	// llm.check probes one model (reply, JSON, tool calls, silence) and remembers the report for the Models page
+	rpc(s, "llm.check", func(ctx context.Context, r struct {
+		Ref string `json:"ref"`
+	}) (llm.CheckReport, error) {
+		if strings.TrimSpace(r.Ref) == "" {
+			return llm.CheckReport{}, fmt.Errorf("pick a model")
+		}
+		rep := a.LLM.CheckModel(ctx, r.Ref)
+		var saved struct {
+			Checks map[string]llm.CheckReport `json:"checks"`
+		}
+		saved = settings.Load(ctx, a.Settings, settings.KeyModelChecks, saved)
+		if saved.Checks == nil {
+			saved.Checks = map[string]llm.CheckReport{}
+		}
+		saved.Checks[r.Ref] = rep
+		_ = a.Settings.Set(ctx, settings.KeyModelChecks, saved)
+		return rep, nil
+	})
 	// llm.test sends a tiny prompt through the full routing path (fallback, key rotation included)
 	rpc(s, "llm.test", func(ctx context.Context, r struct {
 		Ref  string `json:"ref"`

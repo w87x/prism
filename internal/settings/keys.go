@@ -13,6 +13,7 @@ const (
 	KeyBrowser      = "browser"
 	KeyAutonomy     = "autonomy"
 	KeyModelActions = "model_actions"
+	KeyModelChecks  = "model_checks"
 	KeyOnboarding   = "onboarding"
 	KeyMemory       = "memory"
 	KeyRuntime      = "runtime"

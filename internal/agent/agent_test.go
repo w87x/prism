@@ -3110,3 +3110,63 @@ func TestAskColleagueWithAnInventedNameAsksTheBestMatch(t *testing.T) {
 		t.Fatalf("an invented name must fall back to the best match: %q %v", out, err)
 	}
 }
+
+// The model check tells a model that makes real tool calls from one that writes them as text, and says what each is fit for.
+func TestModelCheckSeparatesRealToolCallsFromTextOnes(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	mode := "good"
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		role, content, _ := msgAt(req, -1)
+		_, sys, _ := msgAt(req, 0)
+		has := func(sub string) bool {
+			for _, m := range ms {
+				if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, sub) {
+					return true
+				}
+			}
+			return false
+		}
+		switch {
+		case has("exactly one word: PONG"):
+			return testutil.Reply{Content: "PONG"}
+		case has("extract {"):
+			return testutil.Reply{Content: `{"name":"Anna","age":34,"city":"Lisbon","instrument":"cello"}`}
+		case has("What time is it in Paris"):
+			if role == "tool" {
+				return testutil.Reply{Content: "It is 14:07 in Paris."}
+			}
+			if mode == "text" {
+				return testutil.Reply{Content: "Checking...\n[Tool: get_time] → 14:07"}
+			}
+			return testutil.Reply{Tools: []llm.ToolCall{tc("t1", "get_time", map[string]any{"city": "Paris"})}}
+		case strings.Contains(sys, "reply with exactly NO_REPLY") || strings.Contains(content, "no bike under"):
+			if mode == "chatty" {
+				return testutil.Reply{Content: "Nothing found today, I will keep looking!"}
+			}
+			return testutil.Reply{Content: "NO_REPLY"}
+		}
+		return testutil.Reply{Content: "?"}
+	}
+	good := h.e.LLM.CheckModel(ctx, "role:chat")
+	if good.Role != "main" || !strings.Contains(good.Verdict, "main model") {
+		t.Fatalf("a model that does everything is fit as the main one: %+v", good)
+	}
+	mode = "text"
+	txt := h.e.LLM.CheckModel(ctx, "role:chat")
+	var tools llm.Probe
+	for _, p := range txt.Probes {
+		if p.ID == "tools" {
+			tools = p
+		}
+	}
+	if txt.Role != "aux" || tools.OK || !strings.Contains(tools.Note, "as text") {
+		t.Fatalf("a model that writes the call as text is aux material, and the note says why: %+v", txt)
+	}
+	mode = "chatty"
+	chatty := h.e.LLM.CheckModel(ctx, "role:chat")
+	if chatty.Role != "main" || !strings.Contains(chatty.Verdict, "over-report") {
+		t.Fatalf("a chatty one is flagged for background jobs: %+v", chatty)
+	}
+}
