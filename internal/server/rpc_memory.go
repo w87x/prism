@@ -195,6 +195,25 @@ func (s *Server) registerMemory() {
 	}) (bool, error) {
 		return true, a.Memory.Unlink(ctx, r.A, r.B)
 	})
+	// core memory: the short labelled blocks that are always in every agent's prompt
+	rpc(s, "core.list", func(ctx context.Context, _ none) ([]memory.CoreBlock, error) { return a.Memory.CoreBlocks(ctx) })
+	rpc(s, "core.save", func(ctx context.Context, r struct {
+		Label       string `json:"label"`
+		Text        string `json:"text"`
+		Description string `json:"description"`
+	}) (bool, error) {
+		return true, a.Memory.SetCoreBlock(ctx, r.Label, r.Text, r.Description, "user")
+	})
+	rpc(s, "core.delete", func(ctx context.Context, r struct {
+		Label string `json:"label"`
+	}) (bool, error) {
+		return true, a.Memory.DeleteCoreBlock(ctx, r.Label)
+	})
+	rpc(s, "core.history", func(ctx context.Context, r struct {
+		Label string `json:"label"`
+	}) ([]memory.CoreBlock, error) {
+		return a.Memory.CoreHistory(ctx, r.Label)
+	})
 	// settle a contradiction: keep a or b (confirmed; the other retired), retire both, or "none" (not a contradiction)
 	rpc(s, "memory.resolve_contradiction", func(ctx context.Context, r struct {
 		A      int64  `json:"a"`

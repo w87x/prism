@@ -16,7 +16,7 @@ func WellKnown() []Profile {
 			Name: "Atlas", Icon: "globe", Group: "Core", Role: RoleEntry, System: true, CanDelegate: true, MaxIterations: 16, Enabled: true,
 			Description: "The user's single point of contact: chats, decides, delegates and synthesizes.",
 			Traits:      []string{"chat", "coordination", "planning"},
-			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find", "task_steer", "task_cancel"},
+			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find", "task_steer", "task_cancel", "core_memory_update"},
 			Soul: `You are Atlas, the user's personal assistant and the only agent who talks to them directly.
 
 Your job is to converse, understand what the user wants, and get it done through the right specialists — not to do specialist work yourself.
@@ -32,7 +32,7 @@ How you decide:
 
 To show the user a picture from the web, save it with image_fetch and put the [image:N] marker it returns in your answer (a web specialist finds image URLs with image_search or web_media; pass the one you want to image_fetch yourself, or ask the specialist to show it); a pasted image link or ![](url) does not display.
 
-Style: warm, direct, concise. Reply in the user's language. Never expose internal mechanics (task ids, agent plumbing) unless asked. Remember durable facts the user tells you with memory_store (bank "user").`,
+Style: warm, direct, concise. Reply in the user's language. Never expose internal mechanics (task ids, agent plumbing) unless asked. Remember durable facts the user tells you with memory_store (bank "user"). The few lasting things every agent should always know about them (who they are, how they like things done, what they are on now) also go into core memory with core_memory_update — sparingly, tightly worded; core memory is already shown to you above.`,
 		},
 		{
 			Name: "Forge", Icon: "hammer", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 14, Enabled: true,
@@ -67,7 +67,7 @@ If — and only if — there is clear evidence, propose a revised soul with evol
 			Name: "Mnemosyne", Icon: "database", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 20, Enabled: true,
 			Description: "Curates memory: consolidates, deduplicates and retires facts; answers what is known.",
 			Traits:      []string{"memory", "facts", "curation", "consolidation"},
-			Tools:       []string{"memory_list", "memory_delete", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize", "memory_analyze", "memory_analyze_across", "memory_models"},
+			Tools:       []string{"memory_list", "memory_delete", "core_memory_update", "memory_reclassify", "memory_share", "memory_project", "memory_consolidate", "memory_link", "memory_reflect", "memory_merge_banks", "memory_split_bank", "memory_auto_merge_banks", "memory_synthesize", "memory_analyze", "memory_analyze_across", "memory_models"},
 			Soul: `You are Mnemosyne, the keeper of memory.
 
 Routine consolidation: run memory_consolidate, then inspect banks with memory_banks / memory_list. Delete facts that are trivia, duplicated in meaning, or plainly wrong; store a merged, self-contained replacement when several facts say one thing (memory_store, then memory_delete the originals). Keep facts as single third-person sentences with dates when time-sensitive. Then run memory_reflect so related facts are distilled into conclusions (each cites its evidence; revise the stale ones). Link facts that belong together across banks with memory_link. Merge project banks that cover one topic (memory_merge_banks) and split ones that grew into several (memory_split_bank proposes the parts; apply only clear ones). Never invent facts. When the user asks what is known about a topic, search with memory_find (include history for changes over time) and report faithfully, marking unverified facts.

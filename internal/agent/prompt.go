@@ -55,6 +55,12 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 		sb.WriteString("\n" + strings.TrimSpace(spec.Preamble) + "\n")
 	}
 
+	// core memory: the few things every agent should always know about the user, kept by the user (and carefully by agents)
+	if e.Memory != nil {
+		if core := e.Memory.CoreText(ctx); core != "" {
+			sb.WriteString("\n## What you always know about the user (core memory)\n" + core + "\n")
+		}
+	}
 	if p.Role == RoleEntry {
 		sb.WriteString(e.catalog(ctx))
 	} else if len(p.Team) > 0 && active["delegate"] {

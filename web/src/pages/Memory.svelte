@@ -41,6 +41,20 @@
   let nb = $state({ kind: 'project', name: '', description: '' });
   let ops = $state([]); // merges and splits that can still be undone
   let importer = $state();
+  // ── core memory: short labelled blocks that are always in every agent's prompt ──
+  let coreOpen = $state(false);
+  let core = $state([]);
+  let coreNew = $state({ label: '', text: '' });
+  let coreHist = $state(null); // {label, items}
+  async function loadCore() { core = (await call('core.list', {}, { quiet: true })) || []; }
+  async function openCore() { coreOpen = true; coreHist = null; await loadCore(); }
+  async function saveCore(b) { if (await call('core.save', { label: b.label, text: b.text })) { toast(`“${b.label.replace(/_/g, ' ')}” saved`); loadCore(); } }
+  async function addCore() {
+    const label = coreNew.label.trim().toLowerCase().replace(/\s+/g, '_');
+    if (label && (await call('core.save', { label, text: coreNew.text }))) { coreNew = { label: '', text: '' }; loadCore(); }
+  }
+  async function delCore(b) { if (await confirmBox({ title: 'Delete block', text: `Delete the “${b.label}” block? Its history stays.`, ok: 'Delete', danger: true })) { await call('core.delete', { label: b.label }); loadCore(); } }
+  async function showCoreHist(b) { coreHist = { label: b.label, items: (await call('core.history', { label: b.label }, { quiet: true })) || [] }; }
   let review = $state(null); // contradictions / stale conclusions / prune candidates, loaded on demand
   let reviewOpen = $state(false);
   async function loadReview() { review = await call('memory.review', {}, { quiet: true }); }
@@ -431,6 +445,7 @@
     <button type="button" class="act" title="What memory maintenance is doing — click for the activity log" onclick={() => { activityOpen = true; loadActivity(); }}><Led state={act.status.step ? 'ok' : 'off'} size={7} /> {act.status.step ? act.status.step + '…' : act.status.last_at ? 'idle · last pass ' + ago(new Date(act.status.last_at * 1000).toISOString()) : 'idle'}</button>
     {#if stats}<span class="sm dim nowrap"><Led state={stats.embedding ? 'ok' : 'off'} size={7} /> embeddings {stats.embedding ? 'on' : 'off'} · {stats.facts} facts · {stats.raw} raw</span>{/if}
     <input bind:this={importer} type="file" accept="application/json,.json" hidden onchange={doImport} />
+    <Button size="sm" variant="ghost" title="The few lasting things every agent always knows about you: who you are, how you like things done, what you are on now" onclick={openCore}>Core memory</Button>
     <Button size="sm" variant={reviewCount ? 'accent' : 'ghost'} title="Contradictions, stale conclusions and facts about to be auto-archived" onclick={() => (reviewOpen = true)}><Icon name="warn" size={11} /> Review{#if reviewCount} · {reviewCount}{/if}</Button>
     <Button size="sm" variant="ghost" title="Send an agent to check something on the web and add what it finds" onclick={() => research()}>Research…</Button>
     <Button size="sm" variant="ghost" title="Teach memory from a document: a chat export (Telegram, WhatsApp), notes, an article, a PDF…" onclick={() => { learnOpen = true; loadLearn(); }}>Learn from document</Button>
@@ -741,6 +756,25 @@
   <Field label="Question"><Textarea bind:value={nm.query} rows={2} mono={false} placeholder="What does the user want from their media setup and what is in the way?" /></Field>
   <Field label="Scope"><Select bind:value={nm.bank_id} options={[{ value: 0, label: 'every bank' }, ...banks.map((b) => ({ value: b.id, label: labelOf(b.id) }))]} /></Field>
   {#snippet footer()}<Button variant="ghost" onclick={() => (modelsOpen = false)}>Close</Button><Button loading={modelBusy === -1} disabled={!nm.name.trim() || !nm.query.trim()} onclick={addModel}>Add model</Button>{/snippet}
+</Modal>
+
+<Modal bind:open={coreOpen} title="Core memory" width={720}>
+  <div class="sm mute">Short blocks that are always in every agent's prompt — keep them tight (800 characters each). Everything else lives in ordinary memory and is searched for. Atlas and Mnemosyne may keep these current; every change is kept in the history.</div>
+  {#each core as b (b.label)}
+    <div class="rvrow">
+      <div class="row wrap gap-8"><b class="hi">{b.label.replace(/_/g, ' ')}</b><span class="mute sm grow">{b.description}</span><span class="mute sm">{(b.text || '').length}/800{b.updated_by ? ' · by ' + b.updated_by : ''}</span></div>
+      <Textarea bind:value={b.text} rows={3} mono={false} />
+      <div class="row end"><Button size="sm" variant="ghost" onclick={() => showCoreHist(b)}>History</Button><Button size="sm" variant="ghost" onclick={() => delCore(b)}>Delete</Button><Button size="sm" variant="primary" onclick={() => saveCore(b)}>Save</Button></div>
+      {#if coreHist && coreHist.label === b.label}
+        {#each coreHist.items as h (h.at)}
+          <div class="lrow"><span class="ltx pre">{h.text}</span><span class="sm mute nowrap">{h.updated_by} · {stamp(h.at)}</span><Button size="sm" onclick={() => { b.text = h.text; }}>use</Button></div>
+        {:else}<div class="sm mute">no earlier versions</div>{/each}
+      {/if}
+    </div>
+  {/each}
+  <h4>New block</h4>
+  <div class="row wrap gap-8"><div style="width:180px"><Input bind:value={coreNew.label} placeholder="label, e.g. family" /></div><div class="grow"><Input bind:value={coreNew.text} placeholder="text" /></div><Button size="sm" disabled={!coreNew.label.trim()} onclick={addCore}>Add</Button></div>
+  {#snippet footer()}<Button variant="primary" onclick={() => (coreOpen = false)}>Close</Button>{/snippet}
 </Modal>
 
 <Modal bind:open={reviewOpen} title="Review" width={640}>
