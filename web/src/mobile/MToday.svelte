@@ -112,8 +112,6 @@
 <style>
   .quiet { color: var(--attn); }
   .mt { height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; -webkit-overflow-scrolling: touch; }
-  .top { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px; }
-  .rf { background: none; border: 0; color: var(--fg-mute); min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
   .card { background: var(--panel-bg); border: 1px solid var(--line-2); flex: none; }
   .card.attn { border-color: var(--attn-dim); box-shadow: var(--glow-attn); }
   .card.ok { border-color: var(--line-3); }

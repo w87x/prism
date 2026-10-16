@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -64,9 +65,14 @@ func (b *toolBreaker) allow(tool string) (bool, string) {
 		tool, s.openUntil.Format("15:04"), fails, len(s.out), brief(s.last, 160))
 }
 
-// record notes one finished call and reports whether it tripped the breaker.
+// infraFailure tells a tool that is broken (down, timing out, refusing connections, rate-limited, erroring on its side) from a call
+// that was simply wrong (a missing file, a 404, bad arguments): the second kind says something about the request, not the tool.
+var infraFailure = regexp.MustCompile(`(?i)(timeout|timed out|deadline exceeded|connection (refused|reset)|no such host|unreachable|broken pipe|EOF|\b5\d\d\b|rate.?limit|too many requests|\b429\b|unavailable|temporarily|overloaded|not running|crashed|panic)`)
+
+// record notes one finished call and reports whether it tripped the breaker. A failure that looks like the request's own fault is
+// ignored, so five bad file paths or dead links cannot switch a healthy tool off for everyone.
 func (b *toolBreaker) record(tool string, ok bool, msg string) (tripped bool, until time.Time) {
-	if breakerExempt[tool] {
+	if breakerExempt[tool] || (!ok && !infraFailure.MatchString(msg)) {
 		return false, until
 	}
 	b.mu.Lock()

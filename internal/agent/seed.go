@@ -63,7 +63,9 @@ Report the created agent's name and one-line purpose.`,
 
 For the agent you are asked to review: read its profile (agent_read), its performance (agent_performance) and the facts stored in its profile bank and the user bank (memory_list / memory_find). Look for repeated failures, recurring user corrections, stable user preferences and lessons that belong in the agent's standing instructions.
 
-If — and only if — there is clear evidence, propose a revised soul with evolve_propose: keep the agent's identity and structure, change the minimum necessary, fold in lessons as crisp rules, remove obsolete or contradicted instructions, never grow the soul by more than ~15%. State the evidence in the rationale. If nothing warrants a change, say so and propose nothing.`,
+If — and only if — there is clear evidence, propose a revised soul with evolve_propose: keep the agent's identity and structure, change the minimum necessary, fold in lessons as crisp rules, remove obsolete or contradicted instructions, never grow the soul by more than ~15%. State the evidence in the rationale. If nothing warrants a change, say so and propose nothing.
+
+Know what your proposal does. The user sets how far changes may go without asking: on "safe" yours waits for them; on "guarded" a small one (a trait change, a soul edit touching a third or less, tools removed or read-only ones added) is applied at once; on "armed" every one is. Applied ones are watched, and rolled back if the agent's results drop. So propose only what the evidence supports, and keep changes small. Evidence worth reading besides facts: the thumbs-down ratings and unmet acceptance checks in agent_performance, and lessons recorded after stalls and complaints. A job that fails because its prompt is wrong is a scheduled-job problem, not a soul problem — leave it to the weekly job review.`,
 		},
 		{
 			Name: "Mnemosyne", Icon: "database", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 20, Enabled: true,
@@ -175,8 +177,8 @@ var toolCompanions = map[string][]string{"cron_create": {"cron_update", "cron_fi
 // seedToolsKey records, per built-in agent, which seed tools were already offered to it.
 const seedToolsKey = "seed_tools"
 
-// Seed inserts missing well-known agents. For one that already exists it never rewrites what the user edited, with a
-// single exception: a tool the seed gained since the last time (a release added memory_share, say) is ADDED to its
+// Seed inserts missing well-known agents. For one that already exists it never rewrites what the user edited — except that a
+// soul still at its seeded version follows the seed — and, with a single exception for tools: a tool the seed gained since the last time (a release added memory_share, say) is ADDED to its
 // toolset — agents cannot load tools at run time, so without this an upgraded database would leave the new tool
 // unreachable. It only adds: a tool the user took away afterwards stays away, and nothing is ever removed.
 func (s *ProfileStore) Seed(ctx context.Context) error {
@@ -193,6 +195,17 @@ func (s *ProfileStore) Seed(ctx context.Context) error {
 			}
 			offered[p.Name] = append([]string{}, p.Tools...)
 			continue
+		}
+		// a soul nobody ever touched (its latest version is still the seeded one) follows the seed, so an upgrade's new instructions
+		// reach existing installs instead of only fresh ones; once anyone edited or evolved it, it is theirs and stays as it is
+		var lastReason string
+		if s.db.QueryRow(ctx, `SELECT reason FROM soul_history WHERE profile_id=$1 ORDER BY version DESC LIMIT 1`, cur.ID).Scan(&lastReason) == nil &&
+			strings.HasPrefix(lastReason, "seeded") && strings.TrimSpace(cur.Soul) != strings.TrimSpace(p.Soul) {
+			c := *cur
+			c.Soul = p.Soul
+			if saved, err := s.Save(ctx, c, "seeded: soul refreshed"); err == nil {
+				cur = saved
+			}
 		}
 		var add []string
 		for _, t := range p.Tools {

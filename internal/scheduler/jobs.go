@@ -247,7 +247,15 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 
 // jobEvidence gathers what bears on a job's prompt and whether there is reason to look at it at all.
 func (s *Service) jobEvidence(ctx context.Context, j jobRow) (string, bool) {
-	rows, err := s.DB.Query(ctx, `SELECT status, left(COALESCE(NULLIF(error,''), result), 140), created_at FROM tasks WHERE from_kind='cron' AND from_name=$1 ORDER BY id DESC LIMIT 8`, j.Name)
+	// only runs since the job was last changed count: failures of a prompt that has since been rewritten are not evidence against the new one
+	var same int
+	_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM crons WHERE lower(name)=lower($1)`, j.Name).Scan(&same)
+	if same > 1 {
+		return "", false // runs are told apart by job name; with two jobs of one name they cannot be attributed
+	}
+	var since time.Time
+	_ = s.DB.QueryRow(ctx, `SELECT COALESCE(max(at), 'epoch') FROM cron_history WHERE cron_id=$1`, j.ID).Scan(&since)
+	rows, err := s.DB.Query(ctx, `SELECT status, left(COALESCE(NULLIF(error,''), result), 140), created_at FROM tasks WHERE from_kind='cron' AND from_name=$1 AND created_at > $2 ORDER BY id DESC LIMIT 8`, j.Name, since)
 	if err != nil {
 		return "", false
 	}
@@ -409,8 +417,6 @@ func (s *Service) maybeReviewJobs(ctx context.Context) {
 	if s.Engine == nil || s.Engine.LLMDown() {
 		return
 	}
-	var last time.Time
-	_ = s.DB.QueryRow(ctx, `SELECT COALESCE(max(created_at), 'epoch') FROM job_proposals`).Scan(&last)
 	var lastRun time.Time
 	if ok, _ := s.Settings.Get(ctx, "jobs_review_at", &lastRun); ok && time.Since(lastRun) < 7*24*time.Hour {
 		return

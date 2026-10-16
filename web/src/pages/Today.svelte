@@ -1,4 +1,6 @@
 <script>
+  // a clickable row is also reachable and operable from the keyboard (not when the key was meant for a button inside it)
+  const rowKey = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } };
   import { masonry } from '../lib/masonry.js';
   import { S, call, listen, go, ago, until, openProposal, openRef, toast } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
@@ -74,7 +76,8 @@
 
   <div class="body scroll">
 {#snippet attn(it)}
-      <li class="row click" onclick={() => openRef(it.ref)}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+      <li class="row click" role="button" tabindex="0" onkeydown={rowKey} onclick={() => openRef(it.ref)}>
         <span class="ic attn"><Icon name={kindIcon[it.kind] || 'warn'} size={13} /></span>
         <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.sub}</span>{/if}</div>
         {#if it.kind === 'promise'}
@@ -97,7 +100,8 @@
     {/snippet}
     {#snippet working(w)}
       {@const compactions = runByTask[w.task_id]?.compactions}
-      <li class="row click" onclick={() => { go('tasks'); S.selectedTask = w.task_id; }}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+      <li class="row click" role="button" tabindex="0" onkeydown={rowKey} onclick={() => { go('tasks'); S.selectedTask = w.task_id; }}>
         <span class="ic ok"><Glyph name={w.agent} size={14} /></span>
         <div class="txt"><span class="hi">{w.title || 'working…'}</span><span class="sub">{w.agent}</span></div>
         {#if w.idle_s > 300}<span class="quiet" title="no model call, tool call or output for a while — it may be stuck">quiet {Math.round(w.idle_s / 60)}m</span>{/if}
@@ -113,21 +117,24 @@
       {/if}
     {/snippet}
     {#snippet produced(it)}
-      <li class="row click" onclick={() => openRef(it.ref)}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+      <li class="row click" role="button" tabindex="0" onkeydown={rowKey} onclick={() => openRef(it.ref)}>
         <span class="ic"><Icon name={kindIcon[it.kind] || 'check'} size={13} /></span>
         <div class="txt"><span class="hi">{it.title}</span>{#if it.sub}<span class="sub">{it.origin === 'request' ? '↳ ' : ''}{it.sub}</span>{/if}</div>
         <span class="when mute sm">{ago(it.at)}</span>
       </li>
     {/snippet}
     {#snippet coming(c)}
-      <li class="row click" onclick={() => { S.autonomyTab = c.kind === 'cron' ? 'cron' : 'intents'; go('autonomy'); }}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+      <li class="row click" role="button" tabindex="0" onkeydown={rowKey} onclick={() => { S.autonomyTab = c.kind === 'cron' ? 'cron' : 'intents'; go('autonomy'); }}>
         <span class="ic"><Icon name={c.kind === 'cron' ? 'compact' : 'auto'} size={13} /></span>
         <div class="txt"><span class="hi">{c.title}</span></div>
         <span class="when mute sm">{until(c.due)}</span>
       </li>
     {/snippet}
     {#snippet project(p)}
-      <li class="row click" onclick={() => openProject(p)}>
+      <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+      <li class="row click" role="button" tabindex="0" onkeydown={rowKey} onclick={() => openProject(p)}>
         <span class="ic"><Icon name="folder" size={13} /></span>
         <div class="txt"><span class="hi">{p.bank}</span><span class="sub">{p.facts} fact{p.facts === 1 ? '' : 's'}</span></div>
         <span class="when mute sm">idle {p.idle_days}d</span>

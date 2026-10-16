@@ -95,6 +95,28 @@ type watchPrev struct {
 	Soul   string   `json:"soul"`
 	Tools  []string `json:"tools"`
 	Traits []string `json:"traits"`
+	// After is the field as the change left it (soul text, or the tools / traits joined); a rollback only goes ahead while the
+	// profile still has it, so a later edit by the user or another change is never silently overwritten.
+	After string `json:"after,omitempty"`
+}
+
+func watchField(p *Profile, kind string) string {
+	switch kind {
+	case KindTools:
+		return strings.Join(p.Tools, "\n")
+	case KindTraits:
+		return strings.Join(p.Traits, "\n")
+	}
+	return strings.TrimSpace(p.Soul)
+}
+
+// noteApplied records what the change left in place, once it has been applied.
+func (e *Engine) noteApplied(ctx context.Context, proposalID int64, profileID int64, kind string) {
+	p, err := e.Profiles.GetID(ctx, profileID)
+	if err != nil {
+		return
+	}
+	_, _ = e.DB.Exec(ctx, `UPDATE evolution_watch SET prev = jsonb_set(prev, '{after}', to_jsonb($2::text)) WHERE proposal_id=$1`, proposalID, watchField(p, kind))
 }
 
 // startWatch records what an automatic change replaced and how the agent was doing, so the change can be judged and undone.
@@ -119,6 +141,9 @@ func (e *Engine) rollbackEvolution(ctx context.Context, proposalID int64, status
 	p, err := e.Profiles.GetID(ctx, pid)
 	if err != nil {
 		return err
+	}
+	if prev.After != "" && watchField(p, kind) != prev.After {
+		return fmt.Errorf("%s was changed again after this change, so restoring the old version would undo that too — edit it by hand instead", p.Name)
 	}
 	switch kind {
 	case KindTools:
@@ -189,6 +214,9 @@ func (e *Engine) checkEvolutionWatches(ctx context.Context) {
 		if err := e.rollbackEvolution(ctx, x.id, "rolled_back", why); err == nil {
 			e.Notify(ctx, Notice{Level: "attention", Text: fmt.Sprintf("I rolled back the automatic change to %s (evolution #%d): %s. Its previous version is back.", x.agent, x.id, why)})
 			e.Emit("evolution.rolledback", map[string]any{"id": x.id, "agent": x.agent})
+		} else {
+			_, _ = e.DB.Exec(ctx, `UPDATE evolution_watch SET status='kept', note=$2, decided_at=now() WHERE proposal_id=$1`, x.id, "results dropped ("+why+") but not rolled back: "+err.Error())
+			e.Notify(ctx, Notice{Level: "attention", Text: fmt.Sprintf("Results of %s dropped after the automatic change #%d (%s), but I did not roll it back: %s.", x.agent, x.id, why, err.Error())})
 		}
 	}
 }

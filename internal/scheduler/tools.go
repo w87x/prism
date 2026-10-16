@@ -156,6 +156,9 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if cs, cerr := s.Crons(ctx); cerr == nil {
 					norm := func(x string) string { return strings.ToLower(strings.Join(strings.Fields(x), " ")) }
 					for _, c := range cs {
+						if strings.EqualFold(strings.TrimSpace(c.Name), strings.TrimSpace(a.Name)) {
+							return "", fmt.Errorf("a job named %q already exists (#%d). Runs are told apart by name, so pick a different name — or change that job with cron_update", c.Name, c.ID)
+						}
 						if !c.System && strings.EqualFold(c.Agent, a.Agent) && norm(c.Prompt) == norm(a.Prompt) {
 							return "", fmt.Errorf("cron #%d (%q) already does exactly this. Change it with cron_update instead of creating a second one", c.ID, c.Name)
 						}

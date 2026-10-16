@@ -102,4 +102,22 @@ func TestAutonomyDialDecidesWhatEvolutionMayChangeAlone(t *testing.T) {
 		t.Fatal("the user's undo restores the previous soul")
 	}
 	_ = time.Now
+
+	// a change made after the automatic one is never silently undone along with it
+	if out := propose("Scout", map[string]any{"kind": "soul", "soul": big + "\nOne more rule."}); !strings.Contains(out, "applied automatically") {
+		t.Fatalf("armed: %q", out)
+	}
+	_ = h.e.DB.QueryRow(ctx, `SELECT proposal_id FROM evolution_watch WHERE agent='Scout' AND status='watching' ORDER BY proposal_id DESC LIMIT 1`).Scan(&aid)
+	p, _ = h.e.Profiles.Get(ctx, "Scout")
+	c := *p
+	c.Soul = c.Soul + "\nThe user added this line."
+	if _, err := h.e.Profiles.Save(ctx, c, "edited"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.UndoEvolution(ctx, aid); err == nil || !strings.Contains(err.Error(), "changed again") {
+		t.Fatalf("undo refuses when the soul was edited since: %v", err)
+	}
+	if p, _ = h.e.Profiles.Get(ctx, "Scout"); !strings.Contains(p.Soul, "The user added this line.") {
+		t.Fatal("the later edit survives")
+	}
 }

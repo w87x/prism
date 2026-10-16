@@ -20,12 +20,17 @@ import (
 func TestPainReflexCutsOffAFailingToolAndLetsOthersAlone(t *testing.T) {
 	var b toolBreaker
 	for i := 0; i < 4; i++ {
-		if tripped, _ := b.record("synology_fs_upload", false, "bad base64"); tripped {
+		if tripped, _ := b.record("synology_fs_upload", false, "dial tcp: connection refused"); tripped {
 			t.Fatalf("not yet at %d failures", i+1)
 		}
 	}
-	if tripped, _ := b.record("synology_fs_upload", false, "bad base64"); !tripped {
+	if tripped, _ := b.record("synology_fs_upload", false, "dial tcp: connection refused"); !tripped {
 		t.Fatal("five failures in a row trip it")
+	}
+	for i := 0; i < 10; i++ { // a call that was simply wrong says nothing about the tool
+		if tripped, _ := b.record("file_read", false, "open /x/y: no such file or directory"); tripped {
+			t.Fatal("bad paths and bad arguments must not switch a healthy tool off for everyone")
+		}
 	}
 	if ok, msg := b.allow("synology_fs_upload"); ok || !strings.Contains(msg, "paused") {
 		t.Fatalf("a tripped tool is refused with an explanation: %v %q", ok, msg)

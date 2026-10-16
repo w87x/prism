@@ -17,7 +17,9 @@ import (
 // untrusted content is in the turn (the prompt-injection case the prompt exists for), shell/exec tools, and tools that send,
 // delete, pay or publish.
 
-var neverAuto = regexp.MustCompile(`(?i)(send|delete|remove|wipe|format|pay|buy|purchase|transfer|publish|post|drop|kill|uninstall|install|sudo|push|force|reset|revoke|grant|upload)`)
+// neverAuto matches whole words of a snake_case tool name (email_send, gh_post_comment), not fragments of other words
+// (payload, format-free "information", compost): the filter is meant to be strict about what it covers, not noisy about the rest.
+var neverAuto = regexp.MustCompile(`(?i)(^|[_\-. ])(send|delete|remove|wipe|format|pay|buy|purchase|transfer|publish|post|drop|kill|uninstall|install|sudo|push|force|reset|revoke|grant|upload)(s|es|ed|ing)?($|[_\-. ])`)
 
 const reviewPrompt = `You are the second pair of eyes before an AI agent runs a tool that would normally ask its user for permission.
 Decide from the user's request and the call itself:

@@ -235,3 +235,64 @@ func TestStandupSummarisesTheWeek(t *testing.T) {
 		t.Fatal("standups are kept")
 	}
 }
+
+func TestSeedRefreshesAnUntouchedSoulButNeverAnEditedOne(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	want := ""
+	for _, p := range WellKnown() {
+		if p.Name == "Forge" {
+			want = p.Soul
+		}
+	}
+	if _, err := h.e.DB.Exec(ctx, `UPDATE agent_profiles SET soul='an older seeded soul' WHERE name='Forge'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Profiles.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := h.e.Profiles.Get(ctx, "Forge"); f == nil || f.Soul != want {
+		t.Fatal("a soul nobody edited follows the seed")
+	}
+	f, _ := h.e.Profiles.Get(ctx, "Forge")
+	c := *f
+	c.Soul = "the user's own Forge"
+	if _, err := h.e.Profiles.Save(ctx, c, "edited"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Profiles.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := h.e.Profiles.Get(ctx, "Forge"); f == nil || f.Soul != "the user's own Forge" {
+		t.Fatal("an edited soul is left alone")
+	}
+}
+
+func TestAgentPerformanceShowsRatingsAndLessons(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var id int64
+	if err := h.e.DB.QueryRow(ctx, `INSERT INTO tasks (from_kind, from_name, to_agent, title, input, status, depth, root_id) VALUES ('user','user','Scout','t','x','done',0,0) RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = h.e.DB.Exec(ctx, `INSERT INTO task_meta (task_id, rating, rating_note) VALUES ($1,-1,'quoted the wrong shop')`, id)
+	_ = h.e.AddAntibody(ctx, "Scout", []string{"shop"}, "Check the shop name against the listing.", "complaint")
+	tool, _ := h.e.Tools.Get("agent_performance")
+	out, err := tool.Run(ctx, &tools.Env{Agent: "Metis"}, []byte(`{"agent":"Scout"}`))
+	if err != nil || !strings.Contains(out, "1 thumbs down") || !strings.Contains(out, "wrong shop") || !strings.Contains(out, "Check the shop name") {
+		t.Fatalf("ratings, their notes and lessons are shown to Metis: %v %q", err, out)
+	}
+}
+
+func TestReviewerNeverAutoMatchesWholeWords(t *testing.T) {
+	for _, n := range []string{"email_send", "gh_post_comment", "files_delete", "synology_fs_upload", "package_install", "sends"} {
+		if !neverAuto.MatchString(n) {
+			t.Errorf("%s must never be auto-approved", n)
+		}
+	}
+	for _, n := range []string{"payload_inspect", "information_lookup", "compost_log", "reformatter", "web_fetch", "file_read"} {
+		if neverAuto.MatchString(n) {
+			t.Errorf("%s only contains a fragment of a listed word", n)
+		}
+	}
+}

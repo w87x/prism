@@ -78,7 +78,7 @@ Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (create
 
 | Concept | Where |
 |---|---|
-| Atlas, well-known staff (Forge hires, Metis evolves, Mnemosyne curates memory, Sherpa picks tools, Oneiros dreams) | `internal/agent/seed.go` |
+| Atlas, well-known staff (Forge hires, Metis evolves, Mnemosyne curates memory, Oneiros dreams, Daedalus writes skills from finished tasks, Sentinel watches things) and the Coder / Reviewer specialists | `internal/agent/seed.go` |
 | Agent runner: iteration budget **and** loop detection, steering with synthetic skipped results, concurrent-safe tool fan-out, taint tracking, tiered compaction (80 % → 20 %) | `internal/agent/runner.go`, `compact.go` |
 | Delegation (depth ≤ 2), multi-turn tasks, queue with from/to/status, restart-safe dispatcher | `internal/agent/orchestrator.go`, `internal/tasks` |
 | Memory banks (user / profile / project / domain / raw), ranked + decaying facts, supersession history, raw → facts pipeline | `internal/memory` |
@@ -88,6 +88,8 @@ Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (create
 | Browser automation (chromedp, persistent profile or attach to a running Chrome) | `internal/browser` |
 | MCP client (stdio + streamable HTTP), tools appear deferred | `internal/mcp` |
 | Autonomy: cron, standing intents, watches (files, processes, downloads, pages, feeds), dreams → briefings, soul-evolution proposals | `internal/scheduler`, `internal/cron` |
+| Team practices: acceptance criteria (`done_when`) checked by the lead, runbooks that let routine jobs run on the small model, four-eyes tool reviewer with earned trust, sampled audits, decision log, weekly standup with 👍/👎 ratings, incident mode when the model host is down, pain reflex (a failing tool is paused for everyone), ant trails, immune lessons, scouting, handover notes, team charter | `internal/agent/{acceptance,runbooks,review,standup,nature,relations,incident}.go` |
+| Autonomy dial: evolution and scheduled jobs are each **safe / guarded / armed**; automatic changes are watched and rolled back when results drop; weekly job review merges near-duplicate jobs and rewrites failing ones, with history and undo | `internal/agent/evolve.go`, `internal/scheduler/jobs.go` |
 | Telegram (DM + forum topics with context), macOS (notifications, Reminders, …), Obsidian (iCloud vaults), semantic search | `internal/integrations/*`, `internal/docsearch` |
 
 ### Safety model
@@ -103,7 +105,7 @@ Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (create
   never carries over once a turn is tainted. Secrets (`~/.ssh`, keychains, browser profiles…) are unreadable however the
   path is spelled (case variants, symlinks).
 * The WebSocket checks Host (DNS rebinding) and Origin (cross-site hijacking).
-* Souls only change through reviewable **proposals** (or auto-apply if you switch it on); every version is kept.
+* Souls only change through reviewable **proposals**; whether small or all of them apply by themselves is the evolution dial (safe / guarded / armed, default safe). Applied changes are watched and rolled back if results drop; every version is kept.
 
 
 ## Support

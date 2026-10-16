@@ -1036,6 +1036,7 @@ func (e *Engine) toolEvolvePropose() *tools.Tool {
 					_, _ = e.DB.Exec(ctx, `DELETE FROM evolution_watch WHERE proposal_id=$1`, id)
 					return "", err
 				}
+				e.noteApplied(ctx, id, p.ID, kind)
 				ev["applied"] = true
 				e.Emit("evolution.proposal", ev)
 				return fmt.Sprintf("Proposal #%d (%s) was applied automatically (%s). It is watched: if %s's results get clearly worse it is rolled back, and the previous version is kept.", id, kind, why, p.Name), nil
@@ -1065,7 +1066,7 @@ func sameSet(a, b []string) bool {
 func (e *Engine) toolAgentPerformance() *tools.Tool {
 	return &tools.Tool{
 		Name: "agent_performance", Category: "evolution", Risk: tools.RiskRead,
-		Description: "Task statistics and recent failures for an agent over the last 30 days (input for evolution decisions).",
+		Description: "Task statistics, recent failures, the user's thumbs up/down (with their notes), unmet acceptance checks and recorded lessons for an agent over the last 30 days (input for evolution decisions).",
 		Params:      tools.Obj("agent", tools.Str("agent", "agent name")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct{ Agent string }](raw)
@@ -1087,6 +1088,27 @@ func (e *Engine) toolAgentPerformance() *tools.Tool {
 					var in, er string
 					_ = rows.Scan(&id, &in, &er)
 					fmt.Fprintf(&sb, "failed #%d: %s → %s\n", id, in, er)
+				}
+			}
+			var up, down, unmet int
+			_ = e.DB.QueryRow(ctx, `SELECT count(*) FILTER (WHERE m.rating>0), count(*) FILTER (WHERE m.rating<0), count(*) FILTER (WHERE m.criteria_met IS FALSE)
+				FROM tasks t JOIN task_meta m ON m.task_id=t.id WHERE lower(t.to_agent)=lower($1) AND t.created_at > now()-interval '30 days'`, a.Agent).Scan(&up, &down, &unmet)
+			fmt.Fprintf(&sb, "user ratings: %d thumbs up, %d thumbs down; reports that missed their acceptance criteria: %d\n", up, down, unmet)
+			if rs, err := e.DB.Query(ctx, `SELECT t.id, left(m.rating_note,160) FROM tasks t JOIN task_meta m ON m.task_id=t.id WHERE lower(t.to_agent)=lower($1) AND m.rating<0 ORDER BY t.id DESC LIMIT 5`, a.Agent); err == nil {
+				for rs.Next() {
+					var id int64
+					var note string
+					if rs.Scan(&id, &note) == nil {
+						fmt.Fprintf(&sb, "thumbs down #%d: %s\n", id, orNone(note))
+					}
+				}
+				rs.Close()
+			}
+			if abs, err := e.Antibodies(ctx); err == nil {
+				for _, ab := range abs {
+					if strings.EqualFold(ab.Agent, a.Agent) {
+						fmt.Fprintf(&sb, "lesson on record (%s): %s\n", ab.Source, ab.Rule)
+					}
 				}
 			}
 			return sb.String(), nil

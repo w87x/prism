@@ -13,6 +13,10 @@
   // the hover card: where the row is, so the card sits beside it (fixed, so the scrolling list does not clip it)
   let tip = $state(null);
   function showTip(c, e) { const r = e.currentTarget.getBoundingClientRect(); tip = { c, x: Math.min(r.right + 6, window.innerWidth - 270), y: Math.max(6, Math.min(r.top, window.innerHeight - 150)) }; }
+  // touch has no hover: a long press shows the card (and swallows the tap that ends it); the row actions are always visible (see the css)
+  let pressTimer, longPressed = false;
+  function pressStart(c, e) { if (e.pointerType !== 'touch') return; longPressed = false; const el = e.currentTarget; pressTimer = setTimeout(() => { longPressed = true; showTip(c, { currentTarget: el }); }, 450); }
+  function pressEnd() { clearTimeout(pressTimer); }
   let archived = $state([]);
   $effect(() => { if (showArchived) call('chats.list', { archived: true }, { quiet: true }).then((r) => (archived = (r || []).filter((c) => c.archived))); });
   const label = (c) => c.title || (c.topic ? 'New chat' : 'Main');
@@ -40,7 +44,8 @@
   <div class="list scroll" onscroll={() => (tip = null)}>
     {#each rows as c (c.id)}
       <div class="ci" class:on={!showArchived && !selecting && c.topic === S.chatTopic} class:busy={!!S.chatBusy[c.topic]} class:hasnew={chatHasNew(c)} role="button" tabindex="0"
-        onclick={() => (showArchived ? restore(c) : open(c))} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (showArchived ? restore(c) : open(c))}
+        onclick={() => { if (longPressed) { longPressed = false; return; } tip = null; showArchived ? restore(c) : open(c); }}
+        onpointerdown={(e) => pressStart(c, e)} onpointerup={pressEnd} onpointercancel={pressEnd} onpointermove={pressEnd} oncontextmenu={(e) => { if (e.pointerType === 'touch' || longPressed) e.preventDefault(); }} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (showArchived ? restore(c) : open(c))}
         onmouseenter={(e) => showTip(c, e)} onmouseleave={() => (tip = null)} onfocus={(e) => showTip(c, e)} onblur={() => (tip = null)}>
         {#if selecting}<input type="checkbox" checked={!!ticked[c.id]} onclick={(e) => e.stopPropagation()} onchange={(e) => (ticked[c.id] = e.currentTarget.checked)} aria-label="select {label(c)}" />{/if}
         <i class="led"></i>
@@ -88,6 +93,7 @@
   .t.new { color: var(--fg-hi); font-weight: 700; }
   .acts { display: none; gap: 3px; flex: none; }
   .ci:hover .acts { display: inline-flex; }
+  @media (hover: none) { .acts { display: inline-flex; } .ci { height: 34px; } }
   .ci input[type='checkbox'] { margin: 0 0 0 2px; }
   .tip { position: fixed; z-index: 60; width: 256px; pointer-events: none; background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); padding: 7px 9px; display: flex; flex-direction: column; gap: 4px; }
   .tt { color: var(--fg-hi); font-weight: 700; overflow-wrap: anywhere; }

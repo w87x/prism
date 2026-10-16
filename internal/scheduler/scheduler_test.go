@@ -366,6 +366,9 @@ func TestCronUpdateFinishAndDuplicateGuard(t *testing.T) {
 	if _, err := run("Atlas", "cron_create", map[string]any{"name": "avito x again", "expr": "@daily", "prompt": "check  avito price for x.", "agent": "Atlas"}); err == nil || !strings.Contains(err.Error(), "cron_update") {
 		t.Fatalf("an identical job must be refused with a pointer to cron_update: %v", err)
 	}
+	if _, err := run("Atlas", "cron_create", map[string]any{"name": "Avito X", "expr": "@daily", "prompt": "A different prompt entirely.", "agent": "Atlas"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("a second job with an existing name is refused (runs are attributed by name): %v", err)
+	}
 	cs, _ := s.Crons(ctx)
 	var id int64
 	for _, c := range cs {
