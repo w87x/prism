@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"prism/internal/llm"
+	"prism/internal/textutil"
 )
 
 const (
@@ -191,7 +192,7 @@ func foldDelegations(ms []Msg, out []llm.Message) {
 				parts = append(parts, strings.TrimSpace(sec))
 				continue
 			}
-			line := brief(body, delegationKeepChars)
+			line := textutil.Brief(body, delegationKeepChars)
 			parts = append(parts, fmt.Sprintf("%s\n%s (older result shortened — full text: task_status(%s))", head, line, mm[1]))
 		}
 		if len(parts) > 0 {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"prism/internal/llm"
+	"prism/internal/textutil"
 )
 
 // Predicate is the check part of an intent/watch: {kind, …params, state}.
@@ -277,7 +278,7 @@ func (p *Predicate) Eval(ctx context.Context, env Env) (Result, error) {
 		var fresh []FeedItem
 		var ids []any
 		for _, it := range items {
-			id := firstNonEmpty(it.ID, it.Link, it.Title)
+			id := textutil.FirstNonEmpty(it.ID, it.Link, it.Title)
 			ids = append(ids, id)
 			if !seen[id] && (p.Contains == "" || strings.Contains(strings.ToLower(it.Title), strings.ToLower(p.Contains))) {
 				fresh = append(fresh, it)
@@ -548,15 +549,6 @@ func processRunning(ctx context.Context, pid int, pattern string) (bool, error) 
 	return false, nil
 }
 
-func firstNonEmpty(a ...string) string {
-	for _, x := range a {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
-}
-
 // jsonField reads a dot path out of JSON text: keys, array indexes, and * for every array element (values are joined
 // with ", "). ok=false when the text is not JSON or the path is absent.
 func jsonField(text, path string) (string, bool) {
@@ -617,7 +609,7 @@ func jsonFieldValues(text, path string) ([]any, bool) {
 
 // itemKey gives a JSON value from a tool's output a stable identity, so repeated checks can tell whether it is one
 // already seen: an object's own id-like field when it has one, a plain string as itself, and a hash of the whole
-// value as a last resort (mirrors the rss predicate's firstNonEmpty(ID, Link, Title)).
+// value as a last resort (mirrors the rss predicate's textutil.FirstNonEmpty(ID, Link, Title)).
 func itemKey(v any) string {
 	if m, ok := v.(map[string]any); ok {
 		for _, k := range []string{"id", "ID", "Id", "uid", "uuid", "guid", "message_id", "messageId", "key"} {

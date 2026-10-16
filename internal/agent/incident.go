@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"prism/internal/textutil"
 )
 
 // Incident mode. While no model can be reached (see llm.Health) background work is paused instead of failing over and over:
@@ -37,7 +39,7 @@ func (e *Engine) StartIncidentWatch(ctx context.Context) {
 			_, _ = e.DB.Exec(bg, `INSERT INTO incidents (reason) VALUES ($1)`, reason)
 			var queued int
 			_ = e.DB.QueryRow(bg, `SELECT count(*) FROM tasks WHERE status='queued'`).Scan(&queued)
-			e.Notify(bg, Notice{Level: "attention", Text: fmt.Sprintf("No model is reachable (%s). I paused background work — scheduled jobs are skipped and %d queued tasks wait — and will carry on by myself as soon as a model answers again. If this is LM Studio: load a model.", brief(reason, 160), queued)})
+			e.Notify(bg, Notice{Level: "attention", Text: fmt.Sprintf("No model is reachable (%s). I paused background work — scheduled jobs are skipped and %d queued tasks wait — and will carry on by myself as soon as a model answers again. If this is LM Studio: load a model.", textutil.Brief(reason, 160), queued)})
 			return
 		}
 		var skipped int

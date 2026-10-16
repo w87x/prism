@@ -1,7 +1,7 @@
 <script>
   // Right rail for every page that has no dedicated widget: what the agents are doing right now, what needs
   // you, and what is coming up — so the column earns its space instead of only repeating system counters.
-  import { S, call, listen, go, activeRuns, fmtTokens, lastLine, ago, until, openProposal, openRef } from '../lib/store.svelte.js';
+  import { S, call, listen, go, activeRuns, fmtTokens, lastLine, ago, until, openProposal, openRef, kindIcon } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
   import Led from '../lib/ui/Led.svelte';
@@ -24,7 +24,6 @@
     return () => { off.forEach((f) => f()); clearInterval(i); };
   });
 
-  const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools' };
   function open(it) { openRef(it.ref || 'today'); }
   const attn = $derived((d?.needs_attention || []).slice(0, 6));
   const soon = $derived((d?.commitments || []).slice(0, 4));

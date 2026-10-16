@@ -132,7 +132,7 @@
     {:else}<Empty>Nothing has been applied automatically yet. With the evolution dial on safe, that is expected.</Empty>{/each}
 
   {:else if view === 'jobs'}
-    <div class="sm mute" style="margin:8px 0">Agents create scheduled jobs one at a time, and nobody reads them together: “check price X”, “…Y”, “…Z” run as three jobs; a job whose approach keeps failing runs unchanged although memory knows what works. The weekly review proposes merging near-duplicates and rewriting a failing job from the evidence of its runs, its lessons and what memory knows. What happens to a proposal follows the jobs dial in Autonomy.</div>
+    <div class="sm mute" style="margin:8px 0">Agents create scheduled jobs one at a time, and nobody reads them together: “check price X”, “…Y”, “…Z” run as three jobs; a job whose approach keeps failing runs unchanged although memory knows what works. The weekly review proposes merging near-duplicates (or, when each item has values worth keeping, turning them into one tracker with a row per item) and rewriting a failing job from the evidence of its runs, its lessons and what memory knows. What happens to a proposal follows the jobs dial in Autonomy.</div>
     <div class="row wrap gap-8" style="margin-bottom:8px"><span class="grow"></span><Button variant="primary" loading={reviewing} onclick={reviewJobs}>Review jobs now</Button></div>
     {#each jprops as p (p.id)}
       <div class="card">
@@ -141,6 +141,9 @@
           {#if p.status === 'applied'}<Button size="sm" variant="ghost" onclick={() => jUndo(p)}>Undo</Button>{/if}</div>
         <div class="sm mute">{(p.names || []).join(' · ')}</div>
         {#if p.rationale}<div class="sm">{p.rationale}</div>{/if}
+        {#if p.kind === 'tracker' && p.plan?.name}
+          <div class="sm"><b>Tracker “{p.plan.name}”</b> — columns: {(p.plan.columns || []).map((c) => c.name + (c.unit ? ' (' + c.unit + ')' : '')).join(', ')}; {(p.plan.items || []).length} rows to start with: {(p.plan.items || []).map((i) => i.key).join(', ')}.{#if p.new_agent} Refreshed by {p.new_agent}.{/if}{#if p.status === 'applied' || p.status === 'undone'} The tracker stays when the proposal is undone — delete it in Library if you do not want it.{/if}</div>
+        {/if}
         {#if p.old_prompt}<details class="fold"><summary>Before</summary><div class="pre">{p.old_prompt}</div></details>{/if}
         <details class="fold" open={p.status === 'pending'}><summary>After</summary><div class="pre">{p.new_prompt}</div>{#if p.new_expr}<div class="sm mute">schedule: {p.new_expr}</div>{/if}</details>
       </div>

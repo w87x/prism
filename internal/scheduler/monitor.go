@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/textutil"
 )
 
 // A monitor is a watch with a time budget: checked every minute or so, ended automatically when its budget
@@ -122,7 +123,7 @@ func (s *Service) SetAnnounce(ctx context.Context, id int64, on bool) error {
 func (s *Service) expire(ctx context.Context, i Intent) {
 	_, _ = s.DB.Exec(ctx, `UPDATE intents SET status='expired' WHERE id=$1 AND status='active'`, i.ID)
 	s.emit("intent.update", map[string]any{"id": i.ID})
-	msg := fmt.Sprintf("Monitor “%s” ended: its time budget ran out. Last progress: %s.", i.Description, firstNonEmpty(i.Progress, "none recorded"))
+	msg := fmt.Sprintf("Monitor “%s” ended: its time budget ran out. Last progress: %s.", i.Description, textutil.FirstNonEmpty(i.Progress, "none recorded"))
 	if s.Notify != nil {
 		s.Notify("intent", "attention", "Monitor ended", msg)
 	}

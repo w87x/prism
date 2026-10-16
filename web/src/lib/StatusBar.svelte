@@ -14,6 +14,11 @@
   // one, rather than a permanent list of them. Reads `now` so the "Xm ago" stays fresh across a hover.
   const connTitle = $derived.by(() => { now; return S.lastConn ? `Last connection: ${S.lastConn.addr} · ${ago(S.lastConn.at)} ago` : 'No remote connections seen this session'; });
 
+  // tools the pain reflex has paused (it lifts itself, so entries whose time has passed drop out here without a round trip)
+  const paused = $derived((S.paused || []).filter((t) => new Date(t.until) > now));
+  const fmtT = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const pausedTitle = $derived(paused.map((t) => `${t.tool} until ${fmtT(t.until)} — ${t.last || 'kept failing'}`).join('\n') + '\n\nClick to review or resume.');
+
   let now = $state(new Date());
   $effect(() => {
     const i = setInterval(() => (now = new Date()), 1000);
@@ -30,7 +35,9 @@
       </button>
     {/each}
   </div>
-  <div class="mid"></div>
+  <div class="mid">
+    {#if paused.length}<button class="pausedbtn" title={pausedTitle} onclick={() => { S.autonomyTab = 'team'; S.teamView = 'health'; go('autonomy'); }}><Led state="error" pulse size={7} /> {paused.length === 1 ? paused[0].tool + ' paused' : paused.length + ' tools paused'}</button>{/if}
+  </div>
   <div class="right">
     {#if st && !st.setup}
       {#if tasks.length}<button class="mute lk" title="tasks: waiting for a worker · being worked on · paused until you answer" onclick={() => go('tasks')}>{tasks.join(' · ')}</button>
@@ -57,6 +64,8 @@
   .wallbtn { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--fg-dim); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; }
   .wallbtn:hover { color: var(--fg-hi); }
   .warnc { color: var(--warn); }
+  .pausedbtn { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--err, var(--warn)); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; }
+  .pausedbtn:hover { color: var(--fg-hi); }
   .conn { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-dim); }
   @media (max-width: 820px) {
     .sb { padding: 0 8px env(safe-area-inset-bottom); min-height: 26px; gap: 8px; }

@@ -20,6 +20,7 @@ import (
 
 	"prism/internal/netguard"
 	"prism/internal/settings"
+	"prism/internal/textutil"
 )
 
 const defaultBase = "https://api.elevenlabs.io"
@@ -76,20 +77,11 @@ func (e *Error) Error() string {
 	case e.Status == 401:
 		return "ElevenLabs rejected the API key (check Settings → Integrations → ElevenLabs)"
 	case e.Status == 402 || e.Code == "paid_plan_required":
-		return "this needs a paid ElevenLabs plan: " + firstNonEmpty(e.Message, "the free plan does not include it")
+		return "this needs a paid ElevenLabs plan: " + textutil.FirstNonEmpty(e.Message, "the free plan does not include it")
 	case e.Status == 429:
 		return "ElevenLabs is rate-limiting this key (the free plan allows very few parallel requests): " + e.Message
 	}
-	return fmt.Sprintf("ElevenLabs error %d: %s", e.Status, firstNonEmpty(e.Message, e.Code))
-}
-
-func firstNonEmpty(a ...string) string {
-	for _, x := range a {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
+	return fmt.Sprintf("ElevenLabs error %d: %s", e.Status, textutil.FirstNonEmpty(e.Message, e.Code))
 }
 
 // apiError decodes the {"detail": {...}} / {"detail": "..."} / {"detail":[{msg}]} shapes the API uses.
@@ -110,7 +102,7 @@ func apiError(status int, body []byte) error {
 		}
 		switch {
 		case json.Unmarshal(d.Detail, &obj) == nil && (obj.Message != "" || obj.Status != ""):
-			e.Code, e.Message = firstNonEmpty(obj.Status, obj.Code), obj.Message
+			e.Code, e.Message = textutil.FirstNonEmpty(obj.Status, obj.Code), obj.Message
 		case json.Unmarshal(d.Detail, &str) == nil:
 			e.Message = str
 		case json.Unmarshal(d.Detail, &list) == nil && len(list) > 0:
@@ -353,7 +345,7 @@ func (s *Service) Speak(ctx context.Context, text, voice, by string) (*Media, er
 		return nil, err
 	}
 	audio, _, err := s.do(ctx, key, http.MethodPost, "/v1/text-to-speech/"+url.PathEscape(vid)+"?output_format=mp3_44100_128",
-		map[string]any{"text": text, "model_id": firstNonEmpty(cfg.ModelID, "eleven_flash_v2_5")}, nil)
+		map[string]any{"text": text, "model_id": textutil.FirstNonEmpty(cfg.ModelID, "eleven_flash_v2_5")}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +401,7 @@ func (s *Service) Image(ctx context.Context, prompt, model, aspect, resolution, 
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"model_id": firstNonEmpty(model, s.cfg(ctx).ImageModel, "gemini-2.5-flash-image"), "prompt": prompt}
+	body := map[string]any{"model_id": textutil.FirstNonEmpty(model, s.cfg(ctx).ImageModel, "gemini-2.5-flash-image"), "prompt": prompt}
 	if aspect != "" {
 		body["aspect_ratio"] = aspect
 	}
@@ -467,7 +459,7 @@ func (s *Service) Image(ctx context.Context, prompt, model, aspect, resolution, 
 			}
 			return &Media{ID: id, Name: name, MIME: mime, Bytes: len(img)}, nil
 		case "failed":
-			msg := firstNonEmpty(st.Error, st.Reason, "generation failed")
+			msg := textutil.FirstNonEmpty(st.Error, st.Reason, "generation failed")
 			if st.Reason == "moderated" {
 				msg = "the image was blocked by content moderation: " + msg
 			}

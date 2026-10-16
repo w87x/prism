@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 )
 
 // The person model. The user bank holds facts about the user, but facts are not a working relationship: how they like to be spoken
@@ -81,7 +82,7 @@ func (e *Engine) RefreshPersonModel(ctx context.Context) (string, error) {
 		var at time.Time
 		if rows.Scan(&t, &at) == nil {
 			if len(msgs) < 40 {
-				msgs = append(msgs, brief(strings.Join(strings.Fields(t), " "), 180))
+				msgs = append(msgs, textutil.Brief(strings.Join(strings.Fields(t), " "), 180))
 			}
 			when = append(when, at.In(loc))
 		}
@@ -122,7 +123,7 @@ func (e *Engine) RefreshPersonModel(ctx context.Context) (string, error) {
 					sb.WriteString("\nFACTS MEMORY HOLDS ABOUT THEM:\n")
 					first = false
 				}
-				sb.WriteString("- " + brief(t, 160) + "\n")
+				sb.WriteString("- " + textutil.Brief(t, 160) + "\n")
 			}
 		}
 		ff.Close()

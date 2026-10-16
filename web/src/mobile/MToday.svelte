@@ -1,6 +1,6 @@
 <script>
   // Phone layout of Today: one column of full-width cards, big tap targets, what needs you first.
-  import { S, call, listen, ago, until, openRef } from '../lib/store.svelte.js';
+  import { S, call, listen, ago, until, openRef, kindIcon } from '../lib/store.svelte.js';
   import Icon from '../lib/ui/Icon.svelte';
   import Glyph from '../lib/ui/Glyph.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -21,7 +21,6 @@
     return () => { a(); b(); c(); clearInterval(i); };
   });
 
-  const kindIcon = { partial: 'warn', failed: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
   let reviewId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 )
 
 // ImageResult is one picture found by an image search: where the image file is, what it is called, and the page it sits on.
@@ -98,7 +99,7 @@ func searchImagesTavily(ctx context.Context, c settings.Web, q string, limit int
 		case json.Unmarshal(raw, &s) == nil && s != "":
 			out = append(out, ImageResult{Image: s})
 		case json.Unmarshal(raw, &o) == nil && o.URL != "":
-			out = append(out, ImageResult{Image: o.URL, Title: clip(o.Description, 160)})
+			out = append(out, ImageResult{Image: o.URL, Title: textutil.Brief(o.Description, 160)})
 		}
 		if len(out) >= limit {
 			break
@@ -152,7 +153,7 @@ func searchImagesDDG(ctx context.Context, c settings.Web, q string, limit int) (
 		if x.Image == "" {
 			continue
 		}
-		out = append(out, ImageResult{Title: clip(x.Title, 160), Image: x.Image, Page: x.URL, W: x.Width, H: x.Height})
+		out = append(out, ImageResult{Title: textutil.Brief(x.Title, 160), Image: x.Image, Page: x.URL, W: x.Width, H: x.Height})
 		if len(out) >= limit {
 			break
 		}

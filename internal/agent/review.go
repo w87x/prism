@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -49,7 +50,7 @@ func (e *Engine) preReview(ctx context.Context, env *tools.Env, tool *tools.Tool
 	case TrustTrusted:
 		if tool.Risk != tools.RiskExec {
 			reason := fmt.Sprintf("trusted: %d good runs with it, %d bad", w, l)
-			_, _ = e.DB.Exec(ctx, `INSERT INTO review_log (agent, tool, args, verdict, reason, task_id) VALUES ($1,$2,$3,'approve',$4,NULLIF($5,0))`, env.Agent, tc, brief(args, 400), reason, env.TaskID)
+			_, _ = e.DB.Exec(ctx, `INSERT INTO review_log (agent, tool, args, verdict, reason, task_id) VALUES ($1,$2,$3,'approve',$4,NULLIF($5,0))`, env.Agent, tc, textutil.Brief(args, 400), reason, env.TaskID)
 			return "approve", reason
 		}
 	}
@@ -57,9 +58,9 @@ func (e *Engine) preReview(ctx context.Context, env *tools.Env, tool *tools.Tool
 		Verdict string `json:"verdict"`
 		Reason  string `json:"reason"`
 	}
-	in := "THE USER'S REQUEST (what the agent is working on):\n" + brief(request, 1500) +
-		"\n\nAGENT: " + env.Agent + "\nTOOL: " + tc + " [risk: " + tool.Risk.String() + "] — " + brief(tool.Description, 240) +
-		"\nARGUMENTS:\n" + brief(args, 900)
+	in := "THE USER'S REQUEST (what the agent is working on):\n" + textutil.Brief(request, 1500) +
+		"\n\nAGENT: " + env.Agent + "\nTOOL: " + tc + " [risk: " + tool.Risk.String() + "] — " + textutil.Brief(tool.Description, 240) +
+		"\nARGUMENTS:\n" + textutil.Brief(args, 900)
 	if err := e.LLM.CompleteJSON(ctx, e.LLM.ActionRef(ctx, "tool_review", "chat"), reviewPrompt, in, &v); err != nil {
 		return "ask", ""
 	}
@@ -74,7 +75,7 @@ func (e *Engine) preReview(ctx context.Context, env *tools.Env, tool *tools.Tool
 	default:
 		verdict = "ask"
 	}
-	_, _ = e.DB.Exec(ctx, `INSERT INTO review_log (agent, tool, args, verdict, reason, task_id) VALUES ($1,$2,$3,$4,$5,NULLIF($6,0))`, env.Agent, tc, brief(args, 400), verdict, reason, env.TaskID)
+	_, _ = e.DB.Exec(ctx, `INSERT INTO review_log (agent, tool, args, verdict, reason, task_id) VALUES ($1,$2,$3,$4,$5,NULLIF($6,0))`, env.Agent, tc, textutil.Brief(args, 400), verdict, reason, env.TaskID)
 	return verdict, reason
 }
 

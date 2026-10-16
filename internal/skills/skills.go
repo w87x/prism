@@ -18,6 +18,7 @@ import (
 
 	"prism/internal/agent"
 	"prism/internal/textmatch"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -156,20 +157,12 @@ func (s *Store) Summaries(ctx context.Context, names []string) []agent.SkillSumm
 		if len(want) > 0 && !want[strings.ToLower(k.Name)] {
 			continue
 		}
-		out = append(out, agent.SkillSummary{Name: k.Name, Description: clip(k.Description, 140)})
+		out = append(out, agent.SkillSummary{Name: k.Name, Description: textutil.Brief(k.Description, 140)})
 		if len(want) == 0 && len(out) >= 12 {
 			break
 		}
 	}
 	return out
-}
-
-func clip(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 func listFiles(dir string) []string {
@@ -263,7 +256,7 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 				}
 				var sb strings.Builder
 				for _, h := range hits {
-					fmt.Fprintf(&sb, "- %s: %s\n", cand[h.Index].Name, clip(cand[h.Index].Description, 160))
+					fmt.Fprintf(&sb, "- %s: %s\n", cand[h.Index].Name, textutil.Brief(cand[h.Index].Description, 160))
 				}
 				return sb.String(), nil
 			},

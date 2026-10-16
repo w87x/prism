@@ -7,6 +7,7 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // Today is the everyday hub: what needs attention, what's in progress, what just got produced, what's
@@ -95,19 +96,19 @@ func (a *App) GetToday(ctx context.Context) Today {
 			if w.AcknowledgedAt != nil || w.Depth != 0 || w.FromKind != "user" || w.FinishedAt == nil || time.Since(*w.FinishedAt) > 72*time.Hour {
 				continue
 			}
-			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "failed", Title: w.Title, Sub: "failed: " + trim(w.Error, 120), Ref: fmt.Sprintf("task:%d", w.ID), At: *w.FinishedAt})
+			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "failed", Title: w.Title, Sub: "failed: " + textutil.Cut(w.Error, 120), Ref: fmt.Sprintf("task:%d", w.ID), At: *w.FinishedAt})
 		}
 	}
 	if rs, err := a.Engine.PromiseReviews(ctx, "open"); err == nil {
 		for _, r := range rs {
 			sub := ""
 			if len(r.Promises) > 0 {
-				sub = trim(r.Promises[0].Text, 140)
+				sub = textutil.Cut(r.Promises[0].Text, 140)
 				if len(r.Promises) > 1 {
 					sub += fmt.Sprintf(" (+%d more)", len(r.Promises)-1)
 				}
 			}
-			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "promise", Title: "Promised, not done: " + trim(r.Title, 70), Sub: sub, Ref: fmt.Sprintf("promise:%d", r.ID), Agent: r.Agent, At: r.CreatedAt})
+			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "promise", Title: "Promised, not done: " + textutil.Cut(r.Title, 70), Sub: sub, Ref: fmt.Sprintf("promise:%d", r.ID), Agent: r.Agent, At: r.CreatedAt})
 		}
 	}
 	if a.Ext.Ingest != nil {
@@ -124,14 +125,14 @@ func (a *App) GetToday(ctx context.Context) Today {
 				if b.Status == "dismissed" || (b.Status != "new" && !(b.Reply == "" && asks)) {
 					continue
 				}
-				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt})
+				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "briefing", Title: b.Title, Sub: textutil.Cut(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt})
 			}
 		}
 	}
 	if a.Ext.Sched != nil {
 		if jps, err := a.Ext.Sched.JobProposals(ctx, "pending"); err == nil {
 			for _, jp := range jps {
-				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "jobprop", Title: jp.Title, Sub: trim(jp.Rationale, 160), Ref: fmt.Sprintf("jobprop:%d", jp.ID), At: jp.CreatedAt})
+				t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "jobprop", Title: jp.Title, Sub: textutil.Cut(jp.Rationale, 160), Ref: fmt.Sprintf("jobprop:%d", jp.ID), At: jp.CreatedAt})
 			}
 		}
 	}
@@ -179,7 +180,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 			if d.FromKind == "user" || d.FromKind == "telegram" || d.FromKind == "whatsapp" {
 				origin = "request"
 			}
-			t.Produced = append(t.Produced, TodayItem{Kind: "task", Title: d.Title, Sub: trim(d.Result, 140), Ref: fmt.Sprintf("task:%d", d.ID), At: *d.FinishedAt, Origin: origin, Agent: d.ToAgent})
+			t.Produced = append(t.Produced, TodayItem{Kind: "task", Title: d.Title, Sub: textutil.Cut(d.Result, 140), Ref: fmt.Sprintf("task:%d", d.ID), At: *d.FinishedAt, Origin: origin, Agent: d.ToAgent})
 		}
 	}
 	if a.Ext.Sched != nil {
@@ -188,7 +189,7 @@ func (a *App) GetToday(ctx context.Context) Today {
 				if b.CreatedAt.Before(since) {
 					continue
 				}
-				t.Produced = append(t.Produced, TodayItem{Kind: "briefing", Title: b.Title, Sub: trim(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt, Origin: "briefing", Agent: b.Agent})
+				t.Produced = append(t.Produced, TodayItem{Kind: "briefing", Title: b.Title, Sub: textutil.Cut(b.Body, 140), Ref: fmt.Sprintf("briefing:%d", b.ID), At: b.CreatedAt, Origin: "briefing", Agent: b.Agent})
 			}
 		}
 	}

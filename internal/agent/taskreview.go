@@ -9,6 +9,7 @@ import (
 
 	"prism/internal/llm"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // A task that ends "partial" (iteration budget exhausted, or stopped by the loop guard) is not a real
@@ -57,7 +58,7 @@ func (e *Engine) ReviewTask(ctx context.Context, id int64) (*TaskReview, error) 
 	}
 	rv := &TaskReview{TaskID: t.ID, Cause: causeOf(t)}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Agent: %s\nTask: %s\nInput: %s\nEnded: %s (%s)\n\nTRANSCRIPT (tail):\n", t.ToAgent, t.Title, brief(t.Input, 600), t.Status, t.Error)
+	fmt.Fprintf(&sb, "Agent: %s\nTask: %s\nInput: %s\nEnded: %s (%s)\n\nTRANSCRIPT (tail):\n", t.ToAgent, t.Title, textutil.Brief(t.Input, 600), t.Status, t.Error)
 	if t.SessionID != nil {
 		if ms, merr := e.Sessions.Messages(ctx, *t.SessionID); merr == nil {
 			if len(ms) > 24 {
@@ -69,7 +70,7 @@ func (e *Engine) ReviewTask(ctx context.Context, id int64) (*TaskReview, error) 
 					b, _ := json.Marshal(m.ToolCalls)
 					line += " [calls " + string(b) + "]"
 				}
-				fmt.Fprintf(&sb, "%s: %s\n", m.Role, brief(line, 500))
+				fmt.Fprintf(&sb, "%s: %s\n", m.Role, textutil.Brief(line, 500))
 			}
 		}
 	}
@@ -146,16 +147,16 @@ func (e *Engine) ResolveTask(ctx context.Context, id int64, action, note string)
 	switch action {
 	case "continue":
 		err = enqueue(t.ToAgent, t.Title, fmt.Sprintf("%s\n\n(Earlier attempt, task #%d, stopped early: %s. Its partial result:\n%s\nContinue from there instead of starting over, and keep it efficient.)%s",
-			t.Input, t.ID, t.Error, brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
+			t.Input, t.ID, t.Error, textutil.Brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
 	case "split":
 		err = enqueue("Atlas", "Split: "+t.Title, fmt.Sprintf("Task #%d for %s stopped early (%s) because it was too large. Break the job into smaller, independent steps and run them (delegate each to a suitable agent), then combine the results. Original request:\n%s\n\nPartial result so far:\n%s%s",
-			t.ID, t.ToAgent, t.Error, t.Input, brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
+			t.ID, t.ToAgent, t.Error, t.Input, textutil.Brief(t.Result, 1500)+e.handoverNote(ctx, t.ID), ctxNote))
 	case "evolve":
 		err = enqueue("Metis", "Improve "+t.ToAgent, fmt.Sprintf("Task #%d for agent %s stopped early (%s). Read it with task_transcript(id=%d), work out what the agent kept getting wrong or lacked, and propose a soul/tool improvement with evolve_propose only if the evidence is clear.%s",
 			t.ID, t.ToAgent, t.Error, t.ID, ctxNote))
 	case "hire":
 		err = enqueue("Forge", "Better agent for: "+t.Title, fmt.Sprintf("Task #%d (%s) could not be finished by %s (%s). Design an agent better suited to this kind of work if a real gap exists; otherwise say why not.%s",
-			t.ID, brief(t.Input, 400), t.ToAgent, t.Error, ctxNote))
+			t.ID, textutil.Brief(t.Input, 400), t.ToAgent, t.Error, ctxNote))
 	}
 	if err != nil {
 		return nil, err

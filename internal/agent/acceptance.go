@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"prism/internal/textutil"
 )
 
 // Acceptance criteria. A lead who hands out work says what "done" means, and checks the report against it before passing it
@@ -32,7 +34,7 @@ func (e *Engine) judgeAcceptance(ctx context.Context, criteria, instruction, tex
 	var v acceptanceVerdict
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	in := fmt.Sprintf("ACCEPTANCE CRITERIA:\n%s\n\nTHE REQUEST:\n%s\n\nWHAT THE COLLEAGUE DID (tool calls):\n%s\n\nTHE REPORT:\n%s", criteria, brief(instruction, 800), orNone(trail), brief(text, 3500))
+	in := fmt.Sprintf("ACCEPTANCE CRITERIA:\n%s\n\nTHE REQUEST:\n%s\n\nWHAT THE COLLEAGUE DID (tool calls):\n%s\n\nTHE REPORT:\n%s", criteria, textutil.Brief(instruction, 800), orNone(trail), textutil.Brief(text, 3500))
 	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "acceptance", "chat"), acceptancePrompt, in, &v); err != nil || v.Met == nil {
 		return true, "", false // a check that cannot run never blocks the work
 	}

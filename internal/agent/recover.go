@@ -9,6 +9,7 @@ import (
 	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // When a run ends because it used its whole iteration budget (or the loop guard cut it off), simply marking
@@ -42,7 +43,7 @@ func (e *Engine) autoRetryOn(ctx context.Context) bool {
 
 func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, res *RunResult) recovery {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Agent: %s\nTask: %s\nInstruction: %s\nEnded: %s\n\nLAST WORDS OF THE AGENT:\n%s\n\nTRANSCRIPT (tail):\n", t.ToAgent, t.Title, brief(t.Input, 800), res.Aborted, brief(res.Text, 800))
+	fmt.Fprintf(&sb, "Agent: %s\nTask: %s\nInstruction: %s\nEnded: %s\n\nLAST WORDS OF THE AGENT:\n%s\n\nTRANSCRIPT (tail):\n", t.ToAgent, t.Title, textutil.Brief(t.Input, 800), res.Aborted, textutil.Brief(res.Text, 800))
 	if ms, err := e.Sessions.Messages(ctx, sess.ID); err == nil {
 		if len(ms) > 20 {
 			ms = ms[len(ms)-20:]
@@ -50,14 +51,14 @@ func (e *Engine) planRecovery(ctx context.Context, t tasks.Task, sess *Session, 
 		for _, m := range ms {
 			line := m.Content
 			for _, c := range m.ToolCalls {
-				line += " [call " + c.Name + " " + brief(string(c.Arguments), 120) + "]"
+				line += " [call " + c.Name + " " + textutil.Brief(string(c.Arguments), 120) + "]"
 			}
-			fmt.Fprintf(&sb, "%s: %s\n", m.Role, brief(line, 400))
+			fmt.Fprintf(&sb, "%s: %s\n", m.Role, textutil.Brief(line, 400))
 		}
 	}
-	plan := recovery{Decision: "retry", Lesson: "It used its whole budget (" + res.Aborted + ") before finishing.", Achieved: brief(res.Text, 600),
-		Pitfall: fmt.Sprintf("A task like “%s” stalled (%s): if you find yourself repeating calls without new information, stop and report what is blocking you instead.", brief(t.Title, 80), res.Aborted)}
-	fallback := fmt.Sprintf("%s\n\n(An earlier attempt stopped early: %s. What it had reached:\n%s\nContinue from there without redoing it, take the shortest path, and if something blocks you, say exactly what instead of retrying it again and again.)", t.Input, res.Aborted, brief(res.Text, 1500))
+	plan := recovery{Decision: "retry", Lesson: "It used its whole budget (" + res.Aborted + ") before finishing.", Achieved: textutil.Brief(res.Text, 600),
+		Pitfall: fmt.Sprintf("A task like “%s” stalled (%s): if you find yourself repeating calls without new information, stop and report what is blocking you instead.", textutil.Brief(t.Title, 80), res.Aborted)}
+	fallback := fmt.Sprintf("%s\n\n(An earlier attempt stopped early: %s. What it had reached:\n%s\nContinue from there without redoing it, take the shortest path, and if something blocks you, say exactly what instead of retrying it again and again.)", t.Input, res.Aborted, textutil.Brief(res.Text, 1500))
 	if e.LLM == nil || e.LLM.RoleRef(ctx, "fast") == "" {
 		plan.Prompt = fallback
 		return plan

@@ -9,6 +9,7 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -47,14 +48,14 @@ func (e *Engine) restartFindings(ctx context.Context, t tasks.Task, agent string
 	var open, done []string
 	for _, m := range hist {
 		for _, tc := range m.ToolCalls {
-			line := fmt.Sprintf("%s(%s)", tc.Name, brief(tc.Arguments, 140))
+			line := fmt.Sprintf("%s(%s)", tc.Name, textutil.Brief(tc.Arguments, 140))
 			res, ok := results[tc.ID]
 			if !ok {
 				open = append(open, "- "+line)
 				continue
 			}
 			if tool, found := e.Tools.Get(tc.Name); found && tool.Risk != tools.RiskRead {
-				done = append(done, fmt.Sprintf("- %s → %s", line, brief(res, 160)))
+				done = append(done, fmt.Sprintf("- %s → %s", line, textutil.Brief(res, 160)))
 			}
 		}
 	}
@@ -76,7 +77,7 @@ func (e *Engine) restartFindings(ctx context.Context, t tasks.Task, agent string
 				if rows.Scan(&id, &url, &dest, &status, &bytes, &total, &errText) != nil {
 					continue
 				}
-				l := fmt.Sprintf("- download #%d %s → %s: %s", id, brief(url, 100), dest, status)
+				l := fmt.Sprintf("- download #%d %s → %s: %s", id, textutil.Brief(url, 100), dest, status)
 				if status == "done" {
 					if st, err := os.Stat(dest); err == nil {
 						l += fmt.Sprintf(" (file exists, %d bytes)", st.Size())
@@ -84,7 +85,7 @@ func (e *Engine) restartFindings(ctx context.Context, t tasks.Task, agent string
 						l += " (but the file is NOT there now)"
 					}
 				} else if errText != "" {
-					l += " — " + brief(errText, 100)
+					l += " — " + textutil.Brief(errText, 100)
 				} else if total > 0 {
 					l += fmt.Sprintf(" (%d of %d bytes)", bytes, total)
 				}
@@ -104,7 +105,7 @@ func (e *Engine) restartFindings(ctx context.Context, t tasks.Task, agent string
 				if rows.Scan(&id, &cmd, &status, &code) != nil {
 					continue
 				}
-				l := fmt.Sprintf("- process #%d `%s`: %s", id, brief(cmd, 100), status)
+				l := fmt.Sprintf("- process #%d `%s`: %s", id, textutil.Brief(cmd, 100), status)
 				if code != nil {
 					l += fmt.Sprintf(" (exit %d)", *code)
 				}
@@ -125,7 +126,7 @@ func (e *Engine) restartFindings(ctx context.Context, t tasks.Task, agent string
 			banks = []string{"user", "profile:" + agent}
 		}
 		rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		facts, err := e.Memory.Find(rctx, memory.FindReq{Query: brief(t.Input, 300), Banks: banks, Agent: agent, K: 6, MinRel: 0.35, NoLinks: true, NoReinforce: true})
+		facts, err := e.Memory.Find(rctx, memory.FindReq{Query: textutil.Brief(t.Input, 300), Banks: banks, Agent: agent, K: 6, MinRel: 0.35, NoLinks: true, NoReinforce: true})
 		cancel()
 		if err == nil && len(facts) > 0 {
 			sb.WriteString("What memory knows that may bear on this task:\n")
@@ -146,7 +147,7 @@ func (e *Engine) restartReview(ctx context.Context, t tasks.Task, findings strin
 	rctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var v restartVerdict
-	in := "TASK: " + brief(t.Input, 600) + "\n\nEVIDENCE:\n" + brief(findings, 5000)
+	in := "TASK: " + textutil.Brief(t.Input, 600) + "\n\nEVIDENCE:\n" + textutil.Brief(findings, 5000)
 	if err := e.LLM.CompleteJSON(rctx, e.LLM.ActionRef(rctx, "restart_review", "fast"), restartReviewPrompt, in, &v); err != nil {
 		return nil
 	}

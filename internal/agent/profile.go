@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"prism/internal/textmatch"
+	"prism/internal/textutil"
 )
 
 const (
@@ -197,7 +198,7 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO soul_history(profile_id,version,soul,reason) VALUES($1,1,$2,$3)`, id, p.Soul, firstNonEmpty(reason, "created")); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO soul_history(profile_id,version,soul,reason) VALUES($1,1,$2,$3)`, id, p.Soul, textutil.FirstNonEmpty(reason, "created")); err != nil {
 			return nil, err
 		}
 	} else {
@@ -216,7 +217,7 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 		}
 		if oldSoul != p.Soul {
 			ver++
-			if _, err := tx.Exec(ctx, `INSERT INTO soul_history(profile_id,version,soul,reason) VALUES($1,$2,$3,$4)`, id, ver, p.Soul, firstNonEmpty(reason, "edited")); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO soul_history(profile_id,version,soul,reason) VALUES($1,$2,$3,$4)`, id, ver, p.Soul, textutil.FirstNonEmpty(reason, "edited")); err != nil {
 				return nil, err
 			}
 		}
@@ -236,13 +237,6 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 		s.OnChange()
 	}
 	return s.GetID(ctx, id)
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 func (s *ProfileStore) Delete(ctx context.Context, id int64) error {

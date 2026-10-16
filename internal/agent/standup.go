@@ -9,6 +9,7 @@ import (
 
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // Standup. Once a week (Monday morning by default) the team reports to the user like a team does: what got done, what failed or
@@ -98,7 +99,7 @@ func (e *Engine) BuildStandup(ctx context.Context, since, until time.Time) (stri
 	if pt := e.PausedTools(); len(pt) > 0 {
 		var l []string
 		for _, r := range pt {
-			l = append(l, "- "+r.Tool+": "+brief(r.Last, 80))
+			l = append(l, "- "+r.Tool+": "+textutil.Brief(r.Last, 80))
 		}
 		facts += "\nTOOLS PAUSED RIGHT NOW AFTER REPEATED FAILURES:\n" + strings.Join(l, "\n") + "\n"
 	}

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/html"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 )
 
 // Search through the big engines' own result pages, rendered like a person would see them — Bing and Google no longer sell
@@ -163,7 +164,7 @@ func parseBing(body string, limit int) ([]Result, error) {
 			return true
 		})
 		if href != "" && title != "" {
-			out = append(out, Result{Title: title, URL: bingTarget(href), Snippet: clip(snippet, 400)})
+			out = append(out, Result{Title: title, URL: bingTarget(href), Snippet: textutil.Brief(snippet, 400)})
 		}
 		return false
 	})
@@ -198,7 +199,7 @@ func parseBingImages(body string, limit int) ([]ImageResult, error) {
 				T    string `json:"t"`
 			}
 			if json.Unmarshal([]byte(attr(n, "m")), &m) == nil && strings.HasPrefix(m.Murl, "http") {
-				out = append(out, ImageResult{Title: clip(collapse(html.UnescapeString(m.T)), 160), Image: m.Murl, Page: m.Purl})
+				out = append(out, ImageResult{Title: textutil.Brief(collapse(html.UnescapeString(m.T)), 160), Image: m.Murl, Page: m.Purl})
 			}
 			return false
 		}
@@ -291,7 +292,7 @@ func parseGoogle(body string, limit int) ([]Result, error) {
 		if partial {
 			sn = "(Google abbreviated the address; this is the site, open it or search further) " + sn
 		}
-		out = append(out, Result{Title: title, URL: addr, Snippet: clip(strings.TrimSpace(sn), 400)})
+		out = append(out, Result{Title: title, URL: addr, Snippet: textutil.Brief(strings.TrimSpace(sn), 400)})
 		return false
 	})
 	return out, nil

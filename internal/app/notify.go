@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"prism/internal/textutil"
 	"prism/internal/tools/builtin"
 	"sync"
 	"time"
@@ -77,14 +78,14 @@ func (a *App) observe(typ string, data any) {
 			by, _ := m["by"].(string)
 			desc, _ := m["description"].(string)
 			id, _ := m["id"].(int64)
-			go a.notifyRef("proposal", "attention", by+" hired "+name+" (on probation)", trim(desc, 200), fmt.Sprintf("hire:%d", id))
+			go a.notifyRef("proposal", "attention", by+" hired "+name+" (on probation)", textutil.Cut(desc, 200), fmt.Sprintf("hire:%d", id))
 		}
 	case "plugin.pending": // an agent wrote a tool: it does nothing until the user reads the code and approves it
 		if m, ok := data.(map[string]any); ok {
 			name, _ := m["name"].(string)
 			by, _ := m["by"].(string)
 			desc, _ := m["description"].(string)
-			go a.notifyRef("proposal", "attention", by+" wrote a plugin: "+name, trim(desc, 200), "tools")
+			go a.notifyRef("proposal", "attention", by+" wrote a plugin: "+name, textutil.Cut(desc, 200), "tools")
 		}
 	case "ask.done": // answered (in the UI, Telegram, anywhere) or cancelled: its notification is no longer news
 		if m, ok := data.(map[string]any); ok {
@@ -119,15 +120,8 @@ func (a *App) observe(typ string, data any) {
 		if _, dup := notifiedTasks.LoadOrStore(t.ID, struct{}{}); dup {
 			return
 		}
-		go a.Notify("error", "error", t.ToAgent+" failed", trim(t.Title+": "+t.Error, 300))
+		go a.Notify("error", "error", t.ToAgent+" failed", textutil.Cut(t.Title+": "+t.Error, 300))
 	}
-}
-
-func trim(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 // cleanupLoop applies the retention settings hourly.

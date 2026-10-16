@@ -13,6 +13,7 @@ import (
 
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -269,7 +270,7 @@ func formatTaskResult(t tasks.Task) string {
 	default:
 		out := fmt.Sprintf("## Task #%d → %s [%s]\n%s", t.ID, t.ToAgent, t.Status, t.Error)
 		if t.Status == tasks.Failed && strings.TrimSpace(t.Result) != "" {
-			out += "\nLast report from it:\n" + brief(strings.TrimSpace(t.Result), 1200) + "\n(Decide whether to try another agent or approach, or tell the user plainly what could not be done and why.)"
+			out += "\nLast report from it:\n" + textutil.Brief(strings.TrimSpace(t.Result), 1200) + "\n(Decide whether to try another agent or approach, or tell the user plainly what could not be done and why.)"
 		}
 		return out
 	}
@@ -339,22 +340,26 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 			instruction += "\n\n[Recon] A scout took a quick read-only look just before you started. Treat it as a hint, verify what matters:\n" + brief
 		}
 	}
-	pid := env.TaskID
-	var parent *int64
-	var root int64
-	if pid != 0 {
-		parent = &pid
-		if pt, err := e.Tasks.Get(ctx, pid); err == nil {
-			root = pt.RootID
-		}
-	}
-	t, err := e.Tasks.Create(ctx, tasks.Task{ParentID: parent, RootID: root, FromKind: "agent", FromName: env.Agent, ToAgent: p.Name,
-		Title: title, Input: instruction, Depth: depth}, true)
+	t, err := e.childTask(ctx, env, p, title, instruction, depth)
 	if err != nil {
 		return t, false, err
 	}
 	e.Tasks.SetCriteria(ctx, t.ID, criteria)
 	return e.finishSub(ctx, t, opts)
+}
+
+// childTask creates a task for agent p as a child of the task env is running (if any), requested by env's agent.
+func (e *Engine) childTask(ctx context.Context, env *tools.Env, p *Profile, title, input string, depth int) (tasks.Task, error) {
+	var parent *int64
+	var root int64
+	if pid := env.TaskID; pid != 0 {
+		parent = &pid
+		if pt, err := e.Tasks.Get(ctx, pid); err == nil {
+			root = pt.RootID
+		}
+	}
+	return e.Tasks.Create(ctx, tasks.Task{ParentID: parent, RootID: root, FromKind: "agent", FromName: env.Agent, ToAgent: p.Name,
+		Title: title, Input: input, Depth: depth}, true)
 }
 
 func (e *Engine) finishSub(ctx context.Context, t tasks.Task, opts TaskOpts) (tasks.Task, bool, error) {
@@ -744,7 +749,7 @@ func (e *Engine) toolEscalate() *tools.Tool {
 			}
 			escalateUse[key]++
 			escalateMu.Unlock()
-			out, err := e.LLM.Complete(ctx, e.LLM.ActionRef(ctx, "escalate", "chat"), "You are the senior model helping a smaller assistant that does routine background work. Answer the question directly and concisely, using only the material given; say plainly if it is not enough to decide.", "QUESTION:\n"+a.Question+"\n\nDETAILS:\n"+brief(a.Details, 12000), false)
+			out, err := e.LLM.Complete(ctx, e.LLM.ActionRef(ctx, "escalate", "chat"), "You are the senior model helping a smaller assistant that does routine background work. Answer the question directly and concisely, using only the material given; say plainly if it is not enough to decide.", "QUESTION:\n"+a.Question+"\n\nDETAILS:\n"+textutil.Brief(a.Details, 12000), false)
 			if err != nil {
 				return "", err
 			}
@@ -999,7 +1004,7 @@ func (e *Engine) toolEvolvePropose() *tools.Tool {
 			if err != nil {
 				return "", err
 			}
-			kind := firstNonEmpty(a.Kind, KindSoul)
+			kind := textutil.FirstNonEmpty(a.Kind, KindSoul)
 			var body string
 			switch kind {
 			case KindSoul:
@@ -1029,7 +1034,7 @@ func (e *Engine) toolEvolvePropose() *tools.Tool {
 			if err != nil {
 				return "", err
 			}
-			ev := map[string]any{"id": id, "agent": p.Name, "kind": kind, "rationale": brief(a.Rationale, 300)}
+			ev := map[string]any{"id": id, "agent": p.Name, "kind": kind, "rationale": textutil.Brief(a.Rationale, 300)}
 			if apply, why := e.autoApply(ctx, p, kind, body); apply { // the autonomy dial (evolve.go)
 				e.startWatch(ctx, id, p, kind)
 				if err := e.Profiles.Decide(ctx, id, true); err != nil {

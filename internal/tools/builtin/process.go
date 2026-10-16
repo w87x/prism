@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -318,11 +319,11 @@ func (pm *ProcessManager) watch(p Process, r *running) {
 	// a command that finished while the agent was still waiting on it (or within seconds) needs no notice: only
 	// long-running ones are worth interrupting the user for — otherwise every `ls` and `cat` became a message
 	if pm.d.Notify != nil && time.Since(p.CreatedAt) > notifyAfter {
-		text := fmt.Sprintf("Process #%d finished (%s): %s", p.ID, status, trim(p.Command, 80))
+		text := fmt.Sprintf("Process #%d finished (%s): %s", p.ID, status, textutil.Cut(p.Command, 80))
 		if status == "exited" && code != 0 {
-			text = fmt.Sprintf("Process #%d exited with code %d: %s", p.ID, code, trim(p.Command, 80))
+			text = fmt.Sprintf("Process #%d exited with code %d: %s", p.ID, code, textutil.Cut(p.Command, 80))
 		}
-		pm.d.Notify(context.Background(), firstNonEmpty(p.Agent, "Atlas"), text)
+		pm.d.Notify(context.Background(), textutil.FirstNonEmpty(p.Agent, "Atlas"), text)
 	}
 }
 
@@ -341,13 +342,6 @@ func (pm *ProcessManager) finish(ctx context.Context, id int64, status string, c
 
 func (pm *ProcessManager) finishCode(ctx context.Context, id int64, status string, code *int, output string) {
 	_, _ = pm.d.DB.Exec(ctx, `UPDATE bg_processes SET status=$2, exit_code=$3, output=$4, finished_at=now() WHERE id=$1`, id, status, code, output)
-}
-
-func trim(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 func registerProcess(reg *tools.Registry, pm *ProcessManager) {
@@ -485,7 +479,7 @@ func formatProcess(p Process) string {
 	if p.ExitCode != nil {
 		code = fmt.Sprintf(" exit=%d", *p.ExitCode)
 	}
-	return fmt.Sprintf("#%d %s%s — %s (%s)", p.ID, p.Status, code, trim(p.Command, 80), p.Cwd)
+	return fmt.Sprintf("#%d %s%s — %s (%s)", p.ID, p.Status, code, textutil.Cut(p.Command, 80), p.Cwd)
 }
 
 // snapshot returns a process record together with the tail of its output (live buffer while running, the
@@ -563,7 +557,7 @@ func lastLine(out string) string {
 		// progress bars redraw with \r: keep the freshest segment
 		seg := strings.Split(lines[i], "\r")
 		if l := strings.TrimSpace(seg[len(seg)-1]); l != "" {
-			return trim(l, 200)
+			return textutil.Cut(l, 200)
 		}
 	}
 	return ""

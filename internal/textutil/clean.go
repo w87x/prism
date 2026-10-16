@@ -12,3 +12,27 @@ func Clean(s string) string {
 	}
 	return strings.ToValidUTF8(s, "�")
 }
+
+// FirstNonEmpty returns the first argument that is not the empty string.
+func FirstNonEmpty(a ...string) string {
+	for _, x := range a {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}
+
+// Brief collapses whitespace runs to single spaces and cuts the result to n runes (with an ellipsis when it cut).
+func Brief(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	return Cut(s, n)
+}
+
+// Cut shortens s to n runes (with an ellipsis when it cut), leaving its whitespace alone.
+func Cut(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}

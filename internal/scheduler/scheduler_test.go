@@ -16,6 +16,7 @@ import (
 	"prism/internal/tasks"
 	"prism/internal/testutil"
 	"prism/internal/tools"
+	"prism/internal/tracker"
 )
 
 type rec struct {
@@ -507,5 +508,82 @@ func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.
 		if x.ID == w && !strings.Contains(x.Prompt, "mobile site") {
 			t.Fatalf("armed applies the rewrite by itself: %q", x.Prompt)
 		}
+	}
+}
+
+func TestJobReviewTurnsAGroupOfChecksIntoATracker(t *testing.T) {
+	s, _, fake := setupFake(t)
+	ctx := context.Background()
+	s.Trackers = &tracker.Service{DB: s.DB}
+	if _, err := s.Engine.Profiles.Save(ctx, agent.Profile{Name: "Organizer", Group: "Home", Description: "keeps track", Soul: "You keep trackers.", Tools: []string{"tracker_snapshot", "tracker_changes", "tracker_rows"}, Enabled: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		ms := req["messages"].([]any)
+		sys, _ := ms[0].(map[string]any)["content"].(string)
+		switch {
+		case strings.Contains(sys, "ONE TRACKER"):
+			return testutil.Reply{Content: `{"fit":true,"name":"FEVM boxes","description":"Avito prices","columns":[{"name":"price","type":"number","unit":"RUB"}],
+				"items":[{"key":"FEVM X","data":{"item":"FEVM X"}},{"key":"FEVM Y","data":{"item":"FEVM Y"}},{"key":"FEVM Z","data":{"item":"FEVM Z"}}],
+				"prompt":"Refresh tracker FEVM boxes for FEVM X, FEVM Y, FEVM Z with one tracker_snapshot; reply NO_REPLY when nothing is under its limit.","expr":"@hourly","why":"three items with a price each"}`}
+		case strings.Contains(sys, "ONE kind of check"):
+			return testutil.Reply{Content: `{"same":true,"prompt":"merged","expr":"@hourly","why":"same check"}`}
+		}
+		return testutil.Reply{Content: "ok"}
+	}
+	var ids []int64
+	for _, n := range []string{"X", "Y", "Z"} {
+		id, err := s.SaveCron(ctx, Cron{Name: "avito " + n, Agent: "Atlas", Expr: "@daily", Prompt: "Check Avito price for the FEVM " + n + " box and tell me if it is under 700000. Reply NO_REPLY if nothing.", Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if n, err := s.ReviewJobs(ctx); err != nil || n != 1 {
+		t.Fatalf("one proposal: %d %v", n, err)
+	}
+	ps, _ := s.JobProposals(ctx, "pending")
+	if len(ps) != 1 || ps[0].Kind != "tracker" || ps[0].NewAgent != "Organizer" {
+		t.Fatalf("a tracker proposal, run by the agent that holds the tracker tools: %+v", ps)
+	}
+	if err := s.ApplyJobProposal(ctx, ps[0].ID, false); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := s.Trackers.Get(ctx, "FEVM boxes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := s.Trackers.Rows(ctx, tr.ID, "", false, 50); len(rows) != 3 {
+		t.Fatalf("one starting row per item: %d", len(rows))
+	}
+	cs, _ := s.Crons(ctx)
+	live, finished := 0, 0
+	for _, c := range cs {
+		for _, id := range ids {
+			if c.ID == id {
+				if c.FinishedAt != nil {
+					finished++
+				} else if c.Agent == "Organizer" && strings.Contains(c.Prompt, "tracker_snapshot") {
+					live++
+				}
+			}
+		}
+	}
+	if live != 1 || finished != 2 {
+		t.Fatalf("one refresh job survives, run by the organizer: live=%d finished=%d", live, finished)
+	}
+	if err := s.UndoJobProposal(ctx, ps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ = s.Crons(ctx)
+	for _, c := range cs {
+		for _, id := range ids {
+			if c.ID == id && (c.Agent != "Atlas" || c.FinishedAt != nil || strings.Contains(c.Prompt, "tracker_snapshot")) {
+				t.Fatalf("undo restores the three jobs: %+v", c)
+			}
+		}
+	}
+	if _, err := s.Trackers.Get(ctx, "FEVM boxes"); err != nil {
+		t.Fatal("the tracker stays")
 	}
 }

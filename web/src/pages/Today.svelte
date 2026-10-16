@@ -2,7 +2,7 @@
   // a clickable row is also reachable and operable from the keyboard (not when the key was meant for a button inside it)
   const rowKey = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } };
   import { masonry } from '../lib/masonry.js';
-  import { S, call, listen, go, ago, until, openProposal, openRef, toast } from '../lib/store.svelte.js';
+  import { S, call, listen, go, ago, until, openProposal, openRef, toast, kindIcon } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Icon from '../lib/ui/Icon.svelte';
@@ -53,7 +53,6 @@
   let reviewId = $state(0);
   let answerId = $state(0);
   async function dismissTask(it, e) { e.stopPropagation(); if (await call('tasks.ack', { id: Number(it.ref.slice(5)) })) load(); }
-  const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', jobprop: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 
   function openProject(p) { S.memoryBank = p.bank_id; go('memory'); }
 

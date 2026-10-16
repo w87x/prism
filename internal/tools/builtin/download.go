@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"prism/internal/netguard"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -168,7 +169,7 @@ func (dl *Downloader) finish(x Download, status string, bytes, total int64, err 
 		if status == "failed" {
 			text = fmt.Sprintf("Download failed: %s — %s", x.URL, msg)
 		}
-		dl.d.Notify(context.Background(), firstNonEmpty(x.Owner, "Atlas"), text)
+		dl.d.Notify(context.Background(), textutil.FirstNonEmpty(x.Owner, "Atlas"), text)
 	}
 }
 
@@ -348,7 +349,7 @@ func (dl *Downloader) runAria(ctx context.Context, x Download, dir string) {
 	case werr != nil:
 		dl.finish(x, "failed", lastPct, 100, fmt.Errorf("aria2c: %v (%s)", werr, tail), x.Dest)
 	default:
-		dl.finish(x, "done", 100, 100, nil, firstNonEmpty(x.Dest, dir))
+		dl.finish(x, "done", 100, 100, nil, textutil.FirstNonEmpty(x.Dest, dir))
 	}
 }
 

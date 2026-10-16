@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"prism/internal/tracker"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +95,8 @@ type Service struct {
 	Engine   *agent.Engine
 	Settings *settings.Store
 	Env      Env
+	// Trackers lets the job review turn a group of similar checks into a tracker (may be nil: it then only merges prompts).
+	Trackers *tracker.Service
 	Emit     func(typ string, data any)
 	Logf     func(level, source, format string, args ...any)
 	// Notify reports scheduler events to the notification centre (may be nil).

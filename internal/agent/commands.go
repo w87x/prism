@@ -10,6 +10,7 @@ import (
 	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // Command describes a slash command available in chat (web and Telegram).
@@ -147,7 +148,7 @@ func (e *Engine) RunCommand(ctx context.Context, channel, topic, line string) (r
 		}
 		var sb strings.Builder
 		for _, t := range ts {
-			fmt.Fprintf(&sb, "#%d %s → %s [%s] %s\n", t.ID, t.FromKind, t.ToAgent, t.Status, brief(t.Title, 60))
+			fmt.Fprintf(&sb, "#%d %s → %s [%s] %s\n", t.ID, t.FromKind, t.ToAgent, t.Status, textutil.Brief(t.Title, 60))
 		}
 		if sb.Len() == 0 {
 			return "No tasks yet.", true

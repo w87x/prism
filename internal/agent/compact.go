@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"prism/internal/llm"
+	"prism/internal/textutil"
 )
 
 // Tools whose results can be re-fetched at will: dropped first during compaction.
@@ -124,10 +125,10 @@ func render(ms []Msg, toolCap int) string {
 				sb.WriteString("ASSISTANT: " + m.Content + "\n")
 			}
 			for _, tc := range m.ToolCalls {
-				fmt.Fprintf(&sb, "ASSISTANT called %s(%s)\n", tc.Name, brief(tc.Arguments, 200))
+				fmt.Fprintf(&sb, "ASSISTANT called %s(%s)\n", tc.Name, textutil.Brief(tc.Arguments, 200))
 			}
 		case "tool":
-			fmt.Fprintf(&sb, "TOOL %s → %s\n", m.Name, brief(m.Content, toolCap))
+			fmt.Fprintf(&sb, "TOOL %s → %s\n", m.Name, textutil.Brief(m.Content, toolCap))
 		}
 	}
 	return sb.String()
@@ -179,9 +180,9 @@ func heuristicSummary(prev string, msgs []Msg) string {
 	for _, m := range msgs {
 		switch {
 		case m.Role == "user" && m.Provenance != "system":
-			sb.WriteString("- User: " + brief(m.Content, 160) + "\n")
+			sb.WriteString("- User: " + textutil.Brief(m.Content, 160) + "\n")
 		case m.Role == "assistant" && m.Content != "":
-			sb.WriteString("- Agent: " + brief(m.Content, 160) + "\n")
+			sb.WriteString("- Agent: " + textutil.Brief(m.Content, 160) + "\n")
 		}
 	}
 	return sb.String()

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"prism/internal/textutil"
 )
 
 // Evidence is one piece of support for, or testimony against, a fact. The ledger only grows: a fact's
@@ -31,7 +33,7 @@ func (s *Service) AddEvidence(ctx context.Context, e Evidence) error {
 	}
 	_, err := s.db.Exec(ctx, `INSERT INTO memory_evidence(fact_id,source_ref,source_group,supports,reliability,note)
 		SELECT $1,$2,$3,$4,$5,$6 WHERE NOT EXISTS (SELECT 1 FROM memory_evidence WHERE fact_id=$1 AND source_ref=$2 AND supports=$4)`,
-		e.FactID, e.SourceRef, strings.TrimSpace(e.Group), e.Supports, float32(e.Reliability), brief(e.Note, 300))
+		e.FactID, e.SourceRef, strings.TrimSpace(e.Group), e.Supports, float32(e.Reliability), textutil.Brief(e.Note, 300))
 	if err != nil {
 		return err
 	}

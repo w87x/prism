@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"prism/internal/textmatch"
+	"prism/internal/textutil"
 )
 
 // Hub is a remote skill repository (a GitHub repo containing SKILL.md files).
@@ -199,7 +200,7 @@ func (s *Store) browseRemote(ctx context.Context, h Hub, token string) ([]Remote
 				if fm["name"] != "" {
 					out[i].Name = fm["name"]
 				}
-				out[i].Description = clip(fm["description"], 200)
+				out[i].Description = textutil.Brief(fm["description"], 200)
 			}
 		}(i, d)
 	}
@@ -229,7 +230,7 @@ func (s *Store) Import(ctx context.Context, h Hub, remotePath, token string, ada
 		return nil, fmt.Errorf("no SKILL.md in %s: %w", remotePath, err)
 	}
 	body, fm := ParseFrontmatter(string(skillMd))
-	name := SafeName(firstNonEmpty(fm["name"], path.Base(remotePath)))
+	name := SafeName(textutil.FirstNonEmpty(fm["name"], path.Base(remotePath)))
 	dir := filepath.Join(s.dataDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -264,15 +265,6 @@ func (s *Store) Import(ctx context.Context, h Hub, remotePath, token string, ada
 		return nil, err
 	}
 	return s.GetID(ctx, id)
-}
-
-func firstNonEmpty(a ...string) string {
-	for _, x := range a {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
 }
 
 type indexEntry struct {

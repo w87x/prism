@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"prism/internal/textutil"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -410,7 +410,7 @@ func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key st
 		task, terr := e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: atlas.Name, Input: input, SessionID: &sess.ID}, true)
 		ar.Info.TaskID = task.ID
 		ar.Info.Title = task.Title
-		ar.task.Store(brief(input, 90))
+		ar.task.Store(textutil.Brief(input, 90))
 		runInput := input
 		if note != "" { // the plan goes to the first turn only; a later turn is a steering message
 			runInput, note = input+note, ""
@@ -868,7 +868,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		input = t.Input
 		if t.FromKind == "agent" && t.RootID != 0 && t.RootID != t.ID {
 			if root, rerr := e.Tasks.Get(tctx, t.RootID); rerr == nil && root.FromKind == "user" && root.Input != "" && root.Input != t.Input {
-				input += "\n\n(Original user request, for context only: " + brief(root.Input, 400) + ")"
+				input += "\n\n(Original user request, for context only: " + textutil.Brief(root.Input, 400) + ")"
 			}
 		}
 	}
@@ -950,13 +950,13 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.WaitingInput, res.Text, "", res.NeedsInput)
 	case res.Aborted != "": // budget exhausted or stopped by the loop guard: a partial result, not a real answer
 		if t.Depth > 0 && recov != nil { // delegated: the parent gets a failure with the analysis and decides what to tell the user
-			msg := fmt.Sprintf("%s — gave up%s. Why: %s Achieved so far: %s", res.Aborted, map[bool]string{true: " after an automatic retry"}[recov.Retried], recov.Lesson, brief(recov.Achieved, 600))
+			msg := fmt.Sprintf("%s — gave up%s. Why: %s Achieved so far: %s", res.Aborted, map[bool]string{true: " after an automatic retry"}[recov.Retried], recov.Lesson, textutil.Brief(recov.Achieved, 600))
 			_ = e.Tasks.Finish(ctx, t.ID, tasks.Failed, res.Text, msg, "")
 			break
 		}
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Partial, res.Text, res.Aborted, "")
 		if t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram") {
-			e.Notify(ctx, Notice{Agent: p.Name, Level: "attention", Text: fmt.Sprintf("“%s” stopped before finishing (%s). Open Today → Needs your attention to review what happened and choose how to proceed.", brief(t.Title, 60), res.Aborted)})
+			e.Notify(ctx, Notice{Agent: p.Name, Level: "attention", Text: fmt.Sprintf("“%s” stopped before finishing (%s). Open Today → Needs your attention to review what happened and choose how to proceed.", textutil.Brief(t.Title, 60), res.Aborted)})
 		}
 	default:
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
@@ -1085,7 +1085,7 @@ func (e *Engine) worthTelling(ctx context.Context, t tasks.Task, txt string) boo
 	}
 	cctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "notice_filter", "fast"), worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+brief(t.Input, 700)+"\n\nMESSAGE:\n"+brief(txt, 1500), &out); err != nil || out.Tell == nil {
+	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "notice_filter", "fast"), worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+textutil.Brief(t.Input, 700)+"\n\nMESSAGE:\n"+textutil.Brief(txt, 1500), &out); err != nil || out.Tell == nil {
 		return true
 	}
 	return *out.Tell

@@ -122,8 +122,7 @@ func (e *Engine) noteApplied(ctx context.Context, proposalID int64, profileID in
 // startWatch records what an automatic change replaced and how the agent was doing, so the change can be judged and undone.
 func (e *Engine) startWatch(ctx context.Context, proposalID int64, before *Profile, kind string) {
 	prev, _ := json.Marshal(watchPrev{Soul: before.Soul, Tools: before.Tools, Traits: before.Traits})
-	var bd, bt int
-	_ = e.DB.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='done'), count(*) FROM tasks WHERE lower(to_agent)=lower($1) AND status IN ('done','failed','partial') AND created_at > now()-interval '14 days'`, before.Name).Scan(&bd, &bt)
+	bd, bt := e.outcomes(ctx, before.Name, time.Now().Add(-14*24*time.Hour))
 	_, _ = e.DB.Exec(ctx, `INSERT INTO evolution_watch (proposal_id, profile_id, agent, kind, prev, before_done, before_total) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
 		proposalID, before.ID, before.Name, kind, prev, bd, bt)
 }
@@ -187,8 +186,7 @@ func (e *Engine) checkEvolutionWatches(ctx context.Context) {
 	}
 	rows.Close()
 	for _, x := range ws {
-		var ad, at int
-		_ = e.DB.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='done'), count(*) FROM tasks WHERE lower(to_agent)=lower($1) AND status IN ('done','failed','partial') AND created_at > $2`, x.agent, x.at).Scan(&ad, &at)
+		ad, at := e.outcomes(ctx, x.agent, x.at)
 		_, _ = e.DB.Exec(ctx, `UPDATE evolution_watch SET after_done=$2, after_total=$3 WHERE proposal_id=$1`, x.id, ad, at)
 		aged := time.Since(x.at) > watchMaxAge
 		if at < watchMinTasks && !(aged && at > 0) {
@@ -255,4 +253,10 @@ func (e *Engine) EvolutionWatches(ctx context.Context) []EvolutionWatchRow {
 		}
 	}
 	return out
+}
+
+// outcomes counts an agent's finished tasks since a time: how many succeeded, and how many there were.
+func (e *Engine) outcomes(ctx context.Context, agent string, since time.Time) (done, total int) {
+	_ = e.DB.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='done'), count(*) FROM tasks WHERE lower(to_agent)=lower($1) AND status IN ('done','failed','partial') AND created_at > $2`, agent, since).Scan(&done, &total)
+	return
 }

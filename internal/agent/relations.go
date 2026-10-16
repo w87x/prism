@@ -8,6 +8,7 @@ import (
 
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // What a team can borrow from how people work together.
@@ -101,8 +102,8 @@ func (e *Engine) startRepair(ctx context.Context, t tasks.Task, note string) {
 	}
 	note = strings.TrimSpace(note)
 	input := fmt.Sprintf("The user rated the result of an earlier task as bad%s.\n\nTHE TASK (#%d “%s”):\n%s\n\nYOUR RESULT:\n%s\n\nIn two or three plain sentences tell the user what went wrong and what you will do differently — an honest account, not an excuse. If the result can be put right with your tools, do it now and say what you changed; if it cannot, say exactly what is missing. Your reply is sent to the user as it stands, so write only that message.",
-		map[bool]string{true: ": " + note}[note != ""], t.ID, t.Title, brief(t.Input, 900), brief(t.Result, 900))
-	rt, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "repair", ToAgent: t.ToAgent, Title: "Repair: " + brief(t.Title, 60), Input: input})
+		map[bool]string{true: ": " + note}[note != ""], t.ID, t.Title, textutil.Brief(t.Input, 900), textutil.Brief(t.Result, 900))
+	rt, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "repair", ToAgent: t.ToAgent, Title: "Repair: " + textutil.Brief(t.Title, 60), Input: input})
 	var rid *int64
 	if err == nil {
 		rid = &rt.ID
@@ -123,7 +124,7 @@ func (e *Engine) antibodyFromComplaint(ctx context.Context, t tasks.Task, note s
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "recover", "fast"), complaintPrompt, fmt.Sprintf("TASK: %s\n%s\n\nTHE USER SAID: %s", t.Title, brief(t.Input, 600), note), &v); err != nil || strings.TrimSpace(v.Rule) == "" {
+	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "recover", "fast"), complaintPrompt, fmt.Sprintf("TASK: %s\n%s\n\nTHE USER SAID: %s", t.Title, textutil.Brief(t.Input, 600), note), &v); err != nil || strings.TrimSpace(v.Rule) == "" {
 		return
 	}
 	_ = e.AddAntibody(ctx, t.ToAgent, v.Triggers, v.Rule, "the user's complaint about task #"+fmt.Sprint(t.ID))
@@ -181,7 +182,7 @@ func (e *Engine) writeHandover(ctx context.Context, t tasks.Task) {
 		return
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "TASK: %s\nINSTRUCTION: %s\nENDED: %s %s %s\n\nWHAT IT DID:\n%s\nITS LAST WORDS:\n%s", t.Title, brief(t.Input, 900), t.Status, t.Error, t.Question, orNone(e.toolTrail(ctx, *t.SessionID)), brief(t.Result, 700))
+	fmt.Fprintf(&sb, "TASK: %s\nINSTRUCTION: %s\nENDED: %s %s %s\n\nWHAT IT DID:\n%s\nITS LAST WORDS:\n%s", t.Title, textutil.Brief(t.Input, 900), t.Status, t.Error, t.Question, orNone(e.toolTrail(ctx, *t.SessionID)), textutil.Brief(t.Result, 700))
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "handover", "fast"), handoverPrompt, sb.String(), false)

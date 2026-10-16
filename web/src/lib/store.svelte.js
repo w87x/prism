@@ -48,6 +48,7 @@ export const S = $state({
   shortcutsOpen: false, // keyboard shortcuts cheatsheet (Cmd+/) — see ShortcutsHelp.svelte
   notifs: { items: [], unread: 0 },
   llm: { active: 0, down: false, reason: '' }, // model calls in flight (any caller)
+  paused: [], // tools the pain reflex has cut off for everyone: { tool, until, last }
   peekRun: null, // run whose live view is open (held by reference, so it outlives its removal from `runs`)
   onboardingOpen: false,
   skipOnboarding: lsGet('prism.skipOnboarding', false),
@@ -199,6 +200,9 @@ function wire() {
     if (!document.hidden && !S.editor.editor && !S.editor.taken) rpc('editor.claim').catch(() => {});
   });
   on('llm.busy', (e) => { S.llm.active = e.active || 0; });
+  const loadPaused = () => call('breaker.list', {}, { quiet: true }).then((r) => { S.paused = r || []; });
+  on('tool.paused', loadPaused);
+  on('tool.resumed', loadPaused);
   on('llm.health', (e) => { S.llm.down = !!e.down; S.llm.reason = e.reason || ''; });
   on('status', (st) => { S.status = st; });
   // start-up progress while PRISM opens its database and starts services (see ConnectingSplash)
@@ -335,6 +339,7 @@ export function modelOptions(kind = 'chat') {
 export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
   if (st) { S.status = st; S.startup = st.startup ? { ...st.startup, _at: Date.now() } : null; }
+  loadPaused();
   call('llm.health', {}, { quiet: true }).then((h) => { if (h) { S.llm.down = !!h.down; S.llm.reason = h.reason || ''; } });
   if (!st || st.setup || st.starting) return; // starting: the splash shows progress; a `startup` event brings us back here when ready
   await loadChats();
@@ -459,6 +464,8 @@ export function until(ts) {
   return Math.round(s / 86400) + 'd';
 }
 export const clock = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+// the icon of each kind of Today / side-rail item
+export const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', jobprop: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 export const stamp = (ts) => (ts ? new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
 /** Font Awesome glyph (a character of the "FA" font) for an agent; `robot` until one is assigned. */

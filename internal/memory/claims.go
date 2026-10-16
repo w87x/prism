@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 	"time"
+
+	"prism/internal/textutil"
 )
 
 // A fact is a claim with a lifecycle, adopted from the memo design (docs/architecture.md there):
@@ -78,15 +79,7 @@ func (s *Service) audit(ctx context.Context, actor, action string, factID int64,
 	if actor == "" {
 		actor = "system"
 	}
-	_, _ = s.db.Exec(ctx, `INSERT INTO memory_audit(actor,action,fact_id,detail) VALUES($1,$2,$3,$4)`, actor, action, factID, brief(detail, 400))
-}
-
-func brief(t string, n int) string {
-	t = strings.Join(strings.Fields(t), " ")
-	if r := []rune(t); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return t
+	_, _ = s.db.Exec(ctx, `INSERT INTO memory_audit(actor,action,fact_id,detail) VALUES($1,$2,$3,$4)`, actor, action, factID, textutil.Brief(detail, 400))
 }
 
 // Audit lists what happened to a fact, newest first.

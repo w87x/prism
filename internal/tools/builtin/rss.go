@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"prism/internal/netguard"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -96,7 +97,7 @@ func ReadFeedAllow(ctx context.Context, url string, limit int, allowPrivate bool
 			if id == "" {
 				id = it.Link
 			}
-			items = append(items, FeedItem{Title: strip(it.Title), Link: strings.TrimSpace(it.Link), Published: it.Date, Summary: clip(strip(it.Desc), 240), ID: id})
+			items = append(items, FeedItem{Title: strip(it.Title), Link: strings.TrimSpace(it.Link), Published: it.Date, Summary: textutil.Cut(strip(it.Desc), 240), ID: id})
 		}
 	case "feed":
 		title = doc.Title
@@ -116,7 +117,7 @@ func ReadFeedAllow(ctx context.Context, url string, limit int, allowPrivate bool
 			if s == "" {
 				s = e.Content
 			}
-			items = append(items, FeedItem{Title: strip(e.Title), Link: link, Published: d, Summary: clip(strip(s), 240), ID: e.ID})
+			items = append(items, FeedItem{Title: strip(e.Title), Link: link, Published: d, Summary: textutil.Cut(strip(s), 240), ID: e.ID})
 		}
 	default:
 		return "", nil, fmt.Errorf("unrecognised feed format <%s>", doc.XMLName.Local)
@@ -141,13 +142,6 @@ func strip(s string) string {
 		}
 	}
 	return strings.Join(strings.Fields(sb.String()), " ")
-}
-
-func clip(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 func registerRSS(reg *tools.Registry, d Deps) {

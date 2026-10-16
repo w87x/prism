@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"prism/internal/textutil"
 )
 
 // Video and audio pages are not files: yt-dlp finds the real streams, merges them and names the result. The
@@ -123,7 +125,7 @@ func (dl *Downloader) runYtdlp(ctx context.Context, x Download, dir string) {
 		}
 	}
 	werr := cmd.Wait()
-	dest := firstNonEmpty(firstNonEmpty(yp.Dest, x.Dest), dir)
+	dest := textutil.FirstNonEmpty(textutil.FirstNonEmpty(yp.Dest, x.Dest), dir)
 	switch {
 	case ctx.Err() != nil:
 		dl.finish(x, "cancelled", last, 100, ctx.Err(), dest)

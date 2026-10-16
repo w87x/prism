@@ -10,6 +10,7 @@ import (
 
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // Runbooks. A routine job (a cron, a standing intent) runs on the small model to keep it cheap, and small models are the ones
@@ -151,7 +152,7 @@ func (e *Engine) afterRoutine(ctx context.Context, t tasks.Task, state string, r
 			if success {
 				note = fmt.Sprintf("the small model had to escalate %d time(s)", escalations)
 			} else if t.Error != "" {
-				note = brief(t.Error, 160)
+				note = textutil.Brief(t.Error, 160)
 			}
 			e.runbookLoss(ctx, key, note)
 		}
@@ -190,7 +191,7 @@ func (e *Engine) writeRunbook(ctx context.Context, t tasks.Task, old Runbook) {
 	if t.SessionID == nil || e.LLM == nil {
 		return
 	}
-	in := fmt.Sprintf("THE JOB:\n%s\n\nWHAT A SUCCESSFUL RUN DID:\n%s\n\nITS FINAL REPLY:\n%s", brief(t.Input, 1500), orNone(e.toolTrail(ctx, *t.SessionID)), brief(t.Result, 800))
+	in := fmt.Sprintf("THE JOB:\n%s\n\nWHAT A SUCCESSFUL RUN DID:\n%s\n\nITS FINAL REPLY:\n%s", textutil.Brief(t.Input, 1500), orNone(e.toolTrail(ctx, *t.SessionID)), textutil.Brief(t.Result, 800))
 	if old.Status == "stale" && old.Steps != "" {
 		in += fmt.Sprintf("\n\nEARLIER RUNBOOK (it stopped working: %s):\n%s", orNone(old.Note), old.Steps)
 	}
@@ -231,7 +232,7 @@ func (e *Engine) maybeAudit(ctx context.Context, t tasks.Task, rb Runbook) {
 			OK      *bool  `json:"ok"`
 			Problem string `json:"problem"`
 		}
-		in := fmt.Sprintf("THE JOB:\n%s\n\nRUNBOOK:\n%s\n\nWHAT IT DID:\n%s\n\nFINAL REPLY:\n%s", brief(t.Input, 1200), orNone(rb.Steps), orNone(e.toolTrail(bg, *t.SessionID)), brief(t.Result, 800))
+		in := fmt.Sprintf("THE JOB:\n%s\n\nRUNBOOK:\n%s\n\nWHAT IT DID:\n%s\n\nFINAL REPLY:\n%s", textutil.Brief(t.Input, 1200), orNone(rb.Steps), orNone(e.toolTrail(bg, *t.SessionID)), textutil.Brief(t.Result, 800))
 		if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "audit", "chat"), auditPrompt, in, &v); err != nil || v.OK == nil {
 			return
 		}

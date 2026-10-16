@@ -37,7 +37,6 @@ The requester is another agent, not the user.
 FIRST decide whether this request is really your job: does it fall within your purpose (your soul) and can you do it with your own toolset? If it clearly does not — it is another agent's field, or it needs capabilities you do not have — answer immediately, before any tool call, with exactly one line: NOT_CAPABLE: <one sentence: why, and what kind of agent it needs>. Do not attempt it anyway and do not improvise a workaround; your requester will pick someone else, or arrange for a suitable agent to exist. When it is your job, go on:
 Return the result of the task (concise, self-contained, with key facts/links/paths).
 If you are blocked by something only the user can decide, call ask_user with a precise question; it will be relayed.
-If you are blocked because a tool you need is not in your toolset, do not improvise: ask_colleague a holder, or call report_blocked (what is missing, what you did, artifact references to your partial work) so your requester can route the rest.
 `
 
 // buildSystem assembles the system prompt: soul, rules, skills index, deferred-tool hint,

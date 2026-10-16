@@ -8,6 +8,7 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/settings"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -90,7 +91,7 @@ func (e *Engine) MakePlan(ctx context.Context, text, topic string, projects []pl
 	for _, p := range projects {
 		fmt.Fprintf(&sb, "- %s", p.Name)
 		if d := strings.TrimSpace(p.Description); d != "" {
-			fmt.Fprintf(&sb, " — %s", brief(d, 140))
+			fmt.Fprintf(&sb, " — %s", textutil.Brief(d, 140))
 		}
 		sb.WriteString("\n")
 	}
@@ -105,11 +106,11 @@ func (e *Engine) MakePlan(ctx context.Context, text, topic string, projects []pl
 	if hist, err := e.ChatHistory(ctx, "web", topic, 6); err == nil {
 		for _, h := range hist {
 			if h.Role == "user" || h.Role == "agent" {
-				fmt.Fprintf(&sb, "%s: %s\n", h.Role, brief(h.Text, 200))
+				fmt.Fprintf(&sb, "%s: %s\n", h.Role, textutil.Brief(h.Text, 200))
 			}
 		}
 	}
-	fmt.Fprintf(&sb, "\nNEW MESSAGE:\n%s", brief(text, 2000))
+	fmt.Fprintf(&sb, "\nNEW MESSAGE:\n%s", textutil.Brief(text, 2000))
 	var p Plan
 	pctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()

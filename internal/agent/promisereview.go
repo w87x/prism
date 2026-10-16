@@ -9,6 +9,7 @@ import (
 
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textutil"
 )
 
 // Promise review. An autonomous agent (a cron, a standing intent) often ends its report with something like "I looked for the
@@ -61,7 +62,7 @@ func (e *Engine) toolTrail(ctx context.Context, sessionID int64) string {
 	results := map[string]string{}
 	for _, m := range msgs {
 		if m.Role == "tool" {
-			results[m.ToolCallID] = brief(strings.Join(strings.Fields(m.Content), " "), 160)
+			results[m.ToolCallID] = textutil.Brief(strings.Join(strings.Fields(m.Content), " "), 160)
 		}
 	}
 	var sb strings.Builder
@@ -71,7 +72,7 @@ func (e *Engine) toolTrail(ctx context.Context, sessionID int64) string {
 			if n++; n > 60 {
 				return sb.String() + "…(more calls not shown)\n"
 			}
-			fmt.Fprintf(&sb, "- %s(%s) → %s\n", c.Name, brief(strings.Join(strings.Fields(c.Arguments), " "), 140), results[c.ID])
+			fmt.Fprintf(&sb, "- %s(%s) → %s\n", c.Name, textutil.Brief(strings.Join(strings.Fields(c.Arguments), " "), 140), results[c.ID])
 		}
 	}
 	return sb.String()
@@ -94,7 +95,7 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 	var out struct {
 		Commitments []promiseItem `json:"commitments"`
 	}
-	user := fmt.Sprintf("TASK:\n%s\n\nREPORT:\n%s\n\nTOOL CALLS:\n%s", brief(t.Input, 1500), brief(t.Result, 3000), trail)
+	user := fmt.Sprintf("TASK:\n%s\n\nREPORT:\n%s\n\nTOOL CALLS:\n%s", textutil.Brief(t.Input, 1500), textutil.Brief(t.Result, 3000), trail)
 	rctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	if err := e.LLM.CompleteJSON(rctx, e.LLM.ActionRef(rctx, "promise_review", "fast"), promiseReviewPrompt, user, &out); err != nil {
@@ -137,11 +138,11 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 	}
 	if mode == "fix" && t.FromName != promiseReviewName { // one correction per run: the follow-up's own review only reports
 		if _, err := e.FixPromise(ctx, id); err == nil {
-			e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.%s", brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent, repeat)})
+			e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent, repeat)})
 			return
 		}
 	}
-	e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", brief(t.Title, 60), strings.Join(lines, "\n"), repeat)})
+	e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), repeat)})
 }
 
 // FixPromise asks the agent whose run left promises unkept to make them real: do the action now if its condition already holds,
@@ -162,9 +163,9 @@ func (e *Engine) FixPromise(ctx context.Context, id int64) (*tasks.Task, error) 
 	}
 	var sb strings.Builder
 	sb.WriteString("Your earlier run of this task said it would do, or had done, things that did not happen — nothing in your tool calls carried them out, and nothing will carry them out later on its own.\n\nThe task was:\n")
-	sb.WriteString(brief(orig.Input, 1200))
+	sb.WriteString(textutil.Brief(orig.Input, 1200))
 	sb.WriteString("\n\nYour report said:\n")
-	sb.WriteString(brief(orig.Result, 1500))
+	sb.WriteString(textutil.Brief(orig.Result, 1500))
 	sb.WriteString("\n\nWhat is missing:\n")
 	for _, p := range r.Promises {
 		fmt.Fprintf(&sb, "- %s (%s)", p.Text, strings.ReplaceAll(p.Status, "_", " "))
@@ -174,7 +175,7 @@ func (e *Engine) FixPromise(ctx context.Context, id int64) (*tasks.Task, error) 
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\nMake it real now, with your tools. If the condition is already met, do the action (for example start the download) and confirm it started. If it depends on something in the future, set up the standing watch, cron or intent that will do it when it happens (or sleep and check again) — a sentence promising it later is not enough. Finish by stating exactly what you did or set up; if you cannot, say so plainly.")
-	t, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: promiseReviewName, ToAgent: r.Agent, Title: "Keep a promise: " + brief(r.Title, 60), Input: sb.String()})
+	t, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: promiseReviewName, ToAgent: r.Agent, Title: "Keep a promise: " + textutil.Brief(r.Title, 60), Input: sb.String()})
 	if err != nil {
 		return nil, err
 	}

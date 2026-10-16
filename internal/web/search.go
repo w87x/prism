@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/html"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 )
 
 type Result struct {
@@ -174,7 +175,7 @@ func searchTavily(ctx context.Context, c settings.Web, q string, limit int) ([]R
 	defer resp.Body.Close()
 	b := readAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, clip(string(b), 200))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, textutil.Brief(string(b), 200))
 	}
 	var r struct {
 		Results []struct{ Title, URL, Content string } `json:"results"`
@@ -184,7 +185,7 @@ func searchTavily(ctx context.Context, c settings.Web, q string, limit int) ([]R
 	}
 	var out []Result
 	for _, x := range r.Results {
-		out = append(out, Result{x.Title, x.URL, clip(x.Content, 400)})
+		out = append(out, Result{x.Title, x.URL, textutil.Brief(x.Content, 400)})
 	}
 	return out, nil
 }
@@ -207,7 +208,7 @@ func searchAnySearch(ctx context.Context, c settings.Web, q string, limit int) (
 	defer resp.Body.Close()
 	b := readAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, clip(string(b), 200))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, textutil.Brief(string(b), 200))
 	}
 	var r struct {
 		Data struct {
@@ -224,7 +225,7 @@ func searchAnySearch(ctx context.Context, c settings.Web, q string, limit int) (
 	}
 	var out []Result
 	for _, x := range items {
-		out = append(out, Result{x.Title, x.URL, clip(firstNonEmpty(x.Snippet, x.Content), 400)})
+		out = append(out, Result{x.Title, x.URL, textutil.Brief(textutil.FirstNonEmpty(x.Snippet, x.Content), 400)})
 	}
 	return out, nil
 }
@@ -303,7 +304,7 @@ func searchYandex(ctx context.Context, c settings.Web, q string, limit int) ([]R
 		return nil, err
 	}
 	if code/100 != 2 {
-		return nil, fmt.Errorf("HTTP %d: %s", code, clip(string(b), 200))
+		return nil, fmt.Errorf("HTTP %d: %s", code, textutil.Brief(string(b), 200))
 	}
 	var op struct {
 		ID       string                    `json:"id"`
@@ -413,21 +414,4 @@ func userAgent(c settings.Web) string {
 		return c.UserAgent
 	}
 	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-}
-
-func clip(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
-}
-
-func firstNonEmpty(a ...string) string {
-	for _, x := range a {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
 }

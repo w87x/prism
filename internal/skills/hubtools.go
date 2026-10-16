@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -38,7 +39,7 @@ func RegisterHubTools(reg *tools.Registry, s *Store, adapt func(context.Context,
 				}
 				var sb strings.Builder
 				for _, h := range hits {
-					fmt.Fprintf(&sb, "- %s [hub %q, path %s]: %s\n", h.Name, h.Hub, h.Path, clip(h.Description, 160))
+					fmt.Fprintf(&sb, "- %s [hub %q, path %s]: %s\n", h.Name, h.Hub, h.Path, textutil.Brief(h.Description, 160))
 				}
 				return sb.String(), nil
 			},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"prism/internal/cron"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -354,7 +355,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					if i.Type != "watch" || i.ExpiresAt == nil {
 						continue
 					}
-					fmt.Fprintf(&sb, "#%d [%s] %s — every %ds, %s — %s%s\n", i.ID, i.Status, i.Description, i.CadenceS, timeLeft(i), firstNonEmpty(i.Progress, "no progress yet"), monitorNote(i))
+					fmt.Fprintf(&sb, "#%d [%s] %s — every %ds, %s — %s%s\n", i.ID, i.Status, i.Description, i.CadenceS, timeLeft(i), textutil.FirstNonEmpty(i.Progress, "no progress yet"), monitorNote(i))
 				}
 				if sb.Len() == 0 {
 					return "No monitors.", nil

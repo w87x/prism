@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/textmatch"
+	"prism/internal/tracker"
 )
 
 // Job hygiene. Agents create scheduled jobs one at a time, and nobody reads them together afterwards: "check Avito price for X", "…for
@@ -26,24 +28,28 @@ import (
 // (cron_history), so it can be undone.
 
 type JobProposal struct {
-	ID        int64      `json:"id"`
-	Kind      string     `json:"kind"`
-	CronIDs   []int64    `json:"cron_ids"`
-	Names     []string   `json:"names"`
-	Title     string     `json:"title"`
-	NewPrompt string     `json:"new_prompt"`
-	NewExpr   string     `json:"new_expr"`
-	OldPrompt string     `json:"old_prompt"`
-	Rationale string     `json:"rationale"`
-	Evidence  string     `json:"evidence"`
-	Status    string     `json:"status"`
-	Auto      bool       `json:"auto"`
-	CreatedAt time.Time  `json:"created_at"`
-	DecidedAt *time.Time `json:"decided_at,omitempty"`
+	ID        int64    `json:"id"`
+	Kind      string   `json:"kind"`
+	CronIDs   []int64  `json:"cron_ids"`
+	Names     []string `json:"names"`
+	Title     string   `json:"title"`
+	NewPrompt string   `json:"new_prompt"`
+	NewExpr   string   `json:"new_expr"`
+	OldPrompt string   `json:"old_prompt"`
+	Rationale string   `json:"rationale"`
+	Evidence  string   `json:"evidence"`
+	Status    string   `json:"status"`
+	Auto      bool     `json:"auto"`
+	// Plan is the tracker a "tracker" proposal would create; NewAgent the agent that should run its refresh job.
+	Plan        json.RawMessage `json:"plan,omitempty"`
+	NewAgent    string          `json:"new_agent,omitempty"`
+	TrackerName string          `json:"tracker_name,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	DecidedAt   *time.Time      `json:"decided_at,omitempty"`
 }
 
 func (s *Service) JobProposals(ctx context.Context, status string) ([]JobProposal, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id, kind, cron_ids, title, new_prompt, new_expr, rationale, evidence, status, auto, created_at, decided_at FROM job_proposals
+	rows, err := s.DB.Query(ctx, `SELECT id, kind, cron_ids, title, new_prompt, new_expr, rationale, evidence, status, auto, plan, new_agent, tracker_name, created_at, decided_at FROM job_proposals
 		WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT 100`, status)
 	if err != nil {
 		return nil, err
@@ -51,7 +57,7 @@ func (s *Service) JobProposals(ctx context.Context, status string) ([]JobProposa
 	var out []JobProposal
 	for rows.Next() {
 		var p JobProposal
-		if rows.Scan(&p.ID, &p.Kind, &p.CronIDs, &p.Title, &p.NewPrompt, &p.NewExpr, &p.Rationale, &p.Evidence, &p.Status, &p.Auto, &p.CreatedAt, &p.DecidedAt) == nil {
+		if rows.Scan(&p.ID, &p.Kind, &p.CronIDs, &p.Title, &p.NewPrompt, &p.NewExpr, &p.Rationale, &p.Evidence, &p.Status, &p.Auto, &p.Plan, &p.NewAgent, &p.TrackerName, &p.CreatedAt, &p.DecidedAt) == nil {
 			out = append(out, p)
 		}
 	}
@@ -98,6 +104,22 @@ const mergePrompt = `You manage a user's scheduled jobs. Below are several jobs 
 If yes: write the single merged prompt. It must cover every item, keep every threshold, condition and instruction of each job, keep telling the agent to reply exactly NO_REPLY when there is nothing to report, and name each item explicitly. Choose the schedule (cron expression) that serves the most demanding of them.
 If any job needs different logic, a different agent's tools or a different schedule for a real reason, answer same=false.
 Answer JSON only: {"same":true|false,"prompt":"...","expr":"...","why":"one or two sentences"}`
+
+const trackerPrompt = `Several scheduled jobs of a user's AI assistant check the same kind of thing for different items. Decide whether they should become ONE TRACKER (a table with a row per item, refreshed by a single job) instead of one merged prompt.
+Say fit=true only if there are 3 or more items and each has values that change over time and are worth comparing or keeping a history of (prices, counts, status, availability). Say fit=false for a plain "check and tell me" job without values to keep.
+If fit: columns — the first is "item" (string); then only the typed values the jobs really look at (type string, number, boolean or time; unit for a number, like USD). items — one per item across all the jobs, key = the item's name exactly, data = {"item": name} plus any fixed attribute that has a column. prompt — the standing prompt of the single refresh job: for each listed item look up its current values by the method the original jobs describe; then ONE tracker_snapshot call (this tracker, run_id = the current date and time, complete=true, a row per item keyed by the item name exactly as listed; leave out what could not be observed, never invent); then look at tracker_changes and tell the user only what matters under the original jobs' conditions and thresholds (keep every one), otherwise reply exactly NO_REPLY. Name the tracker and list the items inside the prompt. expr — the schedule that serves the most demanding job.
+Answer JSON only: {"fit":true|false,"name":"short tracker name","description":"one line","columns":[{"name":"item","type":"string"},{"name":"price","type":"number","unit":"USD"}],"items":[{"key":"…","data":{"item":"…"}}],"prompt":"…","expr":"…","why":"one or two sentences"}`
+
+// trackerPlan is what a "tracker" proposal would create.
+type trackerPlan struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Columns     []tracker.Column `json:"columns"`
+	Items       []struct {
+		Key  string         `json:"key"`
+		Data map[string]any `json:"data"`
+	} `json:"items"`
+}
 
 const rewritePrompt = `You review one scheduled job of a user's AI assistant. You get its prompt, how its recent runs went, lessons already learned for the agent that runs it, and facts memory holds that relate to it.
 Decide whether the prompt should change so the job stops failing or uses what was learned — for example an approach known to fail replaced by the one that worked, a missing detail added, a wrong assumption fixed. Change only what the evidence supports. Keep the job's purpose, its conditions and thresholds, and the instruction to reply exactly NO_REPLY when there is nothing to report.
@@ -209,6 +231,13 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 				v.Expr = ""
 			}
 		}
+		if len(c) >= 3 {
+			if id, ok := s.proposeTracker(ctx, c, sb.String(), ids, names); ok {
+				made++
+				s.settle(ctx, id)
+				continue
+			}
+		}
 		id, err := s.addJobProposal(ctx, "merge", ids, "Merge "+strings.Join(names, ", "), v.Prompt, v.Expr, v.Why, "")
 		if err == nil {
 			made++
@@ -243,6 +272,82 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 		}
 	}
 	return made, nil
+}
+
+// trackerHolder picks the agent that will run a tracker's refresh job: the job's own agent if it holds the snapshot tool, else any
+// enabled agent that does.
+func (s *Service) trackerHolder(ctx context.Context, preferred string) string {
+	has := func(tools []string) bool {
+		a, b := false, false
+		for _, t := range tools {
+			a = a || t == "tracker_snapshot"
+			b = b || t == "tracker_changes"
+		}
+		return a && b
+	}
+	if p, err := s.Engine.Profiles.Get(ctx, preferred); err == nil && p.Enabled && has(p.Tools) {
+		return p.Name
+	}
+	if ps, err := s.Engine.Profiles.List(ctx); err == nil {
+		for _, p := range ps {
+			if p.Enabled && has(p.Tools) {
+				return p.Name
+			}
+		}
+	}
+	return ""
+}
+
+// proposeTracker asks whether a cluster that is really one check should rather be a tracker with a row per item, and files that
+// proposal if so.
+func (s *Service) proposeTracker(ctx context.Context, c []jobRow, jobsText string, ids []int64, names []string) (int64, bool) {
+	if s.Trackers == nil {
+		return 0, false
+	}
+	holder := s.trackerHolder(ctx, c[0].Agent)
+	if holder == "" {
+		return 0, false
+	}
+	var v struct {
+		Fit         *bool            `json:"fit"`
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		Columns     []tracker.Column `json:"columns"`
+		Items       []struct {
+			Key  string         `json:"key"`
+			Data map[string]any `json:"data"`
+		} `json:"items"`
+		Prompt string `json:"prompt"`
+		Expr   string `json:"expr"`
+		Why    string `json:"why"`
+	}
+	cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), trackerPrompt, jobsText, &v)
+	cancel()
+	if err != nil || v.Fit == nil || !*v.Fit || strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.Prompt) == "" || len(v.Items) < 2 || len(v.Columns) < 1 {
+		return 0, false
+	}
+	if !strings.EqualFold(v.Columns[0].Name, "item") {
+		v.Columns = append([]tracker.Column{{Name: "item", Type: "string"}}, v.Columns...)
+	}
+	if len(v.Columns) < 2 {
+		return 0, false // a table of names only keeps nothing worth keeping
+	}
+	if e := strings.TrimSpace(v.Expr); e != "" {
+		if _, perr := cron.Parse(e); perr != nil {
+			v.Expr = ""
+		}
+	}
+	plan := trackerPlan{Name: strings.TrimSpace(v.Name), Description: strings.TrimSpace(v.Description), Columns: v.Columns, Items: v.Items}
+	pb, _ := json.Marshal(plan)
+	var id int64
+	err = s.DB.QueryRow(ctx, `INSERT INTO job_proposals (kind, cron_ids, title, new_prompt, new_expr, rationale, plan, new_agent) VALUES ('tracker',$1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+		ids, "Track as a table: "+plan.Name+" ("+strings.Join(names, ", ")+")", strings.TrimSpace(v.Prompt), strings.TrimSpace(v.Expr), strings.TrimSpace(v.Why), pb, holder).Scan(&id)
+	if err != nil {
+		return 0, false
+	}
+	s.emit("jobs.proposal", map[string]any{"id": id, "title": plan.Name})
+	return id, true
 }
 
 // jobEvidence gathers what bears on a job's prompt and whether there is reason to look at it at all.
@@ -359,14 +464,47 @@ func (s *Service) ApplyJobProposal(ctx context.Context, id int64, auto bool) err
 	if expr != "" {
 		patch.Expr = &expr
 	}
+	trackerName := ""
+	if kind == "tracker" {
+		var planRaw []byte
+		var newAgent string
+		_ = s.DB.QueryRow(ctx, `SELECT plan, new_agent FROM job_proposals WHERE id=$1`, id).Scan(&planRaw, &newAgent)
+		var plan trackerPlan
+		if err := json.Unmarshal(planRaw, &plan); err != nil || s.Trackers == nil || plan.Name == "" {
+			return errors.New("this proposal has no usable tracker plan")
+		}
+		t, err := s.Trackers.Create(ctx, plan.Name, plan.Description, plan.Columns, "job review")
+		if err != nil {
+			return err
+		}
+		trackerName = t.Name
+		for _, it := range plan.Items {
+			if strings.TrimSpace(it.Key) == "" {
+				continue
+			}
+			if it.Data == nil {
+				it.Data = map[string]any{"item": it.Key}
+			}
+			if _, _, err := s.Trackers.UpsertRow(ctx, t.ID, strings.TrimSpace(it.Key), it.Data, ""); err != nil {
+				_ = s.Trackers.Delete(ctx, t.Name)
+				return fmt.Errorf("starting rows for the tracker: %w", err)
+			}
+		}
+		if newAgent != "" {
+			patch.Agent = &newAgent
+		}
+	}
 	hist := []int64{}
 	if h, err := s.recordHistory(ctx, keeper, why); err == nil {
 		hist = append(hist, h)
 	}
 	if _, err := s.UpdateCron(ctx, keeper, patch); err != nil {
+		if trackerName != "" {
+			_ = s.Trackers.Delete(ctx, trackerName)
+		}
 		return err
 	}
-	if kind == "merge" {
+	if kind == "merge" || kind == "tracker" {
 		for _, other := range ids[1:] {
 			if h, err := s.recordHistory(ctx, other, why); err == nil {
 				hist = append(hist, h)
@@ -374,7 +512,7 @@ func (s *Service) ApplyJobProposal(ctx context.Context, id int64, auto bool) err
 			_ = s.FinishCron(ctx, other, fmt.Sprintf("merged into #%d", keeper))
 		}
 	}
-	_, err := s.DB.Exec(ctx, `UPDATE job_proposals SET status='applied', auto=$2, decided_at=now(), undo_ids=$3 WHERE id=$1`, id, auto, hist)
+	_, err := s.DB.Exec(ctx, `UPDATE job_proposals SET status='applied', auto=$2, decided_at=now(), undo_ids=$3, tracker_name=$4 WHERE id=$1`, id, auto, hist, trackerName)
 	return err
 }
 

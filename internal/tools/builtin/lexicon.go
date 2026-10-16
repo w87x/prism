@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"prism/internal/settings"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -62,15 +63,8 @@ func registerLexicon(reg *tools.Registry, d Deps) {
 				}
 			}
 			out, err := d.LLM.Complete(ctx, "role:fast", "You are a precise bilingual dictionary. Give the translation, part of speech, a one-line definition and one short example. Be brief.",
-				fmt.Sprintf("Term: %s\nTarget language: %s\nSource language: %s", a.Term, a.To, firstNonEmpty(a.From, "auto-detect")), false)
+				fmt.Sprintf("Term: %s\nTarget language: %s\nSource language: %s", a.Term, a.To, textutil.FirstNonEmpty(a.From, "auto-detect")), false)
 			return out, err
 		},
 	})
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

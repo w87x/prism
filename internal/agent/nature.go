@@ -12,6 +12,7 @@ import (
 
 	"prism/internal/tasks"
 	"prism/internal/textmatch"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -62,7 +63,7 @@ func (b *toolBreaker) allow(tool string) (bool, string) {
 		}
 	}
 	return false, fmt.Sprintf("Error: %s is paused for everyone until %s — it kept failing (%d of its last %d calls; last error: %s). Do not retry it now: use another way, or report that it is unavailable.",
-		tool, s.openUntil.Format("15:04"), fails, len(s.out), brief(s.last, 160))
+		tool, s.openUntil.Format("15:04"), fails, len(s.out), textutil.Brief(s.last, 160))
 }
 
 // infraFailure tells a tool that is broken (down, timing out, refusing connections, rate-limited, erroring on its side) from a call
@@ -150,6 +151,7 @@ func (e *Engine) ResumeTool(tool string) {
 	if s := e.brk.m[tool]; s != nil {
 		s.openUntil, s.trips, s.out = time.Time{}, 0, nil
 	}
+	e.Emit("tool.resumed", map[string]any{"tool": tool})
 }
 
 // ── ant trails ──
@@ -365,17 +367,7 @@ const scoutBrief = "Recon only. Another agent will do the real work in a moment;
 // scout takes a quick read-only look at a job before the real run and returns a brief for the agent that will do it ("" when the
 // look produced nothing useful).
 func (e *Engine) scout(ctx context.Context, env *tools.Env, p *Profile, instruction, title string, depth int) string {
-	pid := env.TaskID
-	var parent *int64
-	var root int64
-	if pid != 0 {
-		parent = &pid
-		if pt, err := e.Tasks.Get(ctx, pid); err == nil {
-			root = pt.RootID
-		}
-	}
-	t, err := e.Tasks.Create(ctx, tasks.Task{ParentID: parent, RootID: root, FromKind: "agent", FromName: env.Agent, ToAgent: p.Name,
-		Title: "Scout: " + title, Input: scoutBrief + instruction, Depth: depth}, true)
+	t, err := e.childTask(ctx, env, p, "Scout: "+title, scoutBrief+instruction, depth)
 	if err != nil {
 		return ""
 	}

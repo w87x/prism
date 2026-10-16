@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"prism/internal/textutil"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"prism/internal/settings"
 	"prism/internal/tasks"
 	"prism/internal/tasksum"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -294,14 +294,6 @@ func (e *Engine) register(spec RunSpec) *activeRun {
 	return ar
 }
 
-func brief(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
-}
-
 // Run executes one agent turn-sequence (until a final answer, a needed input, or budget exhaustion).
 func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	p := spec.Profile
@@ -314,7 +306,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	ar.cancel = cancel
 	defer cancel()
 	if ar.task.Load() == nil {
-		ar.task.Store(brief(spec.Input, 90))
+		ar.task.Store(textutil.Brief(spec.Input, 90))
 	}
 	e.Emit("run.start", ar.Info)
 	res := &RunResult{}
@@ -1097,10 +1089,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 	defer ar.touch()
 	ar.calls.Add(1)
 	emit := func(phase string, ok bool, why ...string) {
-		ev := map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": brief(tc.Arguments, 140),
+		ev := map[string]any{"run": ar.Info.ID, "agent": env.Agent, "tool": tc.Name, "args": textutil.Brief(tc.Arguments, 140),
 			"phase": phase, "ok": ok, "ms": time.Since(start).Milliseconds()}
 		if len(why) > 0 && why[0] != "" {
-			ev["error"] = brief(why[0], 200)
+			ev["error"] = textutil.Brief(why[0], 200)
 		}
 		e.Emit("run.tool", ev)
 	}
@@ -1180,7 +1172,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 			if tainted && st.Armed {
 				why = "untrusted content (web/mcp/file) is in this turn's context"
 			}
-			ans, err := e.ask(ctx, ar.Info, tools.Question{Kind: "confirm", Tool: tc.Name, Args: brief(tc.Arguments, 600),
+			ans, err := e.ask(ctx, ar.Info, tools.Question{Kind: "confirm", Tool: tc.Name, Args: textutil.Brief(tc.Arguments, 600),
 				Text: fmt.Sprintf("%s wants to run %s [%s] — %s.", env.Agent, tc.Name, tool.Risk, why), Options: []string{"allow", "allow for this task", "deny"}})
 			if strings.EqualFold(strings.TrimSpace(ans), "allow for this task") {
 				ar.approved.Store(tc.Name, true)
@@ -1261,7 +1253,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 						if r.err != nil {
 							txt = "failed: " + r.err.Error()
 						}
-						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, brief(txt, 600)), spec.Channel, spec.Topic, env.TaskID)
+						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, textutil.Brief(txt, 600)), spec.Channel, spec.Topic, env.TaskID)
 					}
 				}()
 				return toolResult{text: e.interruptedText(ctx, tool.Name, env.TaskID, detached, spec.SteerFrom)}
@@ -1278,7 +1270,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 			}
 			if tripped, until := e.brk.record(tc.Name, err == nil, msg); tripped {
 				e.Emit("tool.paused", map[string]any{"tool": tc.Name, "until": until})
-				e.Notify(context.WithoutCancel(ctx), Notice{Level: "attention", Text: fmt.Sprintf("%s keeps failing, so I paused it for everyone until %s (last error: %s). Resume it in Autonomy → Team → Tools once what is wrong is fixed.", tc.Name, until.Format("15:04"), brief(msg, 140))})
+				e.Notify(context.WithoutCancel(ctx), Notice{Level: "attention", Text: fmt.Sprintf("%s keeps failing, so I paused it for everyone until %s (last error: %s). Resume it in Autonomy → Team → Tools once what is wrong is fixed.", tc.Name, until.Format("15:04"), textutil.Brief(msg, 140))})
 			}
 		}
 	}
@@ -1364,7 +1356,7 @@ func (e *Engine) interruptedText(ctx context.Context, tool string, taskID int64,
 				var id int64
 				var agent, title, status string
 				if rows.Scan(&id, &agent, &title, &status) == nil {
-					lines = append(lines, fmt.Sprintf("#%d %s (%s): %s", id, agent, status, brief(title, 80)))
+					lines = append(lines, fmt.Sprintf("#%d %s (%s): %s", id, agent, status, textutil.Brief(title, 80)))
 				}
 			}
 			if len(lines) > 0 {

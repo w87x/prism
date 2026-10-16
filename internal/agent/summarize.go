@@ -7,6 +7,7 @@ import (
 
 	"prism/internal/tasks"
 	"prism/internal/tasksum"
+	"prism/internal/textutil"
 )
 
 // transcript renders the full step-by-step record of a finished task: every tool call, its result, and the
@@ -19,7 +20,7 @@ func (e *Engine) transcript(ctx context.Context, id int64) (t tasks.Task, text s
 		return t, "", 0, false, err
 	}
 	if t.SessionID == nil {
-		return t, fmt.Sprintf("Task #%d %s (%s → %s): %s\n(no session transcript recorded)", t.ID, t.Status, t.FromKind, t.ToAgent, brief(t.Input, 400)), 0, false, nil
+		return t, fmt.Sprintf("Task #%d %s (%s → %s): %s\n(no session transcript recorded)", t.ID, t.Status, t.FromKind, t.ToAgent, textutil.Brief(t.Input, 400)), 0, false, nil
 	}
 	msgs, err := e.Sessions.Messages(ctx, *t.SessionID)
 	if err != nil {
@@ -33,19 +34,19 @@ func (e *Engine) transcript(ctx context.Context, id int64) (t tasks.Task, text s
 		case len(m.ToolCalls) > 0:
 			for _, tc := range m.ToolCalls {
 				calls++
-				fmt.Fprintf(&sb, "→ %s(%s)\n", tc.Name, brief(tc.Arguments, 300))
+				fmt.Fprintf(&sb, "→ %s(%s)\n", tc.Name, textutil.Brief(tc.Arguments, 300))
 			}
 		case m.Role == "tool":
-			fmt.Fprintf(&sb, "  = %s\n", brief(m.Content, 500))
+			fmt.Fprintf(&sb, "  = %s\n", textutil.Brief(m.Content, 500))
 		case strings.TrimSpace(m.Content) != "":
-			fmt.Fprintf(&sb, "[%s] %s\n", m.Role, brief(m.Content, 500))
+			fmt.Fprintf(&sb, "[%s] %s\n", m.Role, textutil.Brief(m.Content, 500))
 		}
 	}
 	if t.Result != "" {
-		fmt.Fprintf(&sb, "\nFinal result: %s\n", brief(t.Result, 800))
+		fmt.Fprintf(&sb, "\nFinal result: %s\n", textutil.Brief(t.Result, 800))
 	}
 	if t.Error != "" {
-		fmt.Fprintf(&sb, "\nError: %s\n", brief(t.Error, 400))
+		fmt.Fprintf(&sb, "\nError: %s\n", textutil.Brief(t.Error, 400))
 	}
 	return t, sb.String(), calls, tainted, nil
 }
@@ -82,7 +83,7 @@ func (e *Engine) SummarizeTask(ctx context.Context, id int64) (bool, error) {
 	}
 	title := strings.TrimSpace(parsed.Title)
 	if title == "" {
-		title = brief(t.Input, 80)
+		title = textutil.Brief(t.Input, 80)
 	}
 	if _, err := e.TaskSum.Save(ctx, tasksum.Summary{
 		TaskID: t.ID, Agent: t.ToAgent, Title: title, Status: t.Status,
