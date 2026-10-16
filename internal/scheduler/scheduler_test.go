@@ -434,7 +434,7 @@ func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.
 		sys, _ := ms[0].(map[string]any)["content"].(string)
 		switch {
 		case strings.Contains(sys, "ONE kind of check"):
-			return testutil.Reply{Content: `{"same":true,"prompt":"Check Avito prices for X, Y and Z; reply NO_REPLY when none is under its limit.","expr":"@hourly","why":"the same check over three items"}`}
+			return testutil.Reply{Content: `{"same":true,"prompt":"Check Avito prices for X (under 700000), Y (under 800000) and Z (under 900000); reply NO_REPLY when none is under its limit.","expr":"@hourly","why":"the same check over three items"}`}
 		case strings.Contains(sys, "review one scheduled job"):
 			return testutil.Reply{Content: `{"revise":true,"prompt":"Check the Haunted Hotel torrent on the mobile site; reply NO_REPLY when nothing new.","why":"the desktop site blocked three runs"}`}
 		}
@@ -468,7 +468,7 @@ func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.
 			merge = p
 		}
 	}
-	if len(merge.CronIDs) != 3 || !strings.Contains(merge.NewPrompt, "X, Y and Z") {
+	if len(merge.CronIDs) != 3 || !strings.Contains(merge.NewPrompt, "Y (under 800000)") {
 		t.Fatalf("the three similar jobs are one proposal: %+v", merge)
 	}
 	if err := s.ApplyJobProposal(ctx, merge.ID, false); err != nil {
@@ -480,7 +480,7 @@ func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.
 		if x.ID == a || x.ID == b || x.ID == c {
 			if x.FinishedAt != nil {
 				finished++
-			} else if x.Enabled && strings.Contains(x.Prompt, "X, Y and Z") && x.Expr == "@hourly" {
+			} else if x.Enabled && strings.Contains(x.Prompt, "Y (under 800000)") && x.Expr == "@hourly" {
 				live++
 			}
 		}
@@ -493,7 +493,7 @@ func TestJobReviewMergesDuplicatesAndRewritesFailingJobsUnderTheDial(t *testing.
 	}
 	cs, _ = s.Crons(ctx)
 	for _, x := range cs {
-		if (x.ID == a || x.ID == b || x.ID == c) && (!x.Enabled || x.FinishedAt != nil || strings.Contains(x.Prompt, "X, Y and Z")) {
+		if (x.ID == a || x.ID == b || x.ID == c) && (!x.Enabled || x.FinishedAt != nil || strings.Contains(x.Prompt, "Y (under 800000)")) {
 			t.Fatalf("undo puts all three back: %+v", x)
 		}
 	}
@@ -524,10 +524,10 @@ func TestJobReviewTurnsAGroupOfChecksIntoATracker(t *testing.T) {
 		switch {
 		case strings.Contains(sys, "ONE TRACKER"):
 			return testutil.Reply{Content: `{"fit":true,"name":"FEVM boxes","description":"Avito prices","columns":[{"name":"price","type":"number","unit":"RUB"}],
-				"items":[{"key":"FEVM X","data":{"item":"FEVM X"}},{"key":"FEVM Y","data":{"item":"FEVM Y"}},{"key":"FEVM Z","data":{"item":"FEVM Z"}}],
-				"prompt":"Refresh tracker FEVM boxes for FEVM X, FEVM Y, FEVM Z with one tracker_snapshot; reply NO_REPLY when nothing is under its limit.","expr":"@hourly","why":"three items with a price each"}`}
+				"items":[{"key":"FEVM X","data":{"item":"FEVM X"},"notify_when":"under 700000"},{"key":"FEVM Y","data":{"item":"FEVM Y"},"notify_when":"under 700000"},{"key":"FEVM Z","data":{"item":"FEVM Z"},"notify_when":"under 700000"}],
+				"method":"search Avito for the box","expr":"@hourly","why":"three items with a price each"}`}
 		case strings.Contains(sys, "ONE kind of check"):
-			return testutil.Reply{Content: `{"same":true,"prompt":"merged","expr":"@hourly","why":"same check"}`}
+			return testutil.Reply{Content: `{"same":true,"prompt":"merged 700000","expr":"@hourly","why":"same check"}`}
 		}
 		return testutil.Reply{Content: "ok"}
 	}
@@ -585,5 +585,28 @@ func TestJobReviewTurnsAGroupOfChecksIntoATracker(t *testing.T) {
 	}
 	if _, err := s.Trackers.Get(ctx, "FEVM boxes"); err != nil {
 		t.Fatal("the tracker stays")
+	}
+}
+
+func TestKeepsNumbersAndRefreshPrompt(t *testing.T) {
+	orig := []string{"tell me if it is under 700 000 RUB", "alert when below 800000"}
+	if !keepsNumbers(orig, "X under 700000, Y below 800 000") {
+		t.Fatal("same figures, spaced differently, are kept")
+	}
+	if keepsNumbers(orig, "X under 700000, Y below 900000") {
+		t.Fatal("a changed or missing threshold is caught")
+	}
+	var plan trackerPlan
+	plan.Name = "Boxes"
+	plan.Items = append(plan.Items, struct {
+		Key        string         `json:"key"`
+		Data       map[string]any `json:"data"`
+		NotifyWhen string         `json:"notify_when"`
+	}{Key: "FEVM X", NotifyWhen: "the cheapest listing is under 700000 RUB"})
+	p := refreshPrompt(plan, "search Avito")
+	for _, want := range []string{`"Boxes"`, "FEVM X", "under 700000 RUB", "tracker_snapshot", "NO_REPLY", "search Avito"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("refresh prompt lacks %q: %s", want, p)
+		}
 	}
 }

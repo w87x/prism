@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -107,8 +108,8 @@ Answer JSON only: {"same":true|false,"prompt":"...","expr":"...","why":"one or t
 
 const trackerPrompt = `Several scheduled jobs of a user's AI assistant check the same kind of thing for different items. Decide whether they should become ONE TRACKER (a table with a row per item, refreshed by a single job) instead of one merged prompt.
 Say fit=true only if there are 3 or more items and each has values that change over time and are worth comparing or keeping a history of (prices, counts, status, availability). Say fit=false for a plain "check and tell me" job without values to keep.
-If fit: columns — the first is "item" (string); then only the typed values the jobs really look at (type string, number, boolean or time; unit for a number, like USD). items — one per item across all the jobs, key = the item's name exactly, data = {"item": name} plus any fixed attribute that has a column. prompt — the standing prompt of the single refresh job: for each listed item look up its current values by the method the original jobs describe; then ONE tracker_snapshot call (this tracker, run_id = the current date and time, complete=true, a row per item keyed by the item name exactly as listed; leave out what could not be observed, never invent); then look at tracker_changes and tell the user only what matters under the original jobs' conditions and thresholds (keep every one), otherwise reply exactly NO_REPLY. Name the tracker and list the items inside the prompt. expr — the schedule that serves the most demanding job.
-Answer JSON only: {"fit":true|false,"name":"short tracker name","description":"one line","columns":[{"name":"item","type":"string"},{"name":"price","type":"number","unit":"USD"}],"items":[{"key":"…","data":{"item":"…"}}],"prompt":"…","expr":"…","why":"one or two sentences"}`
+If fit: columns — the first is "item" (string); then only values that are OBSERVED about an item and change (a price, a stock count, a status), never the user's thresholds, flags or settings (type string, number, boolean or time; unit for a number, like USD). items — one per item across all the jobs: key = the item's name as the user would say it (like "FEVM X", never a single letter), data = {"item": the same name}, notify_when = the user's condition for telling them about THIS item, copied from its job with the same direction and numbers ("the cheapest listing is under 700000 RUB" stays "under", never "over"). method — how to look an item up, as the jobs describe it (where, what to search, which value counts), in a few sentences without any thresholds. expr — the schedule that serves the most demanding job.
+Answer JSON only: {"fit":true|false,"name":"short tracker name","description":"one line","columns":[{"name":"item","type":"string"},{"name":"price","type":"number","unit":"USD"}],"items":[{"key":"…","data":{"item":"…"},"notify_when":"…"}],"method":"…","expr":"…","why":"one or two sentences"}`
 
 // trackerPlan is what a "tracker" proposal would create.
 type trackerPlan struct {
@@ -116,9 +117,48 @@ type trackerPlan struct {
 	Description string           `json:"description"`
 	Columns     []tracker.Column `json:"columns"`
 	Items       []struct {
-		Key  string         `json:"key"`
-		Data map[string]any `json:"data"`
+		Key        string         `json:"key"`
+		Data       map[string]any `json:"data"`
+		NotifyWhen string         `json:"notify_when"`
 	} `json:"items"`
+}
+
+// refreshPrompt writes the standing prompt of a tracker's single refresh job. The model supplies the facts (items, how to look one up,
+// when to tell the user); the wording that makes the job work — which tool, which keys, when to stay silent — is fixed here, so a
+// model slip cannot leave the job without its item list or with a condition turned around.
+func refreshPrompt(plan trackerPlan, method string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Refresh the tracker %q.\n\nItems (use each key exactly as written):\n", plan.Name)
+	for _, it := range plan.Items {
+		fmt.Fprintf(&sb, "- %s", it.Key)
+		if w := strings.TrimSpace(it.NotifyWhen); w != "" {
+			fmt.Fprintf(&sb, " — tell the user when: %s", w)
+		}
+		sb.WriteString("\n")
+	}
+	if m := strings.TrimSpace(method); m != "" {
+		fmt.Fprintf(&sb, "\nHow to look an item up: %s\n", m)
+	}
+	sb.WriteString("\nLook up every item, then record the whole refresh with ONE tracker_snapshot call (tracker " + plan.Name + ", run_id = the current date and time, complete=true, one row per item keyed as listed; leave out a value you could not observe — never invent one). ")
+	sb.WriteString("Then call tracker_changes and tell the user only about items whose condition above is met, naming the item, the value and the link. If no condition is met, reply exactly NO_REPLY.")
+	return sb.String()
+}
+
+var numberRe = regexp.MustCompile(`\d[\d\s.,]*\d|\d`)
+
+// keepsNumbers reports whether every figure in the original prompts (thresholds, limits, counts) still appears in the new text.
+// A rewrite or merge that drops or changes a number has changed what the job means, whatever the model says it did.
+func keepsNumbers(originals []string, newText string) bool {
+	norm := func(x string) string { return strings.NewReplacer(" ", "", ",", "", ".", "", "\u00a0", "").Replace(x) }
+	have := norm(newText)
+	for _, o := range originals {
+		for _, n := range numberRe.FindAllString(o, -1) {
+			if d := norm(n); len(d) >= 3 && !strings.Contains(have, d) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 const rewritePrompt = `You review one scheduled job of a user's AI assistant. You get its prompt, how its recent runs went, lessons already learned for the agent that runs it, and facts memory holds that relate to it.
@@ -226,6 +266,7 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 		if err != nil || v.Same == nil || !*v.Same || strings.TrimSpace(v.Prompt) == "" {
 			continue
 		}
+
 		if e := strings.TrimSpace(v.Expr); e != "" {
 			if _, perr := cron.Parse(e); perr != nil {
 				v.Expr = ""
@@ -237,6 +278,13 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 				s.settle(ctx, id)
 				continue
 			}
+		}
+		var originals []string
+		for _, j := range c {
+			originals = append(originals, j.Prompt)
+		}
+		if !keepsNumbers(originals, v.Prompt) {
+			continue // the merged prompt lost a threshold or limit: leave the jobs as they are
 		}
 		id, err := s.addJobProposal(ctx, "merge", ids, "Merge "+strings.Join(names, ", "), v.Prompt, v.Expr, v.Why, "")
 		if err == nil {
@@ -262,7 +310,7 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 		cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 		err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), rewritePrompt, "THE JOB #"+fmt.Sprint(j.ID)+" "+j.Name+" (agent "+j.Agent+", "+j.Expr+")\nPROMPT: "+j.Prompt+"\n\n"+evidence, &v)
 		cancel()
-		if err != nil || v.Revise == nil || !*v.Revise || strings.TrimSpace(v.Prompt) == "" || strings.TrimSpace(v.Prompt) == strings.TrimSpace(j.Prompt) {
+		if err != nil || v.Revise == nil || !*v.Revise || strings.TrimSpace(v.Prompt) == "" || strings.TrimSpace(v.Prompt) == strings.TrimSpace(j.Prompt) || !keepsNumbers([]string{j.Prompt}, v.Prompt) {
 			continue
 		}
 		id, err := s.addJobProposal(ctx, "rewrite", []int64{j.ID}, "Rewrite "+j.Name, v.Prompt, "", v.Why, evidence)
@@ -314,17 +362,18 @@ func (s *Service) proposeTracker(ctx context.Context, c []jobRow, jobsText strin
 		Description string           `json:"description"`
 		Columns     []tracker.Column `json:"columns"`
 		Items       []struct {
-			Key  string         `json:"key"`
-			Data map[string]any `json:"data"`
+			Key        string         `json:"key"`
+			Data       map[string]any `json:"data"`
+			NotifyWhen string         `json:"notify_when"`
 		} `json:"items"`
-		Prompt string `json:"prompt"`
+		Method string `json:"method"`
 		Expr   string `json:"expr"`
 		Why    string `json:"why"`
 	}
 	cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), trackerPrompt, jobsText, &v)
 	cancel()
-	if err != nil || v.Fit == nil || !*v.Fit || strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.Prompt) == "" || len(v.Items) < 2 || len(v.Columns) < 1 {
+	if err != nil || v.Fit == nil || !*v.Fit || strings.TrimSpace(v.Name) == "" || len(v.Items) < 2 || len(v.Columns) < 1 {
 		return 0, false
 	}
 	if !strings.EqualFold(v.Columns[0].Name, "item") {
@@ -339,10 +388,18 @@ func (s *Service) proposeTracker(ctx context.Context, c []jobRow, jobsText strin
 		}
 	}
 	plan := trackerPlan{Name: strings.TrimSpace(v.Name), Description: strings.TrimSpace(v.Description), Columns: v.Columns, Items: v.Items}
+	prompt := refreshPrompt(plan, v.Method)
+	var originals []string
+	for _, j := range c {
+		originals = append(originals, j.Prompt)
+	}
+	if !keepsNumbers(originals, prompt) {
+		return 0, false // a threshold went missing or changed on the way: not a faithful translation of these jobs
+	}
 	pb, _ := json.Marshal(plan)
 	var id int64
 	err = s.DB.QueryRow(ctx, `INSERT INTO job_proposals (kind, cron_ids, title, new_prompt, new_expr, rationale, plan, new_agent) VALUES ('tracker',$1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		ids, "Track as a table: "+plan.Name+" ("+strings.Join(names, ", ")+")", strings.TrimSpace(v.Prompt), strings.TrimSpace(v.Expr), strings.TrimSpace(v.Why), pb, holder).Scan(&id)
+		ids, "Track as a table: "+plan.Name+" ("+strings.Join(names, ", ")+")", prompt, strings.TrimSpace(v.Expr), strings.TrimSpace(v.Why), pb, holder).Scan(&id)
 	if err != nil {
 		return 0, false
 	}
