@@ -100,7 +100,11 @@ func (a *App) buildExtensions(ctx context.Context) error {
 	fsDeps := builtin.Deps{DB: a.DB.Pool, Settings: a.Settings, DataDir: a.Cfg.DataDir}
 	x.Browser = &browser.Manager{Settings: a.Settings, DataDir: a.Cfg.DataDir, CanRead: fsDeps.CanReadPath}
 	x.Browser.Save = func(ctx context.Context, name, mime string, data []byte, by string) (int64, string, error) {
-		art, err := builtin.SaveArtifact(ctx, builtin.Deps{DB: a.DB.Pool, DataDir: a.Cfg.DataDir, Emit: a.Emit}, name, mime, data, by)
+		var o builtin.ArtifactOpts
+		if name == "screenshot.png" { // a look at a page is for the moment; a downloaded file is not
+			o.TTL = 3 * 24 * time.Hour
+		}
+		art, err := builtin.SaveArtifactOpts(ctx, builtin.Deps{DB: a.DB.Pool, DataDir: a.Cfg.DataDir, Emit: a.Emit}, name, mime, data, by, o)
 		if err != nil {
 			return 0, "", err
 		}

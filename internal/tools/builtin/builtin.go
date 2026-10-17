@@ -3,6 +3,7 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -410,6 +411,18 @@ func SaveArtifact(ctx context.Context, d Deps, name, mime string, content []byte
 
 // SaveArtifactOpts is SaveArtifact with a lifetime and provenance. Ephemeral artifacts live in their own folder.
 func SaveArtifactOpts(ctx context.Context, d Deps, name, mime string, content []byte, by string, o ArtifactOpts) (*Artifact, error) {
+	if a := sameArtifact(ctx, d, name, by, content); a != nil { // the same agent saving the same file again adds nothing
+		switch {
+		case o.TTL <= 0 && a.ExpiresAt != nil: // now wanted for good
+			_ = KeepArtifact(ctx, d.DB, a.ID)
+			a.ExpiresAt = nil
+		case o.TTL > 0 && a.ExpiresAt != nil && time.Now().Add(min(o.TTL, MaxArtifactTTL)).After(*a.ExpiresAt): // wanted a while longer
+			t := time.Now().Add(min(o.TTL, MaxArtifactTTL))
+			_, _ = d.DB.Exec(ctx, `UPDATE artifacts SET expires_at=$2 WHERE id=$1`, a.ID, t)
+			a.ExpiresAt = &t
+		}
+		return a, nil
+	}
 	sub := time.Now().Format("2006-01")
 	if o.TTL > 0 {
 		_, _ = PurgeArtifacts(ctx, d.DB) // expired hand-offs go whenever a new one is made, not only on the hourly sweep
@@ -447,6 +460,25 @@ func SaveArtifactOpts(ctx context.Context, d Deps, name, mime string, content []
 	return a, err
 }
 
+// sameArtifact finds a live artifact with this name from this creator whose content is byte-for-byte the same.
+func sameArtifact(ctx context.Context, d Deps, name, by string, content []byte) *Artifact {
+	rows, err := d.DB.Query(ctx, `SELECT `+artifactCols+` FROM artifacts WHERE name=$1 AND created_by=$2 AND size=$3 AND (expires_at IS NULL OR expires_at>now()) ORDER BY id DESC LIMIT 3`, name, by, int64(len(content)))
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanArtifact(rows)
+		if err != nil {
+			continue
+		}
+		if b, err := os.ReadFile(a.Path); err == nil && bytes.Equal(b, content) {
+			return &a
+		}
+	}
+	return nil
+}
+
 func safeName(n string) string {
 	n = filepath.Base(strings.TrimSpace(n))
 	n = strings.Map(func(r rune) rune {
@@ -465,25 +497,31 @@ func registerArtifacts(reg *tools.Registry, d Deps) {
 	reg.Register(
 		&tools.Tool{
 			Name: "artifact_save", Category: "files", Base: true, Risk: tools.RiskWrite, Auto: true,
-			Description: "Save a deliverable (report, CSV, markdown, code, JSON) as an artifact and get its id. Two uses: a lasting deliverable for the user (default), " +
-				"or a temporary hand-off to another agent — set ttl_minutes (e.g. 120) and the artifact deletes itself afterwards; then tell your requester 'see artifact #N' and they read it with artifact_read. " +
+			Description: "Save a file (report, CSV, markdown, code, JSON) as an artifact and get its id. By default it is TEMPORARY and deletes itself after 7 days, which is right for working notes, " +
+				"intermediate results and hand-offs to another agent (set ttl_minutes, e.g. 120, for a shorter life; tell your requester 'see artifact #N' and they read it with artifact_read). " +
+				"Set keep=true ONLY for a deliverable the user asked for and will want to find later. Saving the same file again does not create a duplicate. " +
 				"Prefer an artifact over pasting a long result into your answer.",
 			Params: tools.Obj("name,content", tools.Str("name", "file name with extension"), tools.Str("content", "file content (text)"),
 				tools.Str("mime", "MIME type, default inferred text/plain"),
-				tools.Int("ttl_minutes", "make it temporary: deleted after this many minutes (max 10080). Omit for a lasting artifact")),
+				tools.Int("ttl_minutes", "deleted after this many minutes (max 10080 = 7 days, the default)"),
+				tools.Bool("keep", "true: keep it until the user deletes it — only for a deliverable the user asked for")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
 					Name       string `json:"name"`
 					Content    string `json:"content"`
 					Mime       string `json:"mime"`
 					TTLMinutes int    `json:"ttl_minutes"`
+					Keep       bool   `json:"keep"`
 				}](raw)
 				if err != nil {
 					return "", err
 				}
 				o := ArtifactOpts{Tainted: env.Tainted, SessionID: env.SessionID}
-				if a.TTLMinutes > 0 {
+				switch {
+				case a.TTLMinutes > 0:
 					o.TTL = time.Duration(a.TTLMinutes) * time.Minute
+				case !a.Keep:
+					o.TTL = MaxArtifactTTL // working files do not pile up: a deliverable is marked keep
 				}
 				art, err := SaveArtifactOpts(ctx, d, a.Name, a.Mime, []byte(a.Content), env.Agent, o)
 				if err != nil {
@@ -492,7 +530,7 @@ func registerArtifacts(reg *tools.Registry, d Deps) {
 				if art.ExpiresAt != nil {
 					return fmt.Sprintf("Temporary artifact #%d saved (%d bytes), expires %s. Tell the reader: artifact_read id=%d.", art.ID, art.Size, art.ExpiresAt.Format("15:04 on 2 Jan"), art.ID), nil
 				}
-				return fmt.Sprintf("Artifact #%d saved at %s (%d bytes).", art.ID, art.Path, art.Size), nil
+				return fmt.Sprintf("Artifact #%d saved at %s (%d bytes), kept until the user deletes it.", art.ID, art.Path, art.Size), nil
 			},
 		},
 		&tools.Tool{

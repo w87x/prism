@@ -64,7 +64,7 @@ func TestEphemeralArtifactsHandOffBetweenAgents(t *testing.T) {
 	}
 
 	// lasting artifacts are unaffected, and a temporary one can be kept
-	call("artifact_save", sender, map[string]any{"name": "report.md", "content": "final"})
+	call("artifact_save", sender, map[string]any{"name": "report.md", "content": "final", "keep": true})
 	if err := KeepArtifact(ctx, deps.DB, id); err != nil {
 		t.Fatal(err)
 	}
@@ -103,5 +103,41 @@ func TestEphemeralArtifactsHandOffBetweenAgents(t *testing.T) {
 	as, _ = ListArtifacts(ctx, deps.DB)
 	if got, _ = call("artifact_read", reader, map[string]any{"id": as[0].ID}); !strings.Contains(got, "Binary content") {
 		t.Fatalf("binary: %q", got)
+	}
+}
+
+func TestArtifactsAreTemporaryByDefaultAndNeverDuplicated(t *testing.T) {
+	reg, deps, _, _ := setup(t)
+	ctx := context.Background()
+	call := func(env *tools.Env, args any) (string, error) {
+		tool, _ := reg.Get("artifact_save")
+		b, _ := json.Marshal(args)
+		return tool.Run(ctx, env, b)
+	}
+	agent := &tools.Env{Agent: "Mira", SessionID: 7}
+	if _, err := call(agent, map[string]any{"name": "notes.md", "content": "working notes"}); err != nil {
+		t.Fatal(err)
+	}
+	as, _ := ListArtifacts(ctx, deps.DB)
+	if len(as) != 1 || as[0].ExpiresAt == nil || time.Until(*as[0].ExpiresAt) < 6*24*time.Hour {
+		t.Fatalf("working files expire after a week by default: %+v", as)
+	}
+	if _, err := call(agent, map[string]any{"name": "notes.md", "content": "working notes"}); err != nil {
+		t.Fatal(err)
+	}
+	if as, _ = ListArtifacts(ctx, deps.DB); len(as) != 1 {
+		t.Fatalf("saving the same file again adds nothing: %d", len(as))
+	}
+	if _, err := call(agent, map[string]any{"name": "notes.md", "content": "working notes", "keep": true}); err != nil {
+		t.Fatal(err)
+	}
+	if as, _ = ListArtifacts(ctx, deps.DB); len(as) != 1 || as[0].ExpiresAt != nil {
+		t.Fatalf("saving it again with keep makes the existing one lasting: %+v", as)
+	}
+	if _, err := call(agent, map[string]any{"name": "notes.md", "content": "changed notes"}); err != nil {
+		t.Fatal(err)
+	}
+	if as, _ = ListArtifacts(ctx, deps.DB); len(as) != 2 {
+		t.Fatalf("different content is a different artifact: %d", len(as))
 	}
 }
