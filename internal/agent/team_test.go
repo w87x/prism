@@ -296,3 +296,29 @@ func TestReviewerNeverAutoMatchesWholeWords(t *testing.T) {
 		}
 	}
 }
+
+func TestHousekeepingNoticesGoToTheBellNotTheChat(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var bell []string
+	h.e.Bell = func(kind, level, title, text string) { bell = append(bell, kind+"|"+title+"|"+text) }
+	h.e.NotifyHousekeeping(ctx, "error", "A task looks stuck", Notice{Agent: "Vera", Level: "warning", Text: "no activity for 2h"}, false)
+	if len(bell) != 1 || !strings.Contains(bell[0], "no activity for 2h") {
+		t.Fatalf("the bell got it: %v", bell)
+	}
+	msgs, _ := h.e.ChatHistory(ctx, "web", "", 20)
+	for _, m := range msgs {
+		if strings.Contains(m.Text, "no activity for 2h") {
+			t.Fatal("a housekeeping notice must not land in the main chat")
+		}
+	}
+	h.e.Notify(ctx, Notice{Agent: "Ilya", Level: "info", Text: "price dropped to 599000"})
+	if msgs, _ = h.e.ChatHistory(ctx, "web", "", 20); len(msgs) == 0 || !strings.Contains(msgs[len(msgs)-1].Text, "price dropped") {
+		t.Fatal("news the user wants still arrives in the chat")
+	}
+	h.e.Bell = nil
+	h.e.NotifyHousekeeping(ctx, "error", "x", Notice{Agent: "Vera", Level: "warning", Text: "fallback text"}, false)
+	if msgs, _ = h.e.ChatHistory(ctx, "web", "", 20); !strings.Contains(msgs[len(msgs)-1].Text, "fallback text") {
+		t.Fatal("without a bell the notice is not lost: it falls back to the chat")
+	}
+}

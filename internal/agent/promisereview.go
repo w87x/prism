@@ -138,11 +138,11 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 	}
 	if mode == "fix" && t.FromName != promiseReviewName { // one correction per run: the follow-up's own review only reports
 		if _, err := e.FixPromise(ctx, id); err == nil {
-			e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent, repeat)})
+			e.NotifyHousekeeping(ctx, "autonomy", t.ToAgent+": a promise was not kept", Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” said it would do something it did not do:\n%s\nI asked %s to make it happen now.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), t.ToAgent, repeat)}, false)
 			return
 		}
 	}
-	e.Notify(ctx, Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), repeat)})
+	e.NotifyHousekeeping(ctx, "autonomy", t.ToAgent+": promises not carried out", Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), repeat)}, false)
 }
 
 // FixPromise asks the agent whose run left promises unkept to make them real: do the action now if its condition already holds,

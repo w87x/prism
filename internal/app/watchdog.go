@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"prism/internal/agent"
 	"prism/internal/settings"
 	"prism/internal/textutil"
 )
@@ -42,8 +41,8 @@ func (a *App) stallLoop(ctx context.Context) {
 			if what == "" {
 				what = r.Title
 			}
-			a.Engine.Notify(ctx, agent.Notice{Agent: r.Agent, Level: "warning",
-				Text: fmt.Sprintf("“%s” has shown no activity for %s — no model call, tool call or output. It may be stuck (a hung model server or tool). Open Tasks to stop it, or leave it if it is a long wait.", textutil.Cut(what, 70), idle)})
+			a.Notify("error", "warning", r.Agent+": a task looks stuck",
+				fmt.Sprintf("“%s” has shown no activity for %s — no model call, tool call or output. It may be stuck (a hung model server or tool). Open Tasks to stop it, or leave it if it is a long wait.", textutil.Cut(what, 70), idle))
 		}
 		for id := range told { // forget runs that ended or woke up
 			if !live[id] {

@@ -174,6 +174,7 @@ func (a *App) build(ctx context.Context) error {
 	a.Engine = agent.NewEngine(agent.Deps{DB: a.DB.Pool, LLM: a.LLM, Tools: a.Tools, Profiles: a.Profiles, Sessions: a.Sessions,
 		Tasks: a.Tasks, Memory: a.Memory, TaskSum: a.TaskSum, Settings: a.Settings, Emit: a.Emit, DefaultBanks: a.defaultBanks})
 	a.Engine.OnTaskDone = a.reviewWorkspaces
+	a.Engine.Bell = a.Notify // housekeeping notices go to the bell, not the chat
 	a.Memory.ChatProject = a.Engine.ChatProject
 
 	// tools

@@ -39,12 +39,12 @@ func (e *Engine) StartIncidentWatch(ctx context.Context) {
 			_, _ = e.DB.Exec(bg, `INSERT INTO incidents (reason) VALUES ($1)`, reason)
 			var queued int
 			_ = e.DB.QueryRow(bg, `SELECT count(*) FROM tasks WHERE status='queued'`).Scan(&queued)
-			e.Notify(bg, Notice{Level: "attention", Text: fmt.Sprintf("No model is reachable (%s). I paused background work — scheduled jobs are skipped and %d queued tasks wait — and will carry on by myself as soon as a model answers again. If this is LM Studio: load a model.", textutil.Brief(reason, 160), queued)})
+			e.NotifyHousekeeping(bg, "error", "No model is reachable", Notice{Level: "attention", Text: fmt.Sprintf("No model is reachable (%s). I paused background work — scheduled jobs are skipped and %d queued tasks wait — and will carry on by myself as soon as a model answers again. If this is LM Studio: load a model.", textutil.Brief(reason, 160), queued)}, true)
 			return
 		}
 		var skipped int
 		_ = e.DB.QueryRow(bg, `UPDATE incidents SET ended_at=now() WHERE ended_at IS NULL RETURNING skipped`).Scan(&skipped)
-		e.Notify(bg, Notice{Level: "info", Text: fmt.Sprintf("A model answers again — background work resumed (%d scheduled runs were skipped meanwhile).", skipped)})
+		e.NotifyHousekeeping(bg, "error", "A model answers again", Notice{Level: "info", Text: fmt.Sprintf("A model answers again — background work resumed (%d scheduled runs were skipped meanwhile).", skipped)}, true)
 		e.wake()
 	})
 	go func() {

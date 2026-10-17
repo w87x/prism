@@ -210,11 +210,11 @@ func (e *Engine) checkEvolutionWatches(ctx context.Context) {
 			continue
 		}
 		if err := e.rollbackEvolution(ctx, x.id, "rolled_back", why); err == nil {
-			e.Notify(ctx, Notice{Level: "attention", Text: fmt.Sprintf("I rolled back the automatic change to %s (evolution #%d): %s. Its previous version is back.", x.agent, x.id, why)})
+			e.NotifyHousekeeping(ctx, "proposal", x.agent+": change rolled back", Notice{Level: "attention", Text: fmt.Sprintf("I rolled back the automatic change to %s (evolution #%d): %s. Its previous version is back.", x.agent, x.id, why)}, true)
 			e.Emit("evolution.rolledback", map[string]any{"id": x.id, "agent": x.agent})
 		} else {
 			_, _ = e.DB.Exec(ctx, `UPDATE evolution_watch SET status='kept', note=$2, decided_at=now() WHERE proposal_id=$1`, x.id, "results dropped ("+why+") but not rolled back: "+err.Error())
-			e.Notify(ctx, Notice{Level: "attention", Text: fmt.Sprintf("Results of %s dropped after the automatic change #%d (%s), but I did not roll it back: %s.", x.agent, x.id, why, err.Error())})
+			e.NotifyHousekeeping(ctx, "proposal", x.agent+": results dropped", Notice{Level: "attention", Text: fmt.Sprintf("Results of %s dropped after the automatic change #%d (%s), but I did not roll it back: %s.", x.agent, x.id, why, err.Error())}, true)
 		}
 	}
 }

@@ -665,6 +665,20 @@ func (e *Engine) Notify(ctx context.Context, n Notice) {
 	}
 }
 
+// NotifyHousekeeping is for notices about the machinery rather than for the conversation — a stalled task, a paused tool, a rollback.
+// They go to the notification bell (and, when sinks is set, to Telegram / macOS), not into the main chat, which stays the place for
+// the user's own exchange with Atlas and for results they asked for.
+func (e *Engine) NotifyHousekeeping(ctx context.Context, kind, title string, n Notice, sinks bool) {
+	if e.Bell == nil {
+		e.Notify(ctx, n)
+		return
+	}
+	e.Bell(kind, n.Level, title, n.Text)
+	if sinks {
+		e.NotifySinks(ctx, n)
+	}
+}
+
 // NotifyReport is Notify for callers that must tell the truth about delivery: sinks that can report are called
 // in-line and their outcome is returned. Without any such sink the notice still reaches the web UI.
 func (e *Engine) NotifyReport(ctx context.Context, n Notice) string {
@@ -956,7 +970,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		}
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Partial, res.Text, res.Aborted, "")
 		if t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram") {
-			e.Notify(ctx, Notice{Agent: p.Name, Level: "attention", Text: fmt.Sprintf("“%s” stopped before finishing (%s). Open Today → Needs your attention to review what happened and choose how to proceed.", textutil.Brief(t.Title, 60), res.Aborted)})
+			e.NotifyHousekeeping(ctx, "error", p.Name+": stopped before finishing", Notice{Agent: p.Name, Level: "attention", Text: fmt.Sprintf("“%s” stopped before finishing (%s). Open Today → Needs your attention to review what happened and choose how to proceed.", textutil.Brief(t.Title, 60), res.Aborted)}, false)
 		}
 	default:
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
@@ -982,7 +996,11 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	if t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system") && res.NeedsInput == "" {
 		txt := strings.TrimSpace(res.Text)
 		if txt != "" && !strings.HasPrefix(txt, "[partial") && (t.FromName == "repair" || e.worthTelling(ctx, t, txt)) {
-			e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic})
+			if p.Role == RoleMaint && t.FromName != "repair" { // the staff's routine reports are housekeeping, not conversation
+				e.NotifyHousekeeping(ctx, "cron", p.Name+" report", Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic}, false)
+			} else {
+				e.Notify(ctx, Notice{Agent: p.Name, Text: txt, Level: "info", Topic: t.NotifyTopic})
+			}
 		}
 	}
 	return out

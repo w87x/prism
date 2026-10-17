@@ -80,7 +80,9 @@ type Engine struct {
 	asks      map[int64]*pendingAsk
 	cancels   map[int64]context.CancelFunc // task id → cancel
 	Sinks     []NoticeSink
-	brk       toolBreaker // tools cut off after repeated failures (nature.go)
+	// Bell files a housekeeping notice in the notification bell (wired by the app); nil falls back to the chat.
+	Bell func(kind, level, title, text string)
+	brk  toolBreaker // tools cut off after repeated failures (nature.go)
 	// OnTaskDone, when set, is called after a task finished successfully (used to review coding workspaces).
 	OnTaskDone func(ctx context.Context, t tasks.Task)
 }
@@ -1270,7 +1272,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 			}
 			if tripped, until := e.brk.record(tc.Name, err == nil, msg); tripped {
 				e.Emit("tool.paused", map[string]any{"tool": tc.Name, "until": until})
-				e.Notify(context.WithoutCancel(ctx), Notice{Level: "attention", Text: fmt.Sprintf("%s keeps failing, so I paused it for everyone until %s (last error: %s). Resume it in Autonomy → Team → Tools once what is wrong is fixed.", tc.Name, until.Format("15:04"), textutil.Brief(msg, 140))})
+				e.NotifyHousekeeping(context.WithoutCancel(ctx), "autonomy", tc.Name+" paused", Notice{Level: "attention", Text: fmt.Sprintf("%s keeps failing, so I paused it for everyone until %s (last error: %s). Resume it in Autonomy → Team → Tools once what is wrong is fixed.", tc.Name, until.Format("15:04"), textutil.Brief(msg, 140))}, false)
 			}
 		}
 	}
