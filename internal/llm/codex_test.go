@@ -201,6 +201,14 @@ func TestCodexLive(t *testing.T) {
 	}
 	t.Logf("models: %+v", ms)
 	ep := Endpoint{Kind: KindCodex, Model: ms[0].ID, Tools: true}
+	raw, err := codexapp.Default.Complete(ctx, codexapp.Request{Model: ms[0].ID, Instructions: "Answer in one word.", Input: "Colour of a clear daytime sky?", Effort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("input tokens Codex reports for a one-word question: %d (about 12.4k without the slimming)", raw.In)
+	if raw.In > 8000 {
+		t.Fatalf("Codex's own context is not being slimmed: %d input tokens", raw.In)
+	}
 	t0 := time.Now()
 	res, err := c.Chat(ctx, ep, Request{Messages: []Message{{Role: "system", Content: "You are a terse assistant."}, {Role: "user", Content: "In one word: what colour is a clear daytime sky?"}}}, nil)
 	if err != nil {

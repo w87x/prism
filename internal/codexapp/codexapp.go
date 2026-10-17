@@ -464,6 +464,19 @@ func firstNonEmpty(a ...string) string {
 	return ""
 }
 
+// slimConfig switches off everything of Codex's own that PRISM does not use. PRISM wants the model, not the agent around it: with
+// Codex's defaults a one-word question carried ~12.4k input tokens (its skills list, plugin and app catalogues, multi-agent and browser
+// tools, shell, web search, patch and plan tools); with these overrides ~4.2k (measured on the real service). They are ordinary config
+// keys, the same ones `codex -c key=value` takes.
+var slimConfig = map[string]any{
+	"skills.include_instructions": false, "skills.bundled.enabled": false,
+	"features.plugins": false, "features.apps": false, "features.multi_agent": false, "features.multi_agent_v2": false,
+	"features.goals": false, "features.browser_use": false, "features.computer_use": false, "features.in_app_browser": false,
+	"features.image_generation": false, "features.hooks": false, "features.skill_search": false, "features.sleep_tool": false,
+	"features.tool_suggest": false, "features.shell_tool": false, "features.unified_exec": false,
+	"web_search": "disabled", "include_apply_patch_tool": false, "include_plan_tool": false, "tools.view_image": false,
+}
+
 // Request is one model call.
 type Request struct {
 	Model        string
@@ -495,7 +508,13 @@ func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
 	if rq.Model != "" {
 		ts["model"] = rq.Model
 	}
+	ts["config"] = slimConfig
 	res, err := p.call(ctx, "thread/start", ts)
+	var ce *Error
+	if err != nil && errors.As(err, &ce) && !ce.Limit && !ce.Auth {
+		delete(ts, "config") // a Codex version that does not take these keys: work with its defaults rather than not at all
+		res, err = p.call(ctx, "thread/start", ts)
+	}
 	if err != nil {
 		return nil, err
 	}

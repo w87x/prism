@@ -155,7 +155,13 @@ func (c *Client) codexChat(ctx context.Context, ep Endpoint, r Request, onDelta 
 		}
 	}
 
-	rq := codexapp.Request{Model: ep.Model, Instructions: instr, Input: transcript(r.Messages), Images: files, Schema: schema}
+	// reasoning effort: Codex otherwise uses whatever the user set for their own coding sessions (often "high"), which is slow and spends the
+	// plan on thinking; a judging call needs little, a conversation or a tool turn a moderate amount
+	effort := "medium"
+	if r.JSON && !withTools {
+		effort = "low"
+	}
+	rq := codexapp.Request{Model: ep.Model, Instructions: instr, Input: transcript(r.Messages), Images: files, Schema: schema, Effort: effort}
 	if onDelta != nil && !withTools {
 		rq.OnDelta = func(s string) { onDelta(Delta{Content: s}) }
 	}
