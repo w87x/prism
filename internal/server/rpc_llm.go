@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"prism/internal/codexapp"
 	"strings"
 	"time"
 
@@ -76,6 +77,12 @@ func (s *Server) registerLLM() {
 		return a.LLM.Client().ListModels(cctx, base, key)
 	})
 	// the behind-the-scenes actions whose model can be chosen (main / aux), with their defaults; the choices live in the "model_actions" setting
+	// codex.status: whether the Codex CLI is installed and signed in, and the plan's usage windows (no credential is ever included)
+	rpc(s, "codex.status", func(ctx context.Context, _ none) (codexapp.Status, error) {
+		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+		defer cancel()
+		return codexapp.Default.Status(cctx), nil
+	})
 	rpc(s, "models.actions", func(ctx context.Context, _ none) ([]llm.Action, error) { return llm.Actions, nil })
 	rpc(s, "models.list", func(ctx context.Context, _ none) ([]llm.Model, error) { return st().Models(ctx) })
 	rpc(s, "models.save", func(ctx context.Context, m llm.Model) (int64, error) {

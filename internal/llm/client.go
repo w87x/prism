@@ -154,6 +154,9 @@ func isContextErr(e *APIError) bool {
 
 // Chat performs one streaming completion against ep. onDelta may be nil.
 func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(Delta)) (*Response, error) {
+	if ep.Kind == KindCodex {
+		return c.codexChat(ctx, ep, r, onDelta)
+	}
 	body := map[string]any{
 		"model":    ep.Model,
 		"messages": toWire(r.Messages),
@@ -413,6 +416,9 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 
 // Embed returns one vector per input.
 func (c *Client) Embed(ctx context.Context, ep Endpoint, inputs []string) ([][]float32, error) {
+	if ep.Kind == KindCodex {
+		return nil, errors.New("the ChatGPT subscription (Codex) provides chat models only, not embeddings")
+	}
 	req, err := c.newReq(ctx, ep, "/embeddings", map[string]any{"model": ep.Model, "input": inputs})
 	if err != nil {
 		return nil, err
@@ -488,6 +494,9 @@ func realtimeOnly(id string) bool {
 // ListModels queries GET /models. For LM Studio it enriches the result from
 // its native /api/v0/models endpoint (type, load state, context, capabilities).
 func (c *Client) ListModels(ctx context.Context, baseURL, apiKey string) ([]Discovered, error) {
+	if baseURL == CodexBaseURL {
+		return codexModels(ctx)
+	}
 	get := func(u string, out any) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {

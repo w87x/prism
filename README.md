@@ -90,6 +90,7 @@ Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (create
 | Autonomy: cron, standing intents, watches (files, processes, downloads, pages, feeds), dreams → briefings, soul-evolution proposals | `internal/scheduler`, `internal/cron` |
 | Team practices: acceptance criteria (`done_when`) checked by the lead, runbooks that let routine jobs run on the small model, four-eyes tool reviewer with earned trust, sampled audits, decision log, weekly standup with 👍/👎 ratings, incident mode when the model host is down, pain reflex (a failing tool is paused for everyone), ant trails, immune lessons, scouting, handover notes, team charter | `internal/agent/{acceptance,runbooks,review,standup,nature,relations,incident}.go` |
 | Autonomy dial: evolution and scheduled jobs are each **safe / guarded / armed**; automatic changes are watched and rolled back when results drop; weekly job review merges near-duplicate jobs and rewrites failing ones, with history and undo | `internal/agent/evolve.go`, `internal/scheduler/jobs.go` |
+| ChatGPT subscription as a model provider: models run through the Codex CLI's app-server on your ChatGPT sign-in (`codex login`), with tool calls carried over structured output; no API key, and PRISM never sees the token | `internal/codexapp`, `internal/llm/codex.go` |
 | Telegram (DM + forum topics with context), macOS (notifications, Reminders, …), Obsidian (iCloud vaults), semantic search | `internal/integrations/*`, `internal/docsearch` |
 
 ### Safety model

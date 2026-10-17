@@ -116,7 +116,10 @@
   let lists = $state([]);
   let roles = $state({ chat: '', fast: '', embedding: '' });
   let testing = $state({});
-  const kinds = ['openai', 'lmstudio', 'gemini', 'grok', 'openrouter', 'custom'];
+  const kinds = ['openai', 'codex', 'lmstudio', 'gemini', 'grok', 'openrouter', 'custom'];
+  // the ChatGPT subscription through the Codex CLI: no key; the card shows whether Codex is installed and signed in
+  let codexSt = $state(null);
+  async function checkCodex() { codexSt = { busy: true }; codexSt = (await call('codex.status', {}, { quiet: true })) || { error: 'no answer' }; }
   async function loadLLM() {
     const p = await call('providers.list', {}, { quiet: true });
     if (p) { provs = p.providers || []; presets = p.presets || {}; provs.forEach((x) => { newKey[x.id] ||= { label: '', api_key: '' }; }); }
@@ -380,7 +383,12 @@
           <div class="prov">
             <div class="row"><Led state={p.enabled ? 'ok' : 'off'} size={8} /><span class="hi">{p.name}</span><Badge tone="accent">{p.kind}</Badge><span class="sm mute ellipsis grow">{p.base_url}</span>
               <Button size="sm" variant="primary" onclick={() => discover(p)}>Discover models</Button><Button size="sm" variant="ghost" onclick={() => { prov = { ...p }; pOpen = true; }}>Edit</Button><Button size="sm" variant="ghost" onclick={() => delProv(p)}><Icon name="trash" size={11} /></Button></div>
-            {#if p.keys?.length}
+            {#if p.kind === 'codex'}
+              <div class="row addkey">
+                <span class="sm {codexSt?.logged_in ? 'ok' : codexSt?.error ? 'err' : 'mute'} grow">{#if codexSt?.busy}checking…{:else if codexSt?.logged_in}Signed in with {codexSt.kind === 'chatgpt' ? 'ChatGPT' : 'an API key'}{codexSt.plan ? ' · ' + codexSt.plan + ' plan' : ''} — models run on your subscription; Codex keeps the login, PRISM never sees it.{:else if codexSt?.error}{codexSt.error}{:else}Runs models on your ChatGPT subscription through the Codex CLI (sign in once with <code>codex login</code>).{/if}</span>
+                <Button size="sm" onclick={checkCodex}>Check sign-in</Button>
+              </div>
+            {:else if p.keys?.length}
               <table class="t keys"><tbody>
                 {#each p.keys as k (k.id)}
                   <tr><td class="mute">{k.label || 'key'}</td><td class="dim">{k.masked || '(keyless)'}</td><td><Switch bind:checked={k.enabled} onchange={() => saveKey(k)} /></td>
@@ -389,7 +397,7 @@
                 {/each}
               </tbody></table>
             {/if}
-            {#if newKey[p.id]}
+            {#if newKey[p.id] && p.kind !== 'codex'}
               <div class="row addkey">
                 <div class="k1"><Input size="sm" bind:value={newKey[p.id].label} placeholder="label" /></div>
                 <div class="grow"><Input size="sm" type="password" bind:value={newKey[p.id].api_key} placeholder={p.kind === 'lmstudio' || p.kind === 'custom' ? 'API key (optional)' : 'API key — several keys give automatic fallback'} /></div>
@@ -667,7 +675,7 @@
   {#if prov}
     <Field label="Name"><Input bind:value={prov.name} placeholder="OpenAI" /></Field>
     <Field label="Kind"><Select bind:value={prov.kind} options={kinds} onchange={(k) => { if (!prov.id || !prov.base_url) prov.base_url = presets[k] || ''; }} /></Field>
-    <Field label="Base URL" hint="OpenAI-compatible, including /v1"><Input bind:value={prov.base_url} mono /></Field>
+    <Field label="Base URL" hint={prov.kind === 'codex' ? 'not used: models run through the Codex CLI on your ChatGPT subscription (sign in once with `codex login`)' : 'OpenAI-compatible, including /v1'}><Input bind:value={prov.base_url} mono disabled={prov.kind === 'codex'} /></Field>
     <Switch bind:checked={prov.enabled} label="enabled" />
   {/if}
   {#snippet footer()}<Button variant="ghost" onclick={() => (pOpen = false)}>Cancel</Button><Button variant="primary" disabled={!prov?.name?.trim()} onclick={saveProv}>Save</Button>{/snippet}

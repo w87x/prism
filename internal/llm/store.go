@@ -58,6 +58,7 @@ var ProviderPresets = map[string]string{
 	"openrouter": "https://openrouter.ai/api/v1",
 	"lmstudio":   "http://localhost:1234/v1",
 	"custom":     "",
+	KindCodex:    CodexBaseURL, // the ChatGPT subscription through the Codex CLI: no key, no URL
 }
 
 func Mask(k string) string {

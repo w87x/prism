@@ -9,9 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"prism/internal/codexapp"
 	"sort"
 	"strings"
 	"sync"
@@ -293,30 +291,7 @@ func clip(s string, n int) string {
 }
 
 // Where a GUI-launched PRISM may not have the shell's PATH, look in the usual install spots too.
-func findCodex(cfg settings.Consult) (string, error) {
-	bin := cfg.CodexBin
-	if bin == "" {
-		bin = "codex"
-	}
-	if strings.ContainsRune(bin, filepath.Separator) {
-		if _, err := os.Stat(bin); err != nil {
-			return "", fmt.Errorf("codex binary %s: %w", bin, err)
-		}
-		return bin, nil
-	}
-	if p, err := exec.LookPath(bin); err == nil {
-		return p, nil
-	}
-	home, _ := os.UserHomeDir()
-	for _, d := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".local/bin"),
-		filepath.Join(home, ".npm-global/bin"), filepath.Join(home, ".bun/bin"), filepath.Join(home, ".volta/bin")} {
-		p := filepath.Join(d, bin)
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p, nil
-		}
-	}
-	return "", errors.New("the Codex CLI was not found — install it (brew install codex, or npm i -g @openai/codex), run `codex login` and choose Sign in with ChatGPT, or set its path in Settings")
-}
+func findCodex(cfg settings.Consult) (string, error) { return codexapp.FindBinary(cfg.CodexBin) }
 
 // Status is what the Settings panel shows: whether Codex is installed, the effective chat sites, recent jobs.
 func (s *Service) Status(ctx context.Context) map[string]any {
