@@ -76,9 +76,12 @@
     return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
   }
 
-  // quiet = the conversation with Atlas only. What other agents posted into this chat (results of scheduled jobs, tracker alerts, staff
-  // reports) comes back with 'agents' and '+ tools'; the count says how much is hidden, so quiet never hides things silently.
-  const fromOtherAgent = (m) => m.role === 'agent' && !!m.agent && m.agent !== 'Atlas';
+  // quiet hides housekeeping — the maintenance staff's routine reports and the machinery's notices (a stalled task, a paused tool, a
+  // rollback…) that older versions posted into the chat — and keeps everything the user wants to see: Atlas, results, alerts, news.
+  // 'agents' and '+ tools' show it all. The count says how much quiet hides, so it never hides things silently.
+  const STAFF = new Set(['Mnemosyne', 'Forge', 'Metis', 'Daedalus']);
+  const HOUSEKEEPING = /has shown no activity for|stopped before finishing|said it would do something it did not do|made promises nothing carried out|keeps failing, so I paused|I rolled back the automatic change|Results of .* dropped after the automatic change|No model is reachable|A model answers again/;
+  const fromOtherAgent = (m) => m.role === 'agent' && !!m.agent && m.agent !== 'Atlas' && (STAFF.has(m.agent) || HOUSEKEEPING.test(m.text || ''));
   const hiddenCount = $derived(S.activityMode === 'off' ? S.chat.filter(fromOtherAgent).length : 0);
 
   // ── feed: messages plus (optionally) agent activity, merged by time ──
@@ -305,8 +308,8 @@
       </div>
     </div>
     <div class="btns" class:hide={S.narrow && !moreBtns}>
-      <div class="mode" title="quiet: only you and Atlas · agents: also messages from other agents and who Atlas hands work to · + tools: also every tool call">
-        <span>activity</span><Segmented size="sm" value={S.activityMode} options={modes} onchange={setActivityMode} />{#if hiddenCount}<button type="button" class="lnk sm" title="Show the messages other agents posted here" onclick={() => setActivityMode('agents')}>{hiddenCount} from other agents hidden</button>{/if}
+      <div class="mode" title="quiet: hides housekeeping (stall warnings, staff reports) · agents: shows everything and who Atlas hands work to · + tools: also every tool call">
+        <span>activity</span><Segmented size="sm" value={S.activityMode} options={modes} onchange={setActivityMode} />{#if hiddenCount}<button type="button" class="lnk sm" title="Show the housekeeping messages too" onclick={() => setActivityMode('agents')}>{hiddenCount} housekeeping hidden</button>{/if}
       </div>
       <span class="vsep"></span>
       <Button variant={clearArmed ? 'danger' : 'ghost'} size="sm" onclick={clear} title={clearArmed ? 'Click again to clear' : 'Clear the conversation'}><Icon name="trash" size={12} /> {clearArmed ? 'Sure?' : 'Clear'}</Button>
