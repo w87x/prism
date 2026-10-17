@@ -331,7 +331,7 @@ func TestUploadReachesFileInput(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	dataDir := t.TempDir()
+	dataDir := testManagerDir(t)
 	var allowedPath string
 	m := &Manager{Settings: st, DataDir: dataDir, CanRead: func(ctx context.Context, p string) error {
 		if p != allowedPath {
@@ -452,7 +452,7 @@ func TestBrowserTypeAndEvalAcceptModernPages(t *testing.T) {
 	st := settings.New(d.Pool)
 	_ = st.Set(context.Background(), settings.KeyBrowser, settings.Browser{Headless: true})
 	_ = st.Set(context.Background(), settings.KeyWeb, settings.Web{AllowPrivate: true})
-	m := &Manager{Settings: st, DataDir: t.TempDir()}
+	m := &Manager{Settings: st, DataDir: testManagerDir(t)}
 	if !m.Available() {
 		t.Skip("no Chrome installed")
 	}
