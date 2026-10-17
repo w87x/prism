@@ -76,10 +76,15 @@
     return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
   }
 
+  // quiet = the conversation with Atlas only. What other agents posted into this chat (results of scheduled jobs, tracker alerts, staff
+  // reports) comes back with 'agents' and '+ tools'; the count says how much is hidden, so quiet never hides things silently.
+  const fromOtherAgent = (m) => m.role === 'agent' && !!m.agent && m.agent !== 'Atlas';
+  const hiddenCount = $derived(S.activityMode === 'off' ? S.chat.filter(fromOtherAgent).length : 0);
+
   // ── feed: messages plus (optionally) agent activity, merged by time ──
   const feed = $derived.by(() => {
-    const items = S.chat.map((m) => ({ k: 'msg', ts: Date.parse(m.created_at) || 0, m }));
     const mode = S.activityMode;
+    const items = S.chat.filter((m) => mode !== 'off' || !fromOtherAgent(m)).map((m) => ({ k: 'msg', ts: Date.parse(m.created_at) || 0, m }));
     if (mode !== 'off') {
       for (const a of S.activity) {
         // activity from an unrelated run tree (e.g. a Quick Ask, possibly several delegation hops deep)
@@ -300,8 +305,8 @@
       </div>
     </div>
     <div class="btns" class:hide={S.narrow && !moreBtns}>
-      <div class="mode" title="Show what other agents are doing inside the conversation">
-        <span>activity</span><Segmented size="sm" value={S.activityMode} options={modes} onchange={setActivityMode} />
+      <div class="mode" title="quiet: only you and Atlas · agents: also messages from other agents and who Atlas hands work to · + tools: also every tool call">
+        <span>activity</span><Segmented size="sm" value={S.activityMode} options={modes} onchange={setActivityMode} />{#if hiddenCount}<button type="button" class="lnk sm" title="Show the messages other agents posted here" onclick={() => setActivityMode('agents')}>{hiddenCount} from other agents hidden</button>{/if}
       </div>
       <span class="vsep"></span>
       <Button variant={clearArmed ? 'danger' : 'ghost'} size="sm" onclick={clear} title={clearArmed ? 'Click again to clear' : 'Clear the conversation'}><Icon name="trash" size={12} /> {clearArmed ? 'Sure?' : 'Clear'}</Button>
