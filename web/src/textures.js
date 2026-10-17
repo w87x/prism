@@ -141,13 +141,51 @@ function grid() {
   return { url: svgUrl(`<svg xmlns='http://www.w3.org/2000/svg' width='${W}' height='${W}'><path d='${d}' stroke='white' stroke-width='0.5' fill='none'/></svg>`), size: `${W}px ${W}px` };
 }
 
-// Point --tex / --tex-size at the right pattern for the current theme and texture choice. Called by applyTheme/applyTexture.
-export function paintTexture(theme = currentTheme(), mode = document.documentElement.dataset.texture || 'mineral') {
-  const root = document.documentElement;
-  if (mode === 'none') return;
-  const t = mode === 'grid' ? grid() : noise(MINERALS[theme] || MINERALS.emerald);
+// The SVG filter graph is expensive: a browser that evaluates it as a mask on a full-screen fixed layer re-runs it on repaint, and Safari
+// on a desktop display (large, often 2x) hangs on it. So each pattern is evaluated ONCE into a bitmap and the bitmap is the mask.
+const bitmaps = new Map(); // theme|mode → { url (blob), size, a }
+const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+
+function toBitmap(t) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cover = t.size === 'cover';
+        const k = cover ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.round((cover ? COVER[0] : TILE) * k), h = Math.round((cover ? COVER[1] : TILE) * k);
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        c.toBlob((b) => (b ? resolve(URL.createObjectURL(b)) : reject(new Error('no bitmap'))), 'image/png');
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => reject(new Error('texture failed to load'));
+    img.src = t.url.slice(5, -2); // url("…") → the data URL inside
+  });
+}
+
+function apply(root, t, mode) {
   root.style.setProperty('--tex', t.url);
   root.style.setProperty('--tex-size', t.size);
   root.style.setProperty('--tex-repeat', t.size === 'cover' ? 'no-repeat' : 'repeat');
   if (mode === 'grid' || !t.a) root.style.removeProperty('--tex-a'); else root.style.setProperty('--tex-a', String(t.a)); // grid keeps the CSS value
+}
+
+// Point --tex / --tex-size at the right pattern for the current theme and texture choice. Called by applyTheme/applyTexture.
+export function paintTexture(theme = currentTheme(), mode = document.documentElement.dataset.texture || 'mineral') {
+  const root = document.documentElement;
+  if (mode === 'none') return;
+  const key = theme + '|' + mode;
+  if (bitmaps.has(key)) { apply(root, bitmaps.get(key), mode); return; }
+  const t = mode === 'grid' ? grid() : noise(MINERALS[theme] || MINERALS.emerald);
+  root.style.setProperty('--tex-a', '0'); // until the bitmap is ready the wash stays invisible (an unmasked wash would be a solid slab)
+  toBitmap(t).then((blob) => {
+    const done = { ...t, url: `url("${blob}")` };
+    bitmaps.set(key, done);
+    if (currentTheme() === theme && (root.dataset.texture || 'mineral') === mode) apply(root, done, mode);
+  }).catch(() => {
+    // could not be rendered to a bitmap: other browsers cope with the live SVG; Safari is the one that hangs on it, so it goes without
+    if (!isSafari && currentTheme() === theme) apply(root, t, mode);
+  });
 }
