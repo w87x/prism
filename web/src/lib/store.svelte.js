@@ -200,7 +200,6 @@ function wire() {
     if (!document.hidden && !S.editor.editor && !S.editor.taken) rpc('editor.claim').catch(() => {});
   });
   on('llm.busy', (e) => { S.llm.active = e.active || 0; });
-  const loadPaused = () => call('breaker.list', {}, { quiet: true }).then((r) => { S.paused = r || []; });
   on('tool.paused', loadPaused);
   on('tool.resumed', loadPaused);
   on('llm.health', (e) => { S.llm.down = !!e.down; S.llm.reason = e.reason || ''; });
@@ -336,6 +335,8 @@ export function modelOptions(kind = 'chat') {
   return [...ls, ...ms];
 }
 
+// tools the pain reflex has paused (the status bar shows them)
+export const loadPaused = () => call('breaker.list', {}, { quiet: true }).then((r) => { S.paused = r || []; });
 export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
   if (st) { S.status = st; S.startup = st.startup ? { ...st.startup, _at: Date.now() } : null; }
