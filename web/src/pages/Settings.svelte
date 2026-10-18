@@ -376,18 +376,6 @@
           {/each}
         {/if}
       </Panel>
-      <Panel title="Which model does what">
-        <div class="sm mute">Everything PRISM asks a model to do behind the scenes. “main” is the chat model, “aux” the fast one; “default” is what PRISM does unless you say otherwise. An agent's own answers use the model set on its profile.</div>
-        {#each actionGroups as grp (grp.g)}
-          <div class="gk" style="margin-top:8px">{grp.g}</div>
-          {#each grp.items as a (a.id)}
-            <div class="row wrap gap-8 actrow">
-              <span class="grow">{a.label}</span>
-              <Segmented size="sm" value={modelActions.choice[a.id] || ''} options={[{ value: '', label: `default (${a.default})` }, { value: 'main', label: 'main' }, { value: 'aux', label: 'aux' }]} onchange={(v) => setAction(a.id, v)} />
-            </div>
-          {/each}
-        {/each}
-      </Panel>
       <Panel title="Model roles">
         <div class="roles">
           {#each [['chat', 'Chat model', 'default for every agent (each agent can override)', chatOpts], ['fast', 'Fast model', 'summaries, extraction, tool selection, judging — small & cheap', chatOpts], ['embedding', 'Embedding model', 'memory & semantic search', embOpts]] as [r, label, hint, opts]}
@@ -461,6 +449,20 @@
         {#each lists as l (l.id)}
           <div class="row"><span class="hi">⛓ {l.name}</span><Badge tone="mute">{l.kind}</Badge><span class="sm dim grow ellipsis">{l.models.join(' → ')}</span><Button size="sm" variant="ghost" onclick={() => { lst = structuredClone($state.snapshot(l)); lOpen = true; }}>Edit</Button><Button size="sm" variant="ghost" onclick={() => delList(l)}><Icon name="trash" size={11} /></Button></div>
         {/each}
+      </Panel>
+      <Panel title="Which model does what" id="model-actions" collapsible open={false}>
+        <div class="sm mute">What PRISM asks a model to do behind the scenes: “main” is the chat model, “aux” the fast one, “default” is PRISM's own choice. An agent's own answers use the model on its profile.</div>
+        <div class="acts">
+          {#each actionGroups as grp (grp.g)}
+            <div class="gk">{grp.g}</div>
+            {#each grp.items as a (a.id)}
+              <div class="actrow">
+                <span class="grow ellipsis" title={a.label}>{a.label}</span>
+                <Segmented size="sm" value={modelActions.choice[a.id] || ''} options={[{ value: '', label: `default (${a.default})` }, { value: 'main', label: 'main' }, { value: 'aux', label: 'aux' }]} onchange={(v) => setAction(a.id, v)} />
+              </div>
+            {/each}
+          {/each}
+        </div>
       </Panel>
     {:else if tab === 'web'}
       <div class="masonry" use:masonry style="--mw:380px">
@@ -838,6 +840,7 @@
   tr.off td { opacity: 0.5; }
   .verdict { margin: 8px 0 4px; padding: 6px 8px; border: 1px solid var(--accent-dim); background: var(--bg-2); }
   .verdict.bad { border-color: var(--err); }
-  .actrow { padding: 3px 0; border-bottom: 1px solid var(--line-2); align-items: center; }
-  .gk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); }
+  .acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 18px; row-gap: 0; margin-top: 6px; }
+  .acts .gk { grid-column: 1 / -1; margin-top: 8px; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-mute); }
+  .actrow { display: flex; align-items: center; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--line-2); font-size: 11px; min-width: 0; }
 </style>
