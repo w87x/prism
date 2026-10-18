@@ -294,6 +294,32 @@
   }
   $effect(() => { if (tab === 'integrations') untrack(() => { loadInt(); loadEl(); loadMail(); }); });
   $effect(() => listen('status', () => { if (tab === 'integrations') call('telegram.status', {}, { quiet: true }).then((r) => r && (tgs = r)); }));
+  // topics the bot made in the group: delete one, or clear the ones nothing posts to any more
+  const reloadTg = async () => { tgs = (await call('telegram.status', {}, { quiet: true })) || tgs; };
+  async function removeTopic(t, forget = false) {
+    try {
+      await call('telegram.topic_delete', { chat_id: t.chat_id, thread_id: t.thread_id, forget_only: forget }, { quiet: true, throw: true });
+      await reloadTg();
+      return true;
+    } catch (e) {
+      if (!forget && (await confirmBox({ title: 'Telegram did not delete it', text: `${e.message}\n\nForget “${t.name}” in this list anyway? It stays in the group.`, ok: 'Forget it' }))) return removeTopic(t, true);
+      return false;
+    }
+  }
+  async function delTopic(t) {
+    if (await confirmBox({ title: 'Delete topic', text: `Delete “${t.name}” in the Telegram group, with everything in it? If something still posts there, the topic is simply created again.`, ok: 'Delete', danger: true })) {
+      if (await removeTopic(t)) toast('Topic deleted');
+    }
+  }
+  async function tidyTopics() {
+    const list = (await call('telegram.topics_unused', {}, { quiet: true })) || [];
+    if (!list.length) return toast('Every topic is still in use');
+    const names = list.slice(0, 12).map((t) => '• ' + t.name).join('\n') + (list.length > 12 ? `\n… and ${list.length - 12} more` : '');
+    if (!(await confirmBox({ title: 'Remove unused topics', text: `${list.length} topic${list.length === 1 ? '' : 's'} that no schedule, watch or project posts to:\n${names}\n\nDelete them in Telegram?`, ok: 'Delete', danger: true }))) return;
+    let n = 0;
+    for (const t of list) if (await removeTopic(t)) n++;
+    if (n) toast(`${n} topic${n === 1 ? '' : 's'} removed`);
+  }
   async function saveTg() { await saveSetting('telegram', tg, 'Telegram settings saved'); setTimeout(async () => (tgs = await call('telegram.status', {}, { quiet: true })), 1500); }
   async function testTg() { const u = await call('telegram.test', { token: tg.token }); if (u) toast(`Bot OK: @${u}`); }
   async function pair() { const c = await call('telegram.pair'); if (c) { tg.pair_code = c; tgs = await call('telegram.status', {}, { quiet: true }); } }
@@ -511,7 +537,10 @@
           {/if}
           <div class="kv"><span>Topics group</span><b>{tgs?.group_id ? tgs.group_id : 'not set'}</b></div>
           <div class="sm mute">Create a supergroup with Topics enabled, add the bot as admin (Manage topics), then send <code>/setgroup</code> there. Agents drop messages into topics by name; your replies in a topic carry its context.</div>
-          {#if tgs?.topics?.length}<div class="topics">{#each tgs.topics as t}<div class="sm"><span class="hi">{t.name}</span> <span class="mute">by {t.created_by} — {t.purpose.slice(0, 60)}</span></div>{/each}</div>{/if}
+          {#if tgs?.topics?.length}
+            <div class="topics">{#each tgs.topics as t (t.chat_id + ':' + t.thread_id)}<div class="sm trow"><span class="hi">{t.name}</span><span class="mute grow ellipsis">by {t.created_by}{t.purpose ? ' — ' + t.purpose.slice(0, 60) : ''}</span><button type="button" class="xbtn" title="Delete this topic in Telegram" aria-label="delete topic {t.name}" onclick={() => delTopic(t)}>×</button></div>{/each}</div>
+            <div class="row"><Button size="sm" variant="ghost" title="Topics no schedule, watch or project posts to any more" onclick={tidyTopics}>Remove unused…</Button></div>
+          {/if}
         </Panel>
           <Panel title="Obsidian">
             <Field label="Vault path" hint="an iCloud vault lives under ~/Library/Mobile Documents/iCloud~md~obsidian/Documents"><Input bind:value={obs.vault_path} mono placeholder="/path/to/vault" /></Field>
@@ -835,7 +864,8 @@
   .keys td { padding: 1px 6px; }
   .addkey .k1 { width: 130px; }
   .code { color: var(--attn); font-size: var(--fs-lg); letter-spacing: 0.08em; background: var(--attn-bg); border: 1px solid var(--attn-dim); padding: 1px 8px; }
-  .topics { max-height: 90px; overflow: auto; border: 1px solid var(--line); padding: 3px 6px; }
+  .topics { max-height: 170px; overflow: auto; border: 1px solid var(--line); padding: 2px 6px; }
+  .trow { display: flex; align-items: center; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--line-2); min-width: 0; }
   .w { width: 160px; }
   tr.off td { opacity: 0.5; }
   .verdict { margin: 8px 0 4px; padding: 6px 8px; border: 1px solid var(--accent-dim); background: var(--bg-2); }

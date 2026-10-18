@@ -745,6 +745,29 @@ func (b *Bot) DeleteTopic(ctx context.Context, name string) error {
 	return nil
 }
 
+// RemoveTopic deletes a forum topic in the group and forgets it here. forgetOnly leaves Telegram alone: for a topic already deleted by hand,
+// or one the bot may no longer delete. A topic Telegram says does not exist counts as already gone. A topic that something still posts
+// to is simply created again by the next message.
+func (b *Bot) RemoveTopic(ctx context.Context, chatID, thread int64, forgetOnly bool) error {
+	if !forgetOnly {
+		c, ok := b.active(ctx)
+		if !ok || c.GroupID != chatID {
+			return errors.New("the bot is not connected to that group right now — use “forget” to drop it from the list only")
+		}
+		if err := b.call(ctx, c.Token, "deleteForumTopic", map[string]any{"chat_id": chatID, "message_thread_id": thread}, nil); err != nil {
+			switch m := strings.ToLower(err.Error()); {
+			case strings.Contains(m, "topic_id_invalid"), strings.Contains(m, "thread not found"), strings.Contains(m, "topic not found"): // gone already
+			case strings.Contains(m, "not enough rights"):
+				return fmt.Errorf("%w — the bot needs the “Manage Topics” administrator right to delete topics", err)
+			default:
+				return err
+			}
+		}
+	}
+	_, err := b.DB.Exec(ctx, `DELETE FROM telegram_topics WHERE chat_id=$1 AND thread_id=$2`, chatID, thread)
+	return err
+}
+
 func (b *Bot) topic(ctx context.Context, c settings.Telegram, name, by, purpose string) (int64, error) {
 	name = strings.TrimSpace(name)
 	if r := []rune(name); len(r) > 60 {

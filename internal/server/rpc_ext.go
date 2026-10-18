@@ -514,6 +514,53 @@ func (s *Server) registerIntegrations() {
 		}
 		return map[string]any{"state": st, "detail": d, "paired": cfg.OwnerID != 0, "owner_id": cfg.OwnerID, "group_id": cfg.GroupID, "pair_code": cfg.PairCode, "topics": topics}, nil
 	})
+	// telegram.topic_delete removes one topic from the group (and the list); forget_only drops it from the list without touching Telegram
+	rpc(s, "telegram.topic_delete", func(ctx context.Context, r struct {
+		ChatID     int64 `json:"chat_id"`
+		ThreadID   int64 `json:"thread_id"`
+		ForgetOnly bool  `json:"forget_only"`
+	}) (bool, error) {
+		return true, a.Ext.Telegram.RemoveTopic(ctx, r.ChatID, r.ThreadID, r.ForgetOnly)
+	})
+	// telegram.topics_unused lists the topics nothing points at any more: no cron or watch posts to them, they are not a project's topic and not
+	// one of the fixed ones. They are candidates for the user to confirm, never removed by themselves.
+	rpc(s, "telegram.topics_unused", func(ctx context.Context, _ none) ([]map[string]any, error) {
+		used := map[string]bool{"briefings": true, "questions": true}
+		mark := func(n string) { used[strings.ToLower(strings.TrimSpace(n))] = true }
+		if cs, err := a.Ext.Sched.Crons(ctx); err == nil {
+			for _, c := range cs {
+				mark(c.Topic)
+			}
+		}
+		if is, err := a.Ext.Sched.Intents(ctx, ""); err == nil {
+			for _, i := range is {
+				if i.Status == "active" {
+					mark(i.Topic)
+				}
+			}
+		}
+		if bs, err := a.Memory.Banks(ctx); err == nil {
+			for _, b := range bs {
+				if b.Kind == "project" && b.Status == "active" {
+					mark(b.Name)
+				}
+			}
+		}
+		rows, err := a.DB.Query(ctx, `SELECT chat_id, thread_id, name FROM telegram_topics ORDER BY id DESC LIMIT 200`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []map[string]any{}
+		for rows.Next() {
+			var chat, thread int64
+			var name string
+			if rows.Scan(&chat, &thread, &name) == nil && !used[strings.ToLower(strings.TrimSpace(name))] {
+				out = append(out, map[string]any{"chat_id": chat, "thread_id": thread, "name": name})
+			}
+		}
+		return out, rows.Err()
+	})
 	rpc(s, "telegram.pair", func(ctx context.Context, _ none) (string, error) { return a.Ext.Telegram.NewPairCode(ctx) })
 	rpc(s, "telegram.unpair", func(ctx context.Context, _ none) (bool, error) {
 		c := settings.Load(ctx, a.Settings, settings.KeyTelegram, settings.Telegram{MirrorNotices: true})

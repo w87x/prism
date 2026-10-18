@@ -412,3 +412,73 @@ func TestTelegramSendsGeneratedMedia(t *testing.T) {
 		t.Fatalf("dangling marker: %v", err)
 	}
 }
+
+func TestRemoveTopicDeletesForgetsAndExplainsRefusals(t *testing.T) {
+	d := testutil.DB(t)
+	fakeLLM := testutil.NewFakeLLM(t)
+	_, st := testutil.Setup(t, d, fakeLLM)
+	ctx := context.Background()
+	var mu sync.Mutex
+	var deleted []int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		var p map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		w.Header().Set("Content-Type", "application/json")
+		switch method {
+		case "getMe":
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"username": "prism_bot"}})
+		case "getUpdates":
+			time.Sleep(100 * time.Millisecond)
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": []any{}})
+		case "deleteForumTopic":
+			th := int64(p["message_thread_id"].(float64))
+			switch th {
+			case 2: // already deleted by hand
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: TOPIC_ID_INVALID"})
+			case 3: // the bot lost its admin right
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: not enough rights to manage topics"})
+			default:
+				mu.Lock()
+				deleted = append(deleted, th)
+				mu.Unlock()
+				json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+			}
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+		}
+	}))
+	defer srv.Close()
+	_ = st.Set(ctx, settings.KeyTelegram, settings.Telegram{Enabled: true, Token: "TOKEN", OwnerID: 5, GroupID: -100})
+	bot := &Bot{Settings: st, DB: d.Pool, APIBase: srv.URL}
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go bot.Run(rctx)
+	waitFor(t, "connection", func() bool { s, _ := bot.State(); return s == "ok" })
+	for i, n := range []string{"Old watch", "Gone already", "No rights", "Other group"} {
+		chat := int64(-100)
+		if n == "Other group" {
+			chat = -200
+		}
+		if _, err := d.Exec(ctx, `INSERT INTO telegram_topics(chat_id,thread_id,name,purpose,created_by) VALUES($1,$2,$3,'','Scout')`, chat, i+1, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() (n int) { _ = d.QueryRow(ctx, `SELECT count(*) FROM telegram_topics`).Scan(&n); return }
+	if err := bot.RemoveTopic(ctx, -100, 1, false); err != nil || count() != 3 || len(deleted) != 1 || deleted[0] != 1 {
+		t.Fatalf("a topic is deleted in Telegram and forgotten: %v count=%d deleted=%v", err, count(), deleted)
+	}
+	if err := bot.RemoveTopic(ctx, -100, 2, false); err != nil || count() != 2 {
+		t.Fatalf("a topic Telegram says is gone is simply forgotten: %v count=%d", err, count())
+	}
+	err := bot.RemoveTopic(ctx, -100, 3, false)
+	if err == nil || !strings.Contains(err.Error(), "Manage Topics") || count() != 2 {
+		t.Fatalf("a refusal is explained and the row stays: %v count=%d", err, count())
+	}
+	if err := bot.RemoveTopic(ctx, -100, 3, true); err != nil || count() != 1 || len(deleted) != 1 {
+		t.Fatalf("forget-only never calls Telegram: %v count=%d deleted=%v", err, count(), deleted)
+	}
+	if err := bot.RemoveTopic(ctx, -300, 4, false); err == nil {
+		t.Fatal("a group the bot is not set up for is refused, not guessed at")
+	}
+}
