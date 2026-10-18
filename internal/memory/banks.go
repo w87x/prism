@@ -35,7 +35,7 @@ type MergeResult struct {
 }
 
 // MergeBanks moves every fact of the source banks into one target and removes the emptied sources.
-// into is an existing bank (of the same kind as the sources); when it is 0 a new bank called name is made.
+// into is an existing project or domain bank; when it is 0 a new bank called name is made.
 func (s *Service) MergeBanks(ctx context.Context, sources []int64, into int64, name string) (*MergeResult, error) {
 	if len(sources) == 0 {
 		return nil, errors.New("pick at least one bank to merge")
@@ -55,10 +55,9 @@ func (s *Service) MergeBanks(ctx context.Context, sources []int64, into int64, n
 		if !mergeable(b.Kind) {
 			return nil, fmt.Errorf("%s cannot be merged: only project and domain banks can", b.Label())
 		}
-		if kind != "" && b.Kind != kind {
-			return nil, errors.New("banks of different kinds cannot be merged (project with project, domain with domain)")
+		if kind == "" {
+			kind = b.Kind // only names a bank made by the merge; a project and a domain bank on one topic may be merged into either
 		}
-		kind = b.Kind
 		src = append(src, b)
 	}
 	if len(src) == 0 {
@@ -70,8 +69,8 @@ func (s *Service) MergeBanks(ctx context.Context, sources []int64, into int64, n
 		if target, err = s.bankByID(ctx, into); err != nil {
 			return nil, err
 		}
-		if target.Kind != kind {
-			return nil, fmt.Errorf("%s is a %s bank; the banks to merge are %s banks", target.Label(), target.Kind, kind)
+		if !mergeable(target.Kind) {
+			return nil, fmt.Errorf("%s cannot be merged into: only project and domain banks can", target.Label())
 		}
 	} else {
 		name = strings.TrimSpace(name)

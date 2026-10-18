@@ -178,6 +178,7 @@
     if (await call('memory.resolve_insight', { id: f.id, verdict, answer: answers[f.id] || '' })) { delete answers[f.id]; loadReview(); loadFacts(); }
   }
   async function outdateFromReview(f) { await call('memory.fact_outdate', { id: f.id }); loadReview(); }
+  async function fadeFromReview(f) { if (await call('memory.fact_fade', { id: f.id })) { toast('It will fade out within a week'); loadReview(); loadFacts(); } }
   async function rejectFromReview(f) { await rejectFact(f); }
 
   async function loadBanks() {
@@ -598,6 +599,7 @@
     </div>
   {/if}
   {#snippet footer()}
+    {#if edit && edit.kind !== 'conclusion' && !edit.valid_to && !edit.pinned}<Button variant="ghost" title="Not wrong, just not worth keeping: ranked to the bottom now and expires by itself within a week" onclick={async () => { if (await call('memory.fact_fade', { id: edit.id })) { editOpen = false; toast('It will fade out within a week'); loadFacts(); } }}>Not interesting</Button>{/if}
     {#if edit && edit.kind !== 'conclusion' && !edit.valid_to}<Button variant="ghost" title="retire with no replacement" onclick={markOutdated}>Mark outdated</Button>
       <Button variant="ghost" title="It is false: retired and marked rejected: it is not learned again, and is forgotten once nobody has brought it up for a month" onclick={async () => { if (await call('memory.fact_reject', { id: edit.id })) { toast('Marked as not true'); editOpen = false; loadFacts(); loadReview(); } }}>Not true</Button>{/if}
     <span class="grow"></span>
@@ -856,6 +858,7 @@
           <Button size="sm" variant="ghost" title="Send an agent to check this one" onclick={async () => { if (await call('memory.verify_now', { ids: [f.id] })) toast('Sent to an agent'); }}>Verify</Button>
           <Button size="sm" variant="ghost" title="It is true: trusted from now on" onclick={() => confirmFromReview(f)}>Confirm</Button>
           <Button size="sm" variant="ghost" title="It is false: retired and marked rejected: it is not learned again, and is forgotten once nobody has brought it up for a month" onclick={() => rejectFromReview(f)}>Not true</Button>
+          <Button size="sm" variant="ghost" title="Not wrong, just not worth keeping: ranked to the bottom now and expires by itself within a week" onclick={() => fadeFromReview(f)}>Not interesting</Button>
           <Button size="sm" variant="ghost" title="No longer relevant: retired (kept in history with 'history' on), but it could be learned again" onclick={() => outdateFromReview(f)}>Retire</Button>
         </div>
       </div>
@@ -864,7 +867,8 @@
     {#each review.stale_conclusions as f (f.id)}
       <div class="rvrow">
         <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
-        <div class="sm mute">some of its evidence was retired — Reflect will revise or retire it</div>
+        <div class="sm mute">some of what it rests on was retired — it is repaired or retired automatically in the next maintenance pass</div>
+        <div class="row end"><Button size="sm" variant="ghost" onclick={() => outdateFromReview(f)}>Retire now</Button></div>
       </div>
     {:else}<div class="sm mute">none</div>{/each}
     <h4>About to be auto-archived <span class="mute sm">{review.prune_candidates.length}</span></h4>
@@ -873,6 +877,7 @@
         <button type="button" class="rowlink ltx" onclick={() => openFromReview(f)}>{f.text}</button>
         <div class="row end">
           <Button size="sm" variant="ghost" onclick={() => pinFromReview(f)}>Pin</Button>
+          <Button size="sm" variant="ghost" title="Not wrong, just not worth keeping: ranked to the bottom now and expires by itself within a week" onclick={() => fadeFromReview(f)}>Not interesting</Button>
           <Button size="sm" variant="ghost" onclick={() => outdateFromReview(f)}>Retire now</Button>
         </div>
       </div>

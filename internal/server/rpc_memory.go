@@ -62,6 +62,12 @@ func (s *Server) registerMemory() {
 	}) (bool, error) {
 		return true, a.Memory.MarkOutdated(ctx, r.ID)
 	})
+	// "not interesting": ranked to the bottom now, expires by itself within a week
+	rpc(s, "memory.fact_fade", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Memory.Fade(ctx, r.ID)
+	})
 	// the user vouches for a fact (or withdraws that): trusted, and forgotten four times slower
 	rpc(s, "memory.fact_confirm", func(ctx context.Context, r struct {
 		ID      int64 `json:"id"`

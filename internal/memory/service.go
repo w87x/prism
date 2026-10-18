@@ -407,6 +407,27 @@ func (s *Service) MarkOutdated(ctx context.Context, id int64) error {
 	return s.Retract(ctx, "user", id, "marked outdated")
 }
 
+// FadeDays is how long a fact the user finds uninteresting lasts before it expires on its own.
+const FadeDays = 7
+
+// Fade is "not interesting": the fact is not wrong, just not worth keeping. It drops to the bottom of the ranking at once (so it stops
+// being recalled) and expires by itself after FadeDays; a sooner expiry already set is kept. Pinned and user-confirmed facts are refused.
+func (s *Service) Fade(ctx context.Context, id int64) error {
+	var pinned, confirmed bool
+	if err := s.db.QueryRow(ctx, `SELECT pinned, confirmation='user_confirmed' FROM memory_facts WHERE id=$1 AND valid_to IS NULL`, id).Scan(&pinned, &confirmed); err != nil {
+		return errors.New("that fact is not current")
+	}
+	if pinned || confirmed {
+		return errors.New("you pinned or confirmed this fact: unpin it first, or retire it")
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE memory_facts SET rank=0.05, expires_at=LEAST(COALESCE(expires_at,'infinity'), now()+make_interval(days=>$2)) WHERE id=$1`, id, FadeDays); err != nil {
+		return err
+	}
+	s.audit(ctx, "user", "fade", id, fmt.Sprintf("not interesting: expires within %d days", FadeDays))
+	s.changed()
+	return nil
+}
+
 func (s *Service) DeleteFact(ctx context.Context, id int64) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM memory_facts WHERE id=$1`, id)
 	s.changed()

@@ -18,6 +18,9 @@
   async function wrong(f) {
     if (await call('memory.fact_outdate', { id: f.id })) { facts = facts.filter((x) => x.id !== f.id); toast('Retired — it will not be used again'); }
   }
+  async function bore(f) {
+    if (await call('memory.fact_fade', { id: f.id })) { facts = facts.filter((x) => x.id !== f.id); toast('Not interesting — it fades out within a week'); }
+  }
   const open_ = (f) => { S.selectedFact = f.id; go('memory'); };
 </script>
 
@@ -33,6 +36,7 @@
           <span class="sm mute nowrap">{f.bank}</span>
           <Button size="sm" variant="ghost" title="This helped: rank it up" onclick={() => vote(f, true)}>useful</Button>
           <Button size="sm" variant="ghost" title="Not relevant: rank it down" onclick={() => vote(f, false)}>not relevant</Button>
+          {#if !f.valid_to}<Button size="sm" variant="ghost" title="Not wrong, just not worth keeping: it expires by itself within a week" onclick={() => bore(f)}>not interesting</Button>{/if}
           {#if !f.valid_to}<Button size="sm" variant="ghost" title="This is wrong or outdated: retire it" onclick={() => wrong(f)}>wrong</Button>{/if}
         </div>
       {/each}

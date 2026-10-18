@@ -73,3 +73,63 @@ func TestSweepMergesParaphrasesNotLookAlikes(t *testing.T) {
 		t.Fatalf("an undone pair must not be merged again: %+v", again)
 	}
 }
+
+func TestFadeExpiresSoonAndSpareThePinned(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	f := store(t, s, StoreReq{Bank: "user", Text: "User once glanced at a weather widget"})
+	p := store(t, s, StoreReq{Bank: "user", Text: "User is allergic to penicillin"})
+	_ = s.SetPinned(ctx, p.ID, true)
+	if err := s.Fade(ctx, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	var soon bool
+	var rank float64
+	_ = s.db.QueryRow(ctx, `SELECT expires_at < now()+interval '8 days' AND expires_at > now()+interval '6 days', rank FROM memory_facts WHERE id=$1`, f.ID).Scan(&soon, &rank)
+	if !soon || rank > 0.06 {
+		t.Fatalf("fade should expire in a week and rank last: soon=%v rank=%v", soon, rank)
+	}
+	if s.Fade(ctx, p.ID) == nil {
+		t.Fatal("a pinned fact must be refused")
+	}
+}
+
+func TestHealConclusionsRepairsOrRetires(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	f1 := store(t, s, StoreReq{Bank: "user", Text: "User keeps movies in per-title folders"})
+	f2 := store(t, s, StoreReq{Bank: "user", Text: "User keeps series in per-season folders"})
+	f3 := store(t, s, StoreReq{Bank: "user", Text: "User keeps music in per-album folders"})
+	f4 := store(t, s, StoreReq{Bank: "user", Text: "User keeps photos in per-year folders"})
+	bank, _ := s.BankBySpec(ctx, "user", "", false)
+	mk := func(text string, ev ...int64) int64 {
+		id, err := s.insertDerived(ctx, bank.ID, text, ev, 0.7, nil, "analysis", nil, maxConclusionConf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	healthy := mk("User files everything by a natural unit", f1.ID, f2.ID, f3.ID) // one of three dies: dropped
+	doomed := mk("User files things by title", f1.ID, f4.ID)                      // one of two dies: retired
+	_ = s.MarkOutdated(ctx, f1.ID)
+	r, err := s.HealConclusions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Dropped != 1 || r.Retired != 1 {
+		t.Fatalf("result %+v", r)
+	}
+	live := func(id int64) bool {
+		var v bool
+		_ = s.db.QueryRow(ctx, `SELECT valid_to IS NULL FROM memory_facts WHERE id=$1`, id).Scan(&v)
+		return v
+	}
+	if !live(healthy) || live(doomed) {
+		t.Fatalf("healthy live=%v doomed live=%v", live(healthy), live(doomed))
+	}
+	var stale bool
+	_ = s.db.QueryRow(ctx, `SELECT `+staleConclusionExpr("f")+` FROM memory_facts f WHERE id=$1`, healthy).Scan(&stale)
+	if stale {
+		t.Fatal("the surviving conclusion should no longer be stale")
+	}
+}

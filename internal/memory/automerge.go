@@ -16,7 +16,7 @@ import (
 // discourage that, but this is the safety net: periodically ask the fast model which active banks of one
 // kind are really the same topic, and merge them. Every merge goes through MergeBanks, so it is logged to
 // memory_ops and can be undone from the Memory page exactly like a manual merge.
-const mergePrompt = `You manage the memory banks of a personal assistant (each is project:<Name> or domain:<Name>). Below are the banks of ONE kind, each with its id, name and fact count. Group any that are clearly the SAME real-world topic or task under one canonical name — for example different versions or variants of one product or model family ("GLM", "GLM-4.6", "GLM-5.3") are one topic, not several, and should be one group. Do NOT group banks that are genuinely different topics just because the names look similar.
+const mergePrompt = `You manage the memory banks of a personal assistant (each is project:<Name> or domain:<Name>). Below are the banks, each with its id, kind:name and fact count. A project bank and a domain bank on the same subject are one topic filed twice and belong in one group. Group any that are clearly the SAME real-world topic or task under one canonical name — for example different versions or variants of one product or model family ("GLM", "GLM-4.6", "GLM-5.3") are one topic, not several, and should be one group. Do NOT group banks that are genuinely different topics just because the names look similar.
 
 Only include groups of 2 or more banks; leave out banks that stand on their own — most banks should be left out. Give each group a short canonical name (reuse one of its members' names when it already reads well).
 Answer JSON only: {"groups":[{"name":"...","ids":[1,2,3]}]}`
@@ -30,7 +30,7 @@ type MergeGroup struct {
 // SuggestBankMerges asks the fast model which active banks of one kind (project or domain) are the same
 // topic. Invented or cross-kind ids, and groups under 2 banks, are dropped; a bank appears in at most one group.
 func (s *Service) SuggestBankMerges(ctx context.Context, kind string) ([]MergeGroup, error) {
-	if kind != KindProject && kind != KindDomain {
+	if kind != KindProject && kind != KindDomain && kind != "any" {
 		return nil, fmt.Errorf("unknown bank kind %q", kind)
 	}
 	if s.llm.RoleRef(ctx, "fast") == "" {
@@ -44,11 +44,11 @@ func (s *Service) SuggestBankMerges(ctx context.Context, kind string) ([]MergeGr
 	var sb strings.Builder
 	n := 0
 	for _, b := range bs {
-		if b.Kind != kind || b.Status != "active" {
+		if !mergeable(b.Kind) || (kind != "any" && b.Kind != kind) || b.Status != "active" {
 			continue
 		}
 		valid[b.ID] = true
-		fmt.Fprintf(&sb, "%d: %s (%d facts)", b.ID, b.Name, b.Facts)
+		fmt.Fprintf(&sb, "%d: %s:%s (%d facts)", b.ID, b.Kind, b.Name, b.Facts)
 		if b.Description != "" {
 			fmt.Fprintf(&sb, " — %s", b.Description)
 		}
@@ -95,7 +95,7 @@ func (s *Service) SuggestBankMerges(ctx context.Context, kind string) ([]MergeGr
 // a no-op, and there is nothing left to merge once a round succeeds.
 func (s *Service) AutoMergeBanks(ctx context.Context) ([]MergeResult, error) {
 	var out []MergeResult
-	for _, kind := range []string{KindProject, KindDomain} {
+	for _, kind := range []string{"any"} { // one list: the same topic is often filed once as a project and once as a domain
 		groups, err := s.SuggestBankMerges(ctx, kind)
 		if err != nil {
 			return out, err
@@ -210,7 +210,8 @@ func (s *Service) DedupeBanks(ctx context.Context) ([]MergeResult, error) {
 		}
 		group := []Bank{a}
 		for _, b := range bs[i+1:] {
-			if !done[b.ID] && b.Kind == a.Kind && b.Status == "active" && sameBankName(a.Name, b.Name) {
+			// a project and a domain bank with one name are one topic filed twice
+			if !done[b.ID] && mergeable(b.Kind) && b.Status == "active" && sameBankName(a.Name, b.Name) {
 				group = append(group, b)
 			}
 		}

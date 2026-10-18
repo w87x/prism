@@ -590,6 +590,16 @@ func (a *App) memoryLoop(ctx context.Context) {
 			a.memJob("merge banks", fmt.Sprintf("%d merges", merged), merged > 0, merr)
 		}
 
+		// a conclusion whose premises were retired is repaired or retired by plain rules (Reflect only sees its own, and only if its model chooses to)
+		hr, herr := a.Memory.HealConclusions(ctx)
+		if herr != nil {
+			a.Logf("warn", "memory", "stale conclusions: %v", herr)
+		}
+		if hr.Changes() > 0 {
+			a.Logf("info", "memory", "%s", hr)
+		}
+		a.memJob("stale conclusions", fmt.Sprintf("%d swapped, %d dropped, %d retired", hr.Swapped, hr.Dropped, hr.Retired), hr.Changes() > 0, herr)
+
 		a.memStage("reflecting")
 		if cfg.ReflectOff {
 			a.memJob("reflection", off, false, nil)

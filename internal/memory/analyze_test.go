@@ -511,3 +511,15 @@ func TestAnalyzePooledReadsSeveralSmallBanks(t *testing.T) {
 		t.Fatalf("open insights (questions first): %+v %v", open, err)
 	}
 }
+
+func TestDedupeBanksMergesTheSameNameAcrossKinds(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	store(t, s, StoreReq{Bank: "domain:Torrenting", Text: "Prefers BDRip releases"})
+	store(t, s, StoreReq{Bank: "project:torrenting", Text: "Uses Jackett for searching"})
+	store(t, s, StoreReq{Bank: "project:torrenting", Text: "Downloads go to the NAS"})
+	rs, err := s.DedupeBanks(ctx)
+	if err != nil || len(rs) != 1 || rs[0].Moved != 1 || rs[0].Bank.Kind != KindProject {
+		t.Fatalf("merge result = %+v err=%v", rs, err)
+	}
+}
