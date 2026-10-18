@@ -53,10 +53,28 @@ func TestFakeAppServer(t *testing.T) {
 				map[string]any{"id": "secret", "model": "secret", "hidden": true},
 			}, "nextCursor": nil})
 		case "thread/start":
+			if dt, ok := m.Params["dynamicTools"].([]any); ok && len(dt) > 0 {
+				if os.Getenv("PRISM_FAKE_NO_DYNAMIC") == "1" {
+					_ = out.Encode(map[string]any{"id": m.ID, "error": map[string]any{"code": -32602, "message": "unknown field dynamicTools"}})
+					continue
+				}
+				os.Setenv(fmt.Sprintf("FAKE_TOOL_t%d", threads+1), fmt.Sprint(dt[0].(map[string]any)["name"]))
+			}
 			threads++
 			reply(m.ID, map[string]any{"thread": map[string]any{"id": fmt.Sprintf("t%d", threads)}})
 			// remember this thread's instructions for the turn
 			os.Setenv(fmt.Sprintf("FAKE_INSTR_t%d", threads), fmt.Sprint(m.Params["baseInstructions"]))
+		case "account/login/start":
+			if m.Params["type"] == "chatgptDeviceCode" {
+				reply(m.ID, map[string]any{"type": "chatgptDeviceCode", "loginId": "L2", "userCode": "ABCD-1234", "verificationUrl": "https://example.test/device"})
+			} else {
+				reply(m.ID, map[string]any{"type": "chatgpt", "loginId": "L1", "authUrl": "https://example.test/login"})
+				note("account/login/completed", map[string]any{"loginId": "L1", "success": true, "error": nil})
+			}
+		case "turn/interrupt":
+			tid := fmt.Sprint(m.Params["threadId"])
+			reply(m.ID, map[string]any{})
+			note("turn/completed", map[string]any{"threadId": tid, "turn": map[string]any{"id": "u1", "status": "interrupted", "items": []any{}}})
 		case "turn/start":
 			tid := fmt.Sprint(m.Params["threadId"])
 			reply(m.ID, map[string]any{"turn": map[string]any{"id": "u1", "status": "inProgress"}})
@@ -67,7 +85,14 @@ func TestFakeAppServer(t *testing.T) {
 				}
 			}
 			instr := os.Getenv("FAKE_INSTR_" + tid)
+			if tool := os.Getenv("FAKE_TOOL_" + tid); tool != "" && !strings.Contains(input, "TOOL RESULT") {
+				_ = out.Encode(map[string]any{"id": 9001, "method": "item/tool/call", "params": map[string]any{"threadId": tid, "turnId": "u1", "callId": "c1", "tool": tool, "arguments": map[string]any{"path": "a.txt"}}})
+				continue // the turn waits for the answer; the client interrupts instead
+			}
 			text := "Hello"
+			if os.Getenv("FAKE_TOOL_"+tid) != "" {
+				text = "the file says hi"
+			}
 			schema, hasSchema := m.Params["outputSchema"].(map[string]any)
 			switch {
 			case strings.Contains(input, "FAIL"):
@@ -130,14 +155,63 @@ func TestCodexAnswersPlainTurnsAndStreams(t *testing.T) {
 	}
 }
 
-func TestCodexToolCallsTravelThroughTheOutputSchema(t *testing.T) {
+func TestCodexToolCallsAreNative(t *testing.T) {
 	fakeCodex(t)
+	nativeToolsBroken.Store(false)
+	c := NewClient()
+	tools := []ToolSpec{{Name: "file_read", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}}
+	ep := Endpoint{Kind: KindCodex, Model: "gpt-x", Tools: true}
+	res, err := c.Chat(context.Background(), ep, Request{Tools: tools, Messages: []Message{{Role: "system", Content: "S"}, {Role: "user", Content: "read a.txt"}}}, nil)
+	if err != nil || len(res.ToolCalls) != 1 || res.ToolCalls[0].Name != "file_read" || res.ToolCalls[0].ID != "c1" || !strings.Contains(res.ToolCalls[0].Arguments, "a.txt") || res.FinishReason != "tool_calls" {
+		t.Fatalf("the model's own function call comes back as one: %+v %v", res, err)
+	}
+	if nativeToolsBroken.Load() {
+		t.Fatal("native tools worked, so they are not marked broken")
+	}
+	res, err = c.Chat(context.Background(), ep, Request{Tools: tools, Messages: []Message{{Role: "system", Content: "S"}, {Role: "user", Content: "read a.txt"},
+		{Role: "assistant", ToolCalls: res.ToolCalls}, {Role: "tool", ToolCallID: "c1", Content: "hi"}}}, nil)
+	if err != nil || len(res.ToolCalls) != 0 || res.Content != "the file says hi" {
+		t.Fatalf("with the result in hand it answers: %+v %v", res, err)
+	}
+}
+
+func TestCodexSignInStartsAndCompletes(t *testing.T) {
+	fakeCodex(t)
+	ctx := context.Background()
+	l, err := codexapp.Default.LoginStart(ctx, false)
+	if err != nil || l.URL != "https://example.test/login" || l.ID != "L1" {
+		t.Fatalf("browser sign-in: %+v %v", l, err)
+	}
+	var st codexapp.LoginResult
+	for i := 0; i < 50 && !st.Done; i++ {
+		time.Sleep(20 * time.Millisecond)
+		st = codexapp.Default.LoginStatus(l.ID)
+	}
+	if !st.Done || !st.Success {
+		t.Fatalf("the sign-in's completion is remembered: %+v", st)
+	}
+	d, err := codexapp.Default.LoginStart(ctx, true)
+	if err != nil || d.Code != "ABCD-1234" || d.URL != "https://example.test/device" {
+		t.Fatalf("device-code sign-in: %+v %v", d, err)
+	}
+	if got := codexapp.Default.LoginStatus(d.ID); got.Done {
+		t.Fatalf("not finished until Codex says so: %+v", got)
+	}
+}
+
+func TestCodexToolCallsFallBackToTheOutputSchemaWhenToolsAreRefused(t *testing.T) {
+	fakeCodex(t, "PRISM_FAKE_NO_DYNAMIC=1")
+	nativeToolsBroken.Store(false)
+	t.Cleanup(func() { nativeToolsBroken.Store(false) })
 	c := NewClient()
 	tools := []ToolSpec{{Name: "file_read", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}}
 	ep := Endpoint{Kind: KindCodex, Model: "gpt-x", Tools: true}
 	res, err := c.Chat(context.Background(), ep, Request{Tools: tools, Messages: []Message{{Role: "system", Content: "S"}, {Role: "user", Content: "read a.txt"}}}, nil)
 	if err != nil || len(res.ToolCalls) != 1 || res.ToolCalls[0].Name != "file_read" || !strings.Contains(res.ToolCalls[0].Arguments, "a.txt") || res.ToolCalls[0].ID == "" || res.FinishReason != "tool_calls" {
 		t.Fatalf("a tool call comes back as one: %+v %v", res, err)
+	}
+	if !nativeToolsBroken.Load() {
+		t.Fatal("a Codex that refuses client tools is remembered, so later turns do not try again")
 	}
 	res, err = c.Chat(context.Background(), ep, Request{Tools: tools, Messages: []Message{{Role: "system", Content: "S"}, {Role: "user", Content: "read a.txt"},
 		{Role: "assistant", ToolCalls: res.ToolCalls}, {Role: "tool", ToolCallID: res.ToolCalls[0].ID, Content: "hi"}}}, nil)
@@ -249,4 +323,31 @@ func (c *Client) completeJSONForTest(ctx context.Context, ep Endpoint, out any) 
 		return err
 	}
 	return decodeJSON(ExtractJSON(res.Content), out)
+}
+
+// Debug aid: replays the model check's tool probe against one Codex model and shows both answers. PRISM_CODEX_LIVE=1 PRISM_CODEX_MODEL=gpt-6-luna
+func TestCodexToolProbeDebug(t *testing.T) {
+	if os.Getenv("PRISM_CODEX_LIVE") != "1" || os.Getenv("PRISM_CODEX_MODEL") == "" {
+		t.Skip("PRISM_CODEX_LIVE / PRISM_CODEX_MODEL not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	c := NewClient()
+	ep := Endpoint{Kind: KindCodex, Model: os.Getenv("PRISM_CODEX_MODEL"), Tools: true}
+	spec := ToolSpec{Name: "get_time", Description: "Get the current local time in a city.", Parameters: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}
+	msgs := []Message{{Role: "system", Content: "You are an assistant with tools. Use a tool whenever one fits; never write a tool call as text."}, {Role: "user", Content: "What time is it in Paris right now? Use the tool."}}
+	r1, err := c.Chat(ctx, ep, Request{Messages: msgs, Tools: []ToolSpec{spec}, MaxTokens: 600}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("first: content=%q calls=%+v", r1.Content, r1.ToolCalls)
+	if len(r1.ToolCalls) == 0 {
+		return
+	}
+	msgs = append(msgs, Message{Role: "assistant", ToolCalls: r1.ToolCalls}, Message{Role: "tool", ToolCallID: r1.ToolCalls[0].ID, Name: r1.ToolCalls[0].Name, Content: "14:07"})
+	r2, err := c.Chat(ctx, ep, Request{Messages: msgs, Tools: []ToolSpec{spec}, MaxTokens: 600}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("second: content=%q calls=%+v finish=%s", r2.Content, r2.ToolCalls, r2.FinishReason)
 }

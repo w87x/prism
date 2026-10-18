@@ -48,3 +48,28 @@ func TestCodexThroughTheRouter(t *testing.T) {
 	}
 	t.Logf("window=%d, answer=%+v", r.Window(ctx, "role:chat"), v)
 }
+
+// The Settings "Model check" (reply, JSON, a real tool call, silence) on the Codex models:
+// PRISM_CODEX_LIVE=1 go test -run TestCodexModelCheck ./internal/llm -v
+func TestCodexModelCheck(t *testing.T) {
+	if os.Getenv("PRISM_CODEX_LIVE") != "1" {
+		t.Skip("PRISM_CODEX_LIVE not set")
+	}
+	d := testutil.DB(t)
+	st := settings.New(d.Pool)
+	r := llm.NewRouter(d.Pool, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	pid, _ := r.Store().SaveProvider(ctx, llm.Provider{Name: "ChatGPT", Kind: llm.KindCodex, Enabled: true})
+	found, err := r.Client().ListModels(ctx, llm.CodexBaseURL, "")
+	if err != nil || len(found) == 0 {
+		t.Fatalf("discovery: %v %v", found, err)
+	}
+	for _, f := range found {
+		if _, err := r.Store().SaveModel(ctx, llm.Model{Name: f.ID, ProviderID: pid, ModelID: f.ID, Kind: "chat", ContextWindow: f.Context, SupportsTools: f.Tools, Vision: f.Vision}); err != nil {
+			t.Fatal(err)
+		}
+		rep := r.CheckModel(ctx, f.ID)
+		t.Logf("%s → %+v", f.ID, rep)
+	}
+}

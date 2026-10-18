@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"prism/internal/codexapp"
 	"strings"
 	"time"
 
+	"prism/internal/app"
+	"prism/internal/codexapp"
 	"prism/internal/llm"
 	"prism/internal/settings"
 )
@@ -33,7 +34,15 @@ func (s *Server) registerLLM() {
 		if strings.TrimSpace(p.Name) == "" {
 			return 0, errors.New("name is required")
 		}
-		return st().SaveProvider(ctx, p)
+		isNew := p.ID == 0
+		id, err := st().SaveProvider(ctx, p)
+		if err != nil {
+			return 0, err
+		}
+		if isNew && p.Kind == llm.KindCodex { // one step: the plan's models are there as soon as the provider is
+			importCodexModels(ctx, a, id)
+		}
+		return id, nil
 	})
 	rpc(s, "providers.delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
@@ -82,6 +91,25 @@ func (s *Server) registerLLM() {
 		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 		defer cancel()
 		return codexapp.Default.Status(cctx), nil
+	})
+	// codex.login starts signing in with ChatGPT through Codex itself; the UI opens the URL (or shows the code) and polls codex.login_status
+	rpc(s, "codex.login", func(ctx context.Context, r struct {
+		Device bool `json:"device"`
+	}) (*codexapp.Login, error) {
+		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+		defer cancel()
+		return codexapp.Default.LoginStart(cctx, r.Device)
+	})
+	rpc(s, "codex.login_status", func(ctx context.Context, r struct {
+		ID string `json:"id"`
+	}) (codexapp.LoginResult, error) {
+		return codexapp.Default.LoginStatus(r.ID), nil
+	})
+	// codex.import_models adds the models of the signed-in plan to a Codex provider (after signing in; adding the provider does it too)
+	rpc(s, "codex.import_models", func(ctx context.Context, r struct {
+		ProviderID int64 `json:"provider_id"`
+	}) (int, error) {
+		return importCodexModels(ctx, a, r.ProviderID), nil
 	})
 	rpc(s, "models.actions", func(ctx context.Context, _ none) ([]llm.Action, error) { return llm.Actions, nil })
 	rpc(s, "models.list", func(ctx context.Context, _ none) ([]llm.Model, error) { return st().Models(ctx) })
@@ -212,4 +240,30 @@ func (s *Server) registerLLM() {
 		}
 		return true, nil
 	})
+}
+
+// importCodexModels adds the models the signed-in ChatGPT plan offers as configured models of the provider (best effort: a plan that is
+// not signed in yet simply has none until "Discover models" is used after signing in).
+func importCodexModels(ctx context.Context, a *app.App, providerID int64) int {
+	cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	found, err := a.LLM.Client().ListModels(cctx, llm.CodexBaseURL, "")
+	if err != nil {
+		return 0
+	}
+	existing, _ := a.LLM.Store().Models(ctx)
+	names := map[string]bool{}
+	for _, m := range existing {
+		names[m.Name] = true
+	}
+	n := 0
+	for _, d := range found {
+		if names[d.ID] {
+			continue
+		}
+		if _, err := a.LLM.Store().SaveModel(ctx, llm.Model{Name: d.ID, ProviderID: providerID, ModelID: d.ID, Kind: d.Kind, ContextWindow: d.Context, SupportsTools: d.Tools, Vision: d.Vision}); err == nil {
+			n++
+		}
+	}
+	return n
 }

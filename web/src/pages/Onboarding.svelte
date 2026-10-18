@@ -70,7 +70,7 @@
 
   // ── step 1: models ──
   let mk = $state({ kind: 'lmstudio', name: 'LM Studio', base_url: 'http://localhost:1234/v1', key: '' });
-  const presets = { lmstudio: ['LM Studio', 'http://localhost:1234/v1'], openai: ['OpenAI', 'https://api.openai.com/v1'], gemini: ['Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai'], grok: ['Grok', 'https://api.x.ai/v1'], openrouter: ['OpenRouter', 'https://openrouter.ai/api/v1'], custom: ['Custom', ''] };
+  const presets = { lmstudio: ['LM Studio', 'http://localhost:1234/v1'], codex: ['ChatGPT (Codex)', 'codex://app-server'], openai: ['OpenAI', 'https://api.openai.com/v1'], gemini: ['Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai'], grok: ['Grok', 'https://api.x.ai/v1'], openrouter: ['OpenRouter', 'https://openrouter.ai/api/v1'], custom: ['Custom', ''] };
   let found = $state([]);
   let sel = $state({});
   let provId = $state(0);
@@ -100,7 +100,7 @@
     if (!Object.values(sel).some(Boolean)) items.slice(0, 3).forEach((i) => (sel[i.id] = true));
   }
   async function importFound() {
-    const items = found.filter((i) => sel[i.id]).map(({ id, kind, context, tools }) => ({ id, kind, context, tools }));
+    const items = found.filter((i) => sel[i.id]).map(({ id, kind, context, tools, vision }) => ({ id, kind, context, tools, vision }));
     const n = await call('models.import', { provider_id: provId, items });
     if (n === undefined) return;
     toast(`${n} models imported`);
@@ -324,8 +324,9 @@
         <div class="grid">
           <Field label="Name"><Input bind:value={mk.name} /></Field>
           <Field label="Base URL"><Input bind:value={mk.base_url} mono /></Field>
-          {#if mk.kind !== 'lmstudio'}<Field label="API key"><Input type="password" bind:value={mk.key} /></Field>{/if}
+          {#if mk.kind !== 'lmstudio' && mk.kind !== 'codex'}<Field label="API key"><Input type="password" bind:value={mk.key} /></Field>{/if}
         </div>
+        {#if mk.kind === 'codex'}<div class="sm mute">Uses your ChatGPT subscription through the Codex CLI — no API key. Install it (<code>brew install codex</code>) and sign in once with <code>codex login</code>; you can also sign in from Settings → Models after connecting.</div>{/if}
         <div class="row end"><Button variant="primary" loading={mBusy === 'connect'} disabled={!mk.base_url} onclick={connectProvider}>Connect & discover models</Button></div>
         {#if found.length}
           <div class="scroll list"><table class="t"><tbody>

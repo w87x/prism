@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"prism/internal/codexapp"
@@ -23,6 +24,8 @@ const KindCodex = "codex"
 const CodexBaseURL = "codex://app-server"
 
 // The model sees none of Codex's own machinery: its system prompt is replaced by PRISM's, and it is told it has no tools of its own.
+const codexHistory = " Earlier tool calls and their results appear in the conversation as text ([called tool …] and TOOL RESULT); they really happened, so never repeat a call whose result is already there."
+
 const codexNoTools = "\n\n[Runtime] You are the language model of an application. You have no tools of your own here — do not run commands, read or write files, or browse; work only from this conversation."
 
 // toolContract is how tool calls travel: the app-server has no slot for the application's tool definitions, so a turn that may call tools
@@ -95,7 +98,12 @@ func transcript(ms []Message) string {
 			fmt.Fprintf(&sb, "TOOL RESULT (%s):\n%s\n\n", name, m.Content)
 		}
 	}
-	sb.WriteString("Continue as the ASSISTANT.")
+	if n := len(ms); n > 0 && ms[n-1].Role == "tool" {
+		// each turn is a fresh thread, so the model meets its own earlier call as text; without this it tends to call the tool again
+		sb.WriteString("Continue as the ASSISTANT. The TOOL RESULT above is the answer to your earlier call, which really happened: use it. Call a tool again only if you still lack information the results do not give.")
+	} else {
+		sb.WriteString("Continue as the ASSISTANT.")
+	}
 	return sb.String()
 }
 
@@ -114,6 +122,25 @@ func randID() string {
 	return "call_" + hex.EncodeToString(b[:])
 }
 
+// nativeToolsBroken is set once a Codex that cannot take client-supplied tools has been seen: tool turns then use the structured-output
+// route (toolContract) without trying again.
+var nativeToolsBroken atomic.Bool
+
+// codexError maps a Codex failure onto the errors the Router already understands: a used-up plan is a rate limit (so it falls back to
+// another model), a missing or expired sign-in is an auth error.
+func codexError(err error) error {
+	var ce *codexapp.Error
+	if errors.As(err, &ce) {
+		switch {
+		case ce.Limit:
+			return &APIError{Status: 429, Body: ce.Message, RetryAfter: 5 * time.Minute}
+		case ce.Auth:
+			return &APIError{Status: 401, Body: ce.Message + " — sign in again in Settings → Models, or run `codex login`"}
+		}
+	}
+	return err
+}
+
 // codexChat answers a Chat request through the Codex app-server.
 func (c *Client) codexChat(ctx context.Context, ep Endpoint, r Request, onDelta func(Delta)) (*Response, error) {
 	var system []string
@@ -124,32 +151,29 @@ func (c *Client) codexChat(ctx context.Context, ep Endpoint, r Request, onDelta 
 	}
 	instr := strings.Join(system, "\n\n") + codexNoTools
 	withTools := len(r.Tools) > 0 && ep.Tools
-	var schema json.RawMessage
+	native := withTools && !nativeToolsBroken.Load()
 	if withTools {
-		instr += toolContract + toolList(r.Tools)
-		schema = codexSchema(r.Tools)
-	} else if r.JSON {
+		instr += codexHistory
+	}
+	if r.JSON && !withTools {
 		instr += "\n\nAnswer with a single JSON object and nothing else — no commentary, no code fences."
 	}
 
 	// pictures go to Codex as files
 	var files []string
-	if len(r.Messages) > 0 {
-		dir, err := os.MkdirTemp("", "prism-codex-img-*")
-		if err == nil {
-			defer os.RemoveAll(dir)
-			for _, m := range r.Messages {
-				for i, im := range m.Images {
-					ext := ".png"
-					if strings.Contains(im.MIME, "jpeg") || strings.Contains(im.MIME, "jpg") {
-						ext = ".jpg"
-					} else if strings.Contains(im.MIME, "webp") {
-						ext = ".webp"
-					}
-					f := filepath.Join(dir, fmt.Sprintf("img%d-%d%s", len(files), i, ext))
-					if os.WriteFile(f, im.Data, 0o600) == nil {
-						files = append(files, f)
-					}
+	if dir, err := os.MkdirTemp("", "prism-codex-img-*"); err == nil {
+		defer os.RemoveAll(dir)
+		for _, m := range r.Messages {
+			for i, im := range m.Images {
+				ext := ".png"
+				if strings.Contains(im.MIME, "jpeg") || strings.Contains(im.MIME, "jpg") {
+					ext = ".jpg"
+				} else if strings.Contains(im.MIME, "webp") {
+					ext = ".webp"
+				}
+				f := filepath.Join(dir, fmt.Sprintf("img%d-%d%s", len(files), i, ext))
+				if os.WriteFile(f, im.Data, 0o600) == nil {
+					files = append(files, f)
 				}
 			}
 		}
@@ -161,51 +185,73 @@ func (c *Client) codexChat(ctx context.Context, ep Endpoint, r Request, onDelta 
 	if r.JSON && !withTools {
 		effort = "low"
 	}
-	rq := codexapp.Request{Model: ep.Model, Instructions: instr, Input: transcript(r.Messages), Images: files, Schema: schema, Effort: effort}
+	rq := codexapp.Request{Model: ep.Model, Instructions: instr, Input: transcript(r.Messages), Images: files, Effort: effort}
 	if onDelta != nil && !withTools {
 		rq.OnDelta = func(s string) { onDelta(Delta{Content: s}) }
 	}
-	res, err := codexapp.Default.Complete(ctx, rq)
-	if err != nil {
-		var ce *codexapp.Error
-		if errors.As(err, &ce) {
-			switch {
-			case ce.Limit:
-				return nil, &APIError{Status: 429, Body: ce.Message, RetryAfter: 5 * time.Minute}
-			case ce.Auth:
-				return nil, &APIError{Status: 401, Body: ce.Message + " — run `codex login` and choose Sign in with ChatGPT"}
-			}
+	if native {
+		for _, t := range r.Tools {
+			rq.Tools = append(rq.Tools, codexapp.Tool{Name: t.Name, Description: t.Description, Schema: t.Parameters})
 		}
-		return nil, err
+	} else if withTools {
+		rq.Instructions += toolContract + toolList(r.Tools)
+		rq.Schema = codexSchema(r.Tools)
 	}
-	// Codex reports its own count, which includes ~12k tokens of built-in instructions and tool definitions that PRISM neither sent nor
-	// controls; the context accounting (compaction) must see what PRISM actually put in the prompt, so that is what is reported.
+
+	res, err := codexapp.Default.Complete(ctx, rq)
+	if errors.Is(err, codexapp.ErrNoDynamicTools) { // an older Codex: carry the tool calls in the answer instead
+		nativeToolsBroken.Store(true)
+		native = false
+		rq.Tools = nil
+		rq.Instructions += toolContract + toolList(r.Tools)
+		rq.Schema = codexSchema(r.Tools)
+		res, err = codexapp.Default.Complete(ctx, rq)
+	}
+	if err != nil {
+		return nil, codexError(err)
+	}
+
+	// Codex reports its own count, which includes built-in instructions and tool definitions that PRISM neither sent nor controls; the
+	// context accounting (compaction) must see what PRISM actually put in the prompt, so that is what is reported.
 	out := &Response{Model: ep.Model, Usage: Usage{Prompt: EstimateTokens(instr) + EstimateTokens(rq.Input) + len(files)*ImageTokens, Completion: res.Out}, FinishReason: "stop"}
+	if withTools {
+		out.Usage.Prompt += EstimateTools(r.Tools)
+	}
 	if res.Out == 0 {
 		out.Usage.Completion = EstimateTokens(res.Text)
 	}
-	if !withTools {
+	switch {
+	case native:
 		out.Content = res.Text
-		return out, nil
-	}
-	var v struct {
-		Reply     string `json:"reply"`
-		ToolCalls []struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"tool_calls"`
-	}
-	if err := decodeJSON(ExtractJSON(res.Text), &v); err != nil {
-		out.Content = res.Text // the model ignored the shape: its words are still an answer
-		return out, nil
-	}
-	out.Content = v.Reply
-	for _, tc := range v.ToolCalls {
-		args := strings.TrimSpace(tc.Arguments)
-		if args == "" {
-			args = "{}"
+		for _, call := range res.Calls {
+			id := call.ID
+			if id == "" {
+				id = randID()
+			}
+			out.ToolCalls = append(out.ToolCalls, ToolCall{ID: id, Name: call.Name, Arguments: call.Args})
 		}
-		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: randID(), Name: tc.Name, Arguments: args})
+	case !withTools:
+		out.Content = res.Text
+	default:
+		var v struct {
+			Reply     string `json:"reply"`
+			ToolCalls []struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"tool_calls"`
+		}
+		if err := decodeJSON(ExtractJSON(res.Text), &v); err != nil {
+			out.Content = res.Text // the model ignored the shape: its words are still an answer
+			return out, nil
+		}
+		out.Content = v.Reply
+		for _, tc := range v.ToolCalls {
+			args := strings.TrimSpace(tc.Arguments)
+			if args == "" {
+				args = "{}"
+			}
+			out.ToolCalls = append(out.ToolCalls, ToolCall{ID: randID(), Name: tc.Name, Arguments: args})
+		}
 	}
 	if len(out.ToolCalls) > 0 {
 		out.FinishReason = "tool_calls"

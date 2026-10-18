@@ -94,6 +94,14 @@ type proc struct {
 	dead   chan struct{}
 	tail   *tailBuf
 	rate   json.RawMessage // the last rate-limit snapshot Codex reported
+	logins map[string]*LoginResult
+}
+
+// LoginResult is how a sign-in that PRISM started ended.
+type LoginResult struct {
+	Done    bool   `json:"done"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type tailBuf struct {
@@ -125,10 +133,21 @@ type Manager struct {
 	mu  sync.Mutex
 	p   *proc
 	cwd string
+
+	limOnce sync.Once
+	lim     chan struct{}
 }
 
 // Default is the process-wide manager.
 var Default = &Manager{}
+
+// maxParallel is how many turns may run at once.
+const maxParallel = 3
+
+func (m *Manager) limiter() chan struct{} {
+	m.limOnce.Do(func() { m.lim = make(chan struct{}, maxParallel) })
+	return m.lim
+}
 
 func (m *Manager) scratch() (string, error) {
 	if m.cwd != "" {
@@ -172,7 +191,7 @@ func (m *Manager) ensure(ctx context.Context) (*proc, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &proc{cmd: cmd, stdin: in, wait: map[int64]chan rpcMsg{}, subs: map[string]chan rpcMsg{}, dead: make(chan struct{}), tail: &tailBuf{}}
+	p := &proc{cmd: cmd, stdin: in, wait: map[int64]chan rpcMsg{}, subs: map[string]chan rpcMsg{}, logins: map[string]*LoginResult{}, dead: make(chan struct{}), tail: &tailBuf{}}
 	cmd.Stderr = p.tail
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting codex app-server: %w", err)
@@ -185,7 +204,7 @@ func (m *Manager) ensure(ctx context.Context) (*proc, error) {
 	}
 	ictx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := p.call(ictx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "prism", "title": "PRISM", "version": ver}}); err != nil {
+	if _, err := p.call(ictx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "prism", "title": "PRISM", "version": ver}, "capabilities": map[string]any{"experimentalApi": true}}); err != nil {
 		p.kill()
 		return nil, fmt.Errorf("codex app-server did not start: %w", err)
 	}
@@ -256,13 +275,47 @@ func (p *proc) dispatch(m rpcMsg) {
 		if ch != nil {
 			ch <- m
 		}
-	case m.Method != "" && hasID: // Codex asking us something (an approval, a tool): there is nobody to ask, so it is declined
+	case m.Method != "" && hasID:
+		if m.Method == "item/tool/call" { // the model calling one of the tools the request offered: the turn that asked collects it
+			var th struct {
+				ThreadID string `json:"threadId"`
+			}
+			_ = json.Unmarshal(m.Params, &th)
+			p.mu.Lock()
+			ch := p.subs[th.ThreadID]
+			p.mu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- m:
+					return
+				case <-p.dead:
+					return
+				}
+			}
+		}
+		// anything else Codex asks (an approval, a question): there is nobody to ask, so it is declined
 		p.write(map[string]any{"id": m.ID, "error": map[string]any{"code": -32601, "message": "not supported by this client"}})
 	case m.Method != "":
-		if m.Method == "account/rateLimits/updated" {
+		switch m.Method {
+		case "account/rateLimits/updated":
 			p.mu.Lock()
 			p.rate = m.Params
 			p.mu.Unlock()
+		case "account/login/completed":
+			var c struct {
+				LoginID *string `json:"loginId"`
+				Success bool    `json:"success"`
+				Error   *string `json:"error"`
+			}
+			if json.Unmarshal(m.Params, &c) == nil && c.LoginID != nil {
+				r := &LoginResult{Done: true, Success: c.Success}
+				if c.Error != nil {
+					r.Error = *c.Error
+				}
+				p.mu.Lock()
+				p.logins[*c.LoginID] = r
+				p.mu.Unlock()
+			}
 		}
 		var th struct {
 			ThreadID string `json:"threadId"`
@@ -486,17 +539,42 @@ type Request struct {
 	Schema       json.RawMessage // optional JSON schema the answer must follow
 	Effort       string          // reasoning effort, if the model has it
 	OnDelta      func(string)    // streamed text, when there is no schema
+	Tools        []Tool          // functions the model may call; a call ends the turn and comes back in Result.Calls
+}
+
+// Tool is a function offered to the model for one call. Codex shows it to the model as a native function.
+type Tool struct {
+	Name        string
+	Description string
+	Schema      json.RawMessage // JSON schema of the parameters
+}
+
+// Call is one tool call the model made; the caller runs it and starts the next turn with the result.
+type Call struct {
+	ID   string
+	Name string
+	Args string // JSON
 }
 
 // Result is the model's answer and what it cost.
 type Result struct {
 	Text    string
+	Calls   []Call
 	In, Out int
 	Window  int
 }
 
+// ErrNoDynamicTools: this Codex does not take client-supplied tools; the caller falls back to carrying tool calls in the answer.
+var ErrNoDynamicTools = errors.New("codex: this version does not support client-supplied tools")
+
 // Complete runs one turn on a fresh ephemeral thread.
 func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
+	select { // the plan has rate limits: a burst of parallel turns would spend them at once, so only a few run together
+	case m.limiter() <- struct{}{}:
+		defer func() { <-m.limiter() }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	p, err := m.ensure(ctx)
 	if err != nil {
 		return nil, err
@@ -509,11 +587,28 @@ func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
 		ts["model"] = rq.Model
 	}
 	ts["config"] = slimConfig
+	if len(rq.Tools) > 0 {
+		dt := make([]map[string]any, 0, len(rq.Tools))
+		for _, t := range rq.Tools {
+			sch := t.Schema
+			if len(sch) == 0 {
+				sch = json.RawMessage(`{"type":"object","properties":{}}`)
+			}
+			dt = append(dt, map[string]any{"type": "function", "name": t.Name, "description": t.Description, "inputSchema": json.RawMessage(sch)})
+		}
+		ts["dynamicTools"] = dt
+	}
 	res, err := p.call(ctx, "thread/start", ts)
 	var ce *Error
 	if err != nil && errors.As(err, &ce) && !ce.Limit && !ce.Auth {
 		delete(ts, "config") // a Codex version that does not take these keys: work with its defaults rather than not at all
 		res, err = p.call(ctx, "thread/start", ts)
+		if err != nil && len(rq.Tools) > 0 {
+			delete(ts, "dynamicTools")
+			if _, err2 := p.call(ctx, "thread/start", ts); err2 == nil {
+				return nil, ErrNoDynamicTools // it works without them: the tools were what it refused
+			}
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -556,8 +651,20 @@ func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
 	out := &Result{}
 	var deltas strings.Builder
 	var lastErr string
+	var pending []json.RawMessage // request ids of tool calls waiting for an answer
+	var grace <-chan time.Time    // after the first tool call, a moment for the others it made together
 	for {
 		select {
+		case <-grace:
+			// the model wants tools run: the turn is stopped here (PRISM runs them and asks again with the results)
+			ic, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = p.call(ic, "turn/interrupt", map[string]any{"threadId": tid, "turnId": turnID})
+			cancel()
+			for _, id := range pending {
+				p.write(map[string]any{"id": id, "result": map[string]any{"success": false, "contentItems": []map[string]any{{"type": "inputText", "text": "deferred to the caller"}}}})
+			}
+			out.Text = deltas.String()
+			return out, nil
 		case <-ctx.Done():
 			ic, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, _ = p.call(ic, "turn/interrupt", map[string]any{"threadId": tid, "turnId": turnID})
@@ -567,6 +674,22 @@ func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
 			return nil, p.exited()
 		case n := <-sub:
 			switch n.Method {
+			case "item/tool/call":
+				var c struct {
+					CallID    string          `json:"callId"`
+					Tool      string          `json:"tool"`
+					Arguments json.RawMessage `json:"arguments"`
+				}
+				_ = json.Unmarshal(n.Params, &c)
+				args := strings.TrimSpace(string(c.Arguments))
+				if args == "" || args == "null" {
+					args = "{}"
+				}
+				out.Calls = append(out.Calls, Call{ID: c.CallID, Name: c.Tool, Args: args})
+				pending = append(pending, n.ID)
+				if grace == nil {
+					grace = time.After(400 * time.Millisecond)
+				}
 			case "item/agentMessage/delta":
 				var d struct {
 					Delta string `json:"delta"`
@@ -635,4 +758,54 @@ func (m *Manager) Complete(ctx context.Context, rq Request) (*Result, error) {
 			}
 		}
 	}
+}
+
+// Login is a sign-in that was started: open URL in a browser (browser flow), or enter Code at URL on any device (device flow).
+type Login struct {
+	ID   string `json:"id"`
+	URL  string `json:"url"`
+	Code string `json:"code,omitempty"`
+}
+
+// LoginStart begins signing in with ChatGPT through Codex itself (the same flow as `codex login`); the credential ends up in Codex's own
+// store, never in PRISM. device=true uses the device-code flow, for when the browser is on another machine than this one.
+func (m *Manager) LoginStart(ctx context.Context, device bool) (*Login, error) {
+	p, err := m.ensure(ctx)
+	if err != nil {
+		return nil, err
+	}
+	typ := "chatgpt"
+	if device {
+		typ = "chatgptDeviceCode"
+	}
+	res, err := p.call(ctx, "account/login/start", map[string]any{"type": typ})
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		LoginID         string `json:"loginId"`
+		AuthURL         string `json:"authUrl"`
+		VerificationURL string `json:"verificationUrl"`
+		UserCode        string `json:"userCode"`
+	}
+	if err := json.Unmarshal(res, &r); err != nil || r.LoginID == "" {
+		return nil, errors.New("codex: the sign-in did not start")
+	}
+	return &Login{ID: r.LoginID, URL: firstNonEmpty(r.AuthURL, r.VerificationURL), Code: r.UserCode}, nil
+}
+
+// LoginStatus reports how a started sign-in is going.
+func (m *Manager) LoginStatus(id string) LoginResult {
+	m.mu.Lock()
+	p := m.p
+	m.mu.Unlock()
+	if p == nil {
+		return LoginResult{Done: true, Error: "the Codex app-server is not running"}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if r := p.logins[id]; r != nil {
+		return *r
+	}
+	return LoginResult{}
 }

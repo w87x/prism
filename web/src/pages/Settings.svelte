@@ -120,6 +120,29 @@
   // the ChatGPT subscription through the Codex CLI: no key; the card shows whether Codex is installed and signed in
   let codexSt = $state(null);
   async function checkCodex() { codexSt = { busy: true }; codexSt = (await call('codex.status', {}, { quiet: true })) || { error: 'no answer' }; }
+  // signing in goes through Codex itself (the same flow as `codex login`): a browser window, or a code to enter on any device
+  let codexLogin = $state(null); // { id, url, code, device, state: 'waiting' | 'done' | 'failed', error }
+  async function codexSignIn(p, device) {
+    const r = await call('codex.login', { device });
+    if (!r) return;
+    codexLogin = { ...r, device, state: 'waiting' };
+    if (!device) window.open(r.url, '_blank', 'noopener');
+    for (let i = 0; i < 150 && codexLogin?.id === r.id && codexLogin.state === 'waiting'; i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      const st = await call('codex.login_status', { id: r.id }, { quiet: true });
+      if (st?.done) { codexLogin = { ...codexLogin, state: st.success ? 'done' : 'failed', error: st.error || '' }; break; }
+    }
+    if (codexLogin?.id !== r.id) return;
+    if (codexLogin.state === 'done') {
+      toast('Signed in with ChatGPT');
+      const n = await call('codex.import_models', { provider_id: p.id }, { quiet: true });
+      if (n) toast(`${n} model${n === 1 ? '' : 's'} added`);
+      await checkCodex();
+      loadLLM();
+    } else if (codexLogin.state === 'waiting') codexLogin = { ...codexLogin, state: 'failed', error: 'timed out waiting for the sign-in' };
+  }
+  let codexChecked = false; // plain flag, not state: the effect must not depend on what checkCodex writes
+  $effect(() => { if (!codexChecked && provs.some((x) => x.kind === 'codex')) { codexChecked = true; checkCodex(); } }); // a Codex provider shows its sign-in state without a click
   async function loadLLM() {
     const p = await call('providers.list', {}, { quiet: true });
     if (p) { provs = p.providers || []; presets = p.presets || {}; provs.forEach((x) => { newKey[x.id] ||= { label: '', api_key: '' }; }); }
@@ -167,7 +190,7 @@
     disc.items.filter((i) => !i.have && i.loaded).forEach((i) => (disc.sel[i.id] = true)); // preselect what is already loaded
   }
   async function importSel() {
-    const items = disc.items.filter((i) => disc.sel[i.id] && !i.have).map(({ id, kind, context, tools }) => ({ id, kind, context, tools }));
+    const items = disc.items.filter((i) => disc.sel[i.id] && !i.have).map(({ id, kind, context, tools, vision }) => ({ id, kind, context, tools, vision }));
     const n = await call('models.import', { provider_id: disc.provider.id, items });
     if (n !== undefined) { toast(`${n} models imported`); dOpen = false; loadLLM(); }
   }
@@ -387,7 +410,18 @@
               <div class="row addkey">
                 <span class="sm {codexSt?.logged_in ? 'ok' : codexSt?.error ? 'err' : 'mute'} grow">{#if codexSt?.busy}checking…{:else if codexSt?.logged_in}Signed in with {codexSt.kind === 'chatgpt' ? 'ChatGPT' : 'an API key'}{codexSt.plan ? ' · ' + codexSt.plan + ' plan' : ''} — models run on your subscription; Codex keeps the login, PRISM never sees it.{:else if codexSt?.error}{codexSt.error}{:else}Runs models on your ChatGPT subscription through the Codex CLI (sign in once with <code>codex login</code>).{/if}</span>
                 <Button size="sm" onclick={checkCodex}>Check sign-in</Button>
+                {#if codexSt && !codexSt.logged_in && codexSt.installed && !codexSt.busy}
+                  <Button size="sm" variant="primary" onclick={() => codexSignIn(p, false)}>Sign in with ChatGPT</Button>
+                  <Button size="sm" variant="ghost" title="for when the browser is on another device: enter a code at a web page" onclick={() => codexSignIn(p, true)}>Use a code</Button>
+                {/if}
               </div>
+              {#if codexLogin && codexLogin.state !== 'done'}
+                <div class="row addkey"><span class="sm {codexLogin.state === 'failed' ? 'err' : 'mute'}">
+                  {#if codexLogin.state === 'failed'}Sign-in did not finish: {codexLogin.error || 'cancelled'}
+                  {:else if codexLogin.device}Open <a href={codexLogin.url} target="_blank" rel="noopener">{codexLogin.url}</a> and enter the code <b>{codexLogin.code}</b> — waiting…
+                  {:else}Finish signing in in the browser window that opened (<a href={codexLogin.url} target="_blank" rel="noopener">open it again</a>) — waiting…{/if}
+                </span></div>
+              {/if}
             {:else if p.keys?.length}
               <table class="t keys"><tbody>
                 {#each p.keys as k (k.id)}

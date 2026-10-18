@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/codexapp"
 	"prism/internal/config"
 	"prism/internal/db"
 	"prism/internal/harvest"
@@ -739,6 +740,7 @@ func (a *App) Close() {
 	}
 	a.startupStage("Stopping extensions", "browser, MCP servers")
 	a.stopExtensions()
+	codexapp.Default.Close() // the Codex app-server, if models ran through it
 	if a.DB != nil {
 		a.startupStage("Closing the database", "waiting for running queries to finish")
 		a.DB.Close()
