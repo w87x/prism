@@ -71,7 +71,7 @@ func (s *Service) Ops(ctx context.Context) ([]Op, error) {
 	return out, rows.Err()
 }
 
-// Undo reverses a merge or split. Facts that were deleted, or moved elsewhere since, are left alone.
+// Undo reverses a merge, a split or a duplicate sweep. Facts that were deleted, or moved elsewhere since, are left alone.
 func (s *Service) Undo(ctx context.Context, id int64) (string, error) {
 	var kind, summary string
 	var payload []byte
@@ -94,6 +94,11 @@ func (s *Service) Undo(ctx context.Context, id int64) (string, error) {
 		var op splitOp
 		if err = json.Unmarshal(payload, &op); err == nil {
 			msg, err = s.undoSplit(ctx, op)
+		}
+	case "sweep":
+		var op sweepOp
+		if err = json.Unmarshal(payload, &op); err == nil {
+			msg, err = s.undoSweep(ctx, op)
 		}
 	default:
 		err = fmt.Errorf("unknown operation %q", kind)

@@ -295,6 +295,18 @@ func (s *Server) registerMemory() {
 		}
 		return rs, err
 	})
+	// near-duplicate sweep over the whole memory; dry lists what it would merge
+	rpc(s, "memory.sweep", func(ctx context.Context, r struct {
+		Dry bool `json:"dry"`
+	}) (res memory.SweepResult, err error) {
+		end := a.MemRunStart("Sweeping duplicates")
+		defer func() { end(err) }()
+		res, err = a.Memory.Sweep(ctx, r.Dry)
+		if !r.Dry && res.Changes() > 0 {
+			a.Logf("info", "memory", "%s (manual)", res)
+		}
+		return res, err
+	})
 	// deep analysis over several banks read together (bank_ids empty = the user's bank and every project / domain bank)
 	rpc(s, "memory.analyze_pooled", func(ctx context.Context, r struct {
 		BankIDs []int64 `json:"bank_ids"`

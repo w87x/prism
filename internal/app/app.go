@@ -634,6 +634,15 @@ func (a *App) memoryLoop(ctx context.Context) {
 				a.Logf("info", "memory", "%s", cr)
 			}
 			a.memJob("cross-bank analysis", fmt.Sprintf("%d pairs, %d changes", cr.Pairs, cr.Changes()), cr.Changes() > 0, err)
+			// storing a fact only compares it with its nearest neighbours; this looks at every look-alike pair, once
+			sw, err := a.Memory.Sweep(ctx, false)
+			if err != nil {
+				a.Logf("warn", "memory", "duplicate sweep failed: %v", err)
+			}
+			if sw.Changes() > 0 {
+				a.Logf("info", "memory", "%s", sw)
+			}
+			a.memJob("duplicate sweep", fmt.Sprintf("%d pairs, %d merged", sw.Pairs, sw.Merged), sw.Changes() > 0, err)
 			if cfg.SynthOff {
 				a.memJob("synthesis", off, false, nil)
 			} else {

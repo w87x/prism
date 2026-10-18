@@ -337,6 +337,22 @@
     else toast(`${r.insights} new insights, ${r.strengthened + r.revised} updated, ${r.contradictions} contradictions flagged (read ${r.considered} facts from ${r.bank})`);
     loadBanks(); loadFacts(); loadHealth(); loadReview();
   }
+  // look-alike facts across the whole memory: the first click only lists what would be merged, the second merges (undo is in the operations log)
+  let sweepPlan = $state(null);
+  async function sweep(dry) {
+    busy = 'sweep';
+    const r = await call('memory.sweep', { dry });
+    busy = '';
+    if (!r) return;
+    if (r.skipped) { sweepPlan = null; return toast(`Nothing to sweep: ${r.skipped}`); }
+    if (dry) {
+      sweepPlan = r.items?.length ? r : null;
+      return toast(r.items?.length ? `${r.items.length} duplicate${r.items.length === 1 ? '' : 's'} found among ${r.pairs} look-alike pairs` : `${r.pairs} look-alike pairs judged — none is a true duplicate`);
+    }
+    sweepPlan = null;
+    toast(`${r.merged} duplicate${r.merged === 1 ? '' : 's'} merged${r.left ? `, ${r.left} more pairs waiting` : ''}`);
+    loadBanks(); loadFacts(); loadHealth();
+  }
   async function synthesize() {
     busy = 'synth';
     const rs = await call('memory.synthesize', { level: 0 });
@@ -480,6 +496,7 @@
       {#snippet right()}
         <Button size="sm" variant="ghost" loading={busy === 'reflect'} title="Draw conclusions from facts that agree with each other{bank ? ' in this bank' : ''}" onclick={reflect}>Reflect</Button>
         <Button size="sm" variant="ghost" loading={busy === 'analyze'} title="Deep analysis: patterns, hypotheses, trends, contradictions, duplicates and a profile card{bank ? ' for this bank' : ''}" onclick={analyze}>Analyze</Button>
+        <Button size="sm" variant="ghost" loading={busy === 'sweep'} title="Find facts that say the same thing in different words, anywhere in memory. Lists what it would merge first; nothing changes until you confirm" onclick={() => sweep(true)}>Find duplicates</Button>
         <Button size="sm" variant="ghost" loading={busy === 'pool'} title="Read the user bank and every project and domain bank together: patterns, questions and contradictions that span banks — and the way to analyse banks that have too few facts to be analysed alone" onclick={analyzePooled}>Analyze across banks</Button>
         <Button size="sm" variant="ghost" loading={busy === 'synth'} title="Higher levels of thinking across all banks: level 2 syntheses (themes, causes, implications, tensions), then level 3 principles" onclick={synthesize}>Synthesize</Button>
         <Button size="sm" variant="ghost" loading={busy === 'entities'} title="Pull named entities (people, products, places…) and their relations out of facts{bank ? ' in this bank' : ''}" onclick={extractEntities}>Extract entities</Button>
@@ -488,6 +505,16 @@
         <Button size="sm" variant="ghost" loading={busy === 'prune'} onclick={() => run('prune', 'memory.prune', {}, (r) => `archived ${r.archived}, purged ${r.purged}`)}>Prune</Button>
         {#if bank}<Button size="sm" variant="ghost" loading={busy === 'dedupe'} title="Find and merge near-duplicate facts in this bank" onclick={dedupeFacts}>Dedupe</Button>{/if}
       {/snippet}
+      {#if sweepPlan}
+        <div class="sweep">
+          <b>{sweepPlan.items.length} duplicate{sweepPlan.items.length === 1 ? '' : 's'} to merge</b> — the weaker fact is retired, the kept one stays; every merge can be undone.
+          {#each sweepPlan.items as it (it.drop)}
+            <div class="swrow"><span class="keep">keep</span> {it.keep_text}<br /><span class="drop">retire</span> {it.drop_text}</div>
+          {/each}
+          <Button size="sm" loading={busy === 'sweep'} onclick={() => sweep(false)}>Merge these</Button>
+          <Button size="sm" variant="ghost" onclick={() => (sweepPlan = null)}>Dismiss</Button>
+        </div>
+      {/if}
       {#if view === 'graph3d'}
         <div class="gbody"><MemoryGraph3D {bank} {history} onopen={openId} /></div>
       {:else if view === 'graph'}
@@ -855,6 +882,11 @@
 </Modal>
 
 <style>
+  .sweep { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; display: grid; gap: 6px; }
+  .swrow { padding-left: 8px; border-left: 2px solid var(--line); color: var(--fg-dim, var(--fg)); }
+  .swrow .keep, .swrow .drop { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+  .swrow .keep { color: var(--ok, #4a9); }
+
   .rvpair2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .rvside { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line-2); }
   @media (max-width: 560px) { .rvpair2 { grid-template-columns: 1fr; } }

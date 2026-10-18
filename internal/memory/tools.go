@@ -547,6 +547,24 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 			},
 		},
 		&tools.Tool{
+			Name: "memory_sweep", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
+			Description: "Duplicate sweep: finds pairs of live facts that read almost alike across the whole memory, has the main model judge each pair once, and retires the weaker of two that say the same thing (or the older of a changed value). Different names, places, numbers or dates are kept apart. Every merge can be undone. Runs automatically after analysis; dry_run=true only lists what it would merge.",
+			Params:      tools.Obj("", tools.Bool("dry_run", "list what would be merged without changing anything")),
+			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+				a, err := tools.Decode[struct {
+					DryRun bool `json:"dry_run"`
+				}](raw)
+				if err != nil {
+					return "", err
+				}
+				r, err := s.Sweep(ctx, a.DryRun)
+				if err != nil {
+					return "", err
+				}
+				return r.String(), nil
+			},
+		},
+		&tools.Tool{
 			Name: "memory_synthesize", Category: "memory", Only: maintainers, Risk: tools.RiskWrite, Auto: true,
 			Description: "Higher levels of thinking. level 2 reads the conclusions and insights of every bank together and derives cross-domain syntheses (themes, causes, implications, tensions); level 3 distils standing principles, open tensions and gaps from level 2. Each cites the level below, so chains end in real facts. Runs automatically after enough new material; call it to force a pass. level omitted = both.",
 			Params:      tools.Obj("", tools.Int("level", "2 or 3 (default both)")),
