@@ -892,9 +892,10 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	}
 	skillCovered := false
 	if !o.Scout {
+		base := input // the skill is matched on what was asked, not on lessons appended to it
 		input += e.antibodyNote(tctx, p, input)
 		var sn string
-		sn, skillCovered = e.skillNote(tctx, p, input, t.ID)
+		sn, skillCovered = e.skillNote(tctx, p, base, t.ID)
 		input += sn
 	}
 	rbState, rb := "", Runbook{}

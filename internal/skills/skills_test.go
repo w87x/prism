@@ -165,3 +165,24 @@ func TestTidyMergesSkillsThatTeachTheSameThing(t *testing.T) {
 		t.Fatalf("enabled skills after the merge: %s", names)
 	}
 }
+
+// A skill is put in front of a task only when the task is about what the skill is about: sharing a couple of everyday words with its
+// description is not enough.
+func TestMatchNeedsTheTaskToBeAboutTheSkill(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	s := NewStore(d.Pool, t.TempDir())
+	s.LLM = r
+	ctx := context.Background()
+	if _, err := s.Save(ctx, Skill{Name: "avito-listing-loop", Description: "when fetching avito listing pages stop looping over url variants", Body: "---\nname: avito-listing-loop\ndescription: x\n---\n1. one url", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if ms := s.Match(ctx, "fetching avito listing pages looping url variants", 3, nil); len(ms) != 1 {
+		t.Fatalf("a task about the same thing should match: %+v", ms)
+	}
+	unrelated := "Find and download the animated film with Russian audio on RuTracker, check seeders, then add the torrent to the NAS and confirm the listing of the folder pages is complete, then report which pages loop"
+	if ms := s.Match(ctx, unrelated, 3, nil); len(ms) != 0 {
+		t.Fatalf("a task that merely shares words (listing, pages, loop) must not match: %+v", ms)
+	}
+}

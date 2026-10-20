@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"prism/internal/agent"
 	"prism/internal/llm"
+	"prism/internal/memory"
 	"prism/internal/textmatch"
 	"prism/internal/textutil"
 	"prism/internal/tools"
@@ -45,7 +47,14 @@ type Store struct {
 	// Rehome swaps merged-away skills for the merged one in every agent's pinned list; LLM judges what to merge. Both set by the app.
 	Rehome func(ctx context.Context, from []string, to string)
 	LLM    *llm.Router
+
+	vecMu sync.Mutex
+	vecs  map[string][]float32 // skill (name + description) → its normalised embedding
 }
+
+// skillMinSim is how alike (embedding cosine) a task and a skill must be. Measured on real tasks with bge-m3: skills that fit a task score
+// 0.5–0.67, the ones wrongly pushed on it by shared words (an Avito skill on a torrent task) 0.29–0.42.
+const skillMinSim = 0.45
 
 func NewStore(db *pgxpool.Pool, dataDir string) *Store {
 	return &Store{db: db, dataDir: filepath.Join(dataDir, "skills")}
@@ -190,6 +199,12 @@ func (s *Store) Match(ctx context.Context, query string, limit int, allow func(n
 	for _, w := range textmatch.Tokens(query) {
 		want[w] = true
 	}
+	var qv []float32
+	if s.LLM != nil && s.LLM.HasEmbedding(ctx) {
+		if vs, err := s.LLM.Embed(ctx, s.LLM.RoleRef(ctx, "embedding"), []string{textutil.Cut(query, 700)}); err == nil && len(vs) == 1 {
+			qv = memory.Normalize(vs[0])
+		}
+	}
 	var out []agent.SkillMatch
 	for _, h := range textmatch.Rank(query, docs, limit*2) {
 		shared := 0
@@ -204,6 +219,13 @@ func (s *Store) Match(ctx context.Context, query string, limit int, allow func(n
 			continue
 		}
 		k := cand[h.Index]
+		if qv != nil {
+			if v := s.skillVec(ctx, k); v != nil && memory.Dot(qv, v) < skillMinSim {
+				continue
+			}
+		} else if shared < 3 { // no embedding model: shared words alone must be stronger evidence
+			continue
+		}
 		body, _ := ParseFrontmatter(k.Body)
 		out = append(out, agent.SkillMatch{Name: k.Name, Description: k.Description, Body: strings.TrimSpace(body)})
 		if len(out) >= limit {
@@ -211,6 +233,29 @@ func (s *Store) Match(ctx context.Context, query string, limit int, allow func(n
 		}
 	}
 	return out
+}
+
+// skillVec is the embedding of a skill's name and description, kept until either changes.
+func (s *Store) skillVec(ctx context.Context, k Skill) []float32 {
+	key := k.Name + "\x00" + k.Description
+	s.vecMu.Lock()
+	if v, ok := s.vecs[key]; ok {
+		s.vecMu.Unlock()
+		return v
+	}
+	s.vecMu.Unlock()
+	vs, err := s.LLM.Embed(ctx, s.LLM.RoleRef(ctx, "embedding"), []string{strings.ReplaceAll(k.Name, "-", " ") + " " + k.Description})
+	if err != nil || len(vs) != 1 {
+		return nil
+	}
+	v := memory.Normalize(vs[0])
+	s.vecMu.Lock()
+	if s.vecs == nil {
+		s.vecs = map[string][]float32{}
+	}
+	s.vecs[key] = v
+	s.vecMu.Unlock()
+	return v
 }
 
 // NoteUse records that a skill was put in front of an agent (how = injected) or loaded by it (loaded).
