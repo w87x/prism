@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"prism/internal/testutil"
+	"prism/internal/tools"
 )
 
 // A paraphrase is retired in favour of the better-worded fact, facts that only share a template stay apart, a dry run changes nothing, the
@@ -151,5 +152,28 @@ func TestCharterLivesInCoreMemory(t *testing.T) {
 	}
 	if core := s.CoreText(ctx); strings.Contains(core, "download") || !strings.Contains(core, "Russian") {
 		t.Fatalf("core text must carry the other blocks only: %q", core)
+	}
+}
+
+// memory_find called inside a task puts facts about another named thing behind the ones that fit the task's request, even though the model's
+// search text never named the show.
+func TestMemoryFindInATaskDemotesFactsAboutOtherNamedThings(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	store(t, s, StoreReq{Bank: "user", Text: "User Danil wants an alert when a repack torrent for Call of Duty: Modern Warfare 4 appears on Jackett RuTracker"})
+	store(t, s, StoreReq{Bank: "user", Text: "User prefers torrents from Jackett RuTracker with high seeder counts for series"})
+	var tid int64
+	if err := s.db.QueryRow(ctx, `INSERT INTO tasks(from_kind,from_name,to_agent,title,input,status) VALUES('user','user','Atlas','x','get a torrent of Rick and Morty S01','running') RETURNING id`).Scan(&tid); err != nil {
+		t.Fatal(err)
+	}
+	reg := tools.NewRegistry(s.db)
+	RegisterTools(reg, s, func(context.Context, string) []string { return []string{"user"} })
+	tool, _ := reg.Get("memory_find")
+	out, err := tool.Run(ctx, &tools.Env{Agent: "Niko", TaskID: tid}, []byte(`{"query":"torrent Jackett RuTracker series"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i, j := strings.Index(out, "seeder counts"), strings.Index(out, "Call of Duty"); i < 0 || j < 0 || i > j {
+		t.Fatalf("the fitting fact should come first:\n%s", out)
 	}
 }

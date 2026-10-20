@@ -235,7 +235,7 @@ func (m *Manager) Connect(ctx context.Context, s Server) error {
 			params = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
 		risk := tools.RiskExec
-		if t.Annotations.ReadOnly {
+		if t.Annotations.ReadOnly || looksReadOnly(t.Name) {
 			risk = tools.RiskRead
 		}
 		desc := strings.TrimSpace(t.Description)

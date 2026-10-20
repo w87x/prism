@@ -61,6 +61,35 @@ func (s *Server) registerSkills() {
 		return settings.Load(ctx, a.Settings, "skills", SkillsConfig{}).GitHubToken
 	}
 	rpc(s, "skills.list", func(ctx context.Context, _ none) ([]skills.Skill, error) { return sk().List(ctx) })
+	// how much each skill is really used (injected into a task or loaded by an agent) and who has it pinned — so dead ones show
+	rpc(s, "skills.usage", func(ctx context.Context, _ none) (map[string]skillUsage, error) {
+		out := map[string]skillUsage{}
+		rows, err := a.DB.Pool.Query(ctx, `SELECT skill, count(*) FILTER (WHERE at > now()-interval '30 days'), count(*), max(at) FROM skill_uses GROUP BY skill`)
+		if err != nil {
+			return out, err
+		}
+		for rows.Next() {
+			var name string
+			var u skillUsage
+			if rows.Scan(&name, &u.Last30, &u.Total, &u.LastAt) == nil {
+				out[name] = u
+			}
+		}
+		rows.Close()
+		if pr, err := a.DB.Pool.Query(ctx, `SELECT s, array_agg(name ORDER BY name) FROM agent_profiles, unnest(skills) s GROUP BY s`); err == nil {
+			for pr.Next() {
+				var name string
+				var who []string
+				if pr.Scan(&name, &who) == nil {
+					u := out[name]
+					u.Agents = who
+					out[name] = u
+				}
+			}
+			pr.Close()
+		}
+		return out, nil
+	})
 	rpc(s, "skills.get", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (*skills.Skill, error) {
@@ -373,6 +402,22 @@ func (s *Server) registerWeb() {
 func (s *Server) registerAutonomy() {
 	a := s.App
 	sc := func() *scheduler.Service { return a.Ext.Sched }
+	// everything that watches for something (jobs, watches, trackers, rows) in one list, and stopping some of it
+	rpc(s, "watch.list", func(ctx context.Context, r struct {
+		Query string `json:"query"`
+	}) ([]scheduler.WatchItem, error) {
+		return sc().WatchList(ctx, r.Query)
+	})
+	rpc(s, "watch.stop", func(ctx context.Context, r struct {
+		Refs []string `json:"refs"`
+		Note string   `json:"note"`
+	}) (map[string][]string, error) {
+		if strings.TrimSpace(r.Note) == "" {
+			r.Note = "stopped by you"
+		}
+		done, failed := sc().StopWatches(ctx, r.Refs, r.Note)
+		return map[string][]string{"done": done, "failed": failed}, nil
+	})
 	rpc(s, "crons.list", func(ctx context.Context, _ none) ([]scheduler.Cron, error) { return sc().Crons(ctx) })
 	rpc(s, "crons.save", func(ctx context.Context, c scheduler.Cron) (int64, error) { return sc().SaveCron(ctx, c) })
 	rpc(s, "crons.delete", func(ctx context.Context, r struct {
@@ -1002,4 +1047,11 @@ func (s *Server) registerKB() {
 		}()
 		return true, nil
 	})
+}
+
+type skillUsage struct {
+	Last30 int        `json:"last30"`
+	Total  int        `json:"total"`
+	LastAt *time.Time `json:"last_at,omitempty"`
+	Agents []string   `json:"agents"`
 }

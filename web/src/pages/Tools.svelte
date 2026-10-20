@@ -159,7 +159,8 @@
   let adaptOnImport = $state(true);
   let importing = $state('');
   let ghToken = $state('');
-  async function loadS() { skills = (await loadSkills(true)) || []; hubs = (await call('skills.hubs', {}, { quiet: true })) || []; }
+  let usage = $state({});
+  async function loadS() { usage = (await call('skills.usage', {}, { quiet: true })) || {}; skills = (await loadSkills(true)) || []; hubs = (await call('skills.hubs', {}, { quiet: true })) || []; }
   $effect(() => { loadS(); loadSetting('skills', { github_token: '' }).then((c) => (ghToken = c.github_token)); });
   async function saveSkill() {
     if (await call('skills.save', $state.snapshot(sk))) { skOpen = false; toast('Skill saved'); loadS(); }
@@ -285,12 +286,17 @@
         {#snippet right()}<Button size="sm" variant="ghost" onclick={() => { sk = { id: 0, name: '', description: '', body: '---\nname: my-skill\ndescription: what it does and when to use it\n---\n\n# Steps\n1. ', source: 'local', enabled: true, adapted: false }; skOpen = true; }}><Icon name="plus" size={11} /> New</Button>{/snippet}
         <div class="scroll">
           <table class="t">
-            <thead><tr><th>Skill</th><th>Description</th><th style="width:50px">On</th><th style="width:168px"></th></tr></thead>
+            <thead><tr><th>Skill</th><th>Description</th><th style="width:64px">Used</th><th style="width:50px">On</th><th style="width:168px"></th></tr></thead>
             <tbody>
               {#each skills as k (k.id)}
                 <tr>
-                  <td class="hi nowrap">{k.name} <Badge tone="mute">{k.source}</Badge>{#if k.adapted}<Badge tone="accent">adapted</Badge>{/if}</td>
+                  <td class="hi nowrap">{k.name} <Badge tone="mute">{k.source}</Badge>{#if k.adapted}<Badge tone="accent">adapted</Badge>{/if}{#if k.description.startsWith('(merged into')}<Badge tone="warn" title="switched off when similar skills were merged into one">merged</Badge>{/if}</td>
                   <td class="dim desc">{k.description}</td>
+                  <td class="sm nowrap">
+                    {#if usage[k.name]?.total}<span title="put in front of an agent or loaded by one: {usage[k.name].last30} times in the last 30 days, {usage[k.name].total} in all, last {usage[k.name].last_at?.slice(0, 10)}">{usage[k.name].last30}×</span>
+                    {:else if k.enabled}<span class="mute" title="no agent has been given or has loaded this skill yet">—</span>{/if}
+                    {#if usage[k.name]?.agents?.length}<Badge tone="mute" title="pinned to {usage[k.name].agents.join(', ')}: offered only to them">{usage[k.name].agents.length}</Badge>{/if}
+                  </td>
                   <td><Switch bind:checked={k.enabled} onchange={() => toggleSkill(k)} /></td>
                   <td class="end nowrap">
                     <Button size="sm" variant="ghost" onclick={async () => { sk = await call('skills.get', { id: k.id }); skOpen = true; }}>Edit</Button>
@@ -299,7 +305,7 @@
                   </td>
                 </tr>
               {:else}
-                <tr><td colspan="4"><Empty>no skills — import from a hub or write your own</Empty></td></tr>
+                <tr><td colspan="5"><Empty>no skills — import from a hub or write your own</Empty></td></tr>
               {/each}
             </tbody>
           </table>

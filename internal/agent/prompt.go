@@ -167,7 +167,7 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	if pr, perr := e.Profiles.Get(ctx, agent); perr == nil {
 		self = pr
 	}
-	if facts = rankForTask(spec.Input, facts, infraWords(self)); len(facts) == 0 {
+	if facts = memory.RankForRequest(spec.Input, facts, infraWords(self)); len(facts) == 0 {
 		return ""
 	}
 	// what core memory already puts in the prompt is not recalled a second time

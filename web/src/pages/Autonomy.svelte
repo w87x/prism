@@ -24,6 +24,26 @@
   import TeamPractices from '../lib/TeamPractices.svelte';
 
   let tab = $state('intents');
+  // ── watching: everything that waits for or checks something, in one list ──
+  let watching = $state([]);
+  let wq = $state('');
+  let wsel = $state({});
+  let wbusy = $state(false);
+  async function loadWatching() { watching = (await call('watch.list', { query: wq }, { quiet: true })) || []; wsel = {}; }
+  const WKIND = { job: 'scheduled job', watch: 'watch', tracker: 'tracker', row: 'tracker row' };
+  const wpicked = $derived(Object.keys(wsel).filter((r) => wsel[r]));
+  async function stopWatching(refs) {
+    if (!refs.length) return;
+    const ok = await confirmBox({ title: refs.length === 1 ? 'Stop watching this?' : `Stop ${refs.length} watches?`, text: 'Jobs are marked finished (you can switch them on again), watches cancelled, trackers archived with the jobs that refresh them, rows retired. Nothing is deleted.', ok: 'Stop' });
+    if (!ok) return;
+    wbusy = true;
+    const r = await call('watch.stop', { refs, note: 'stopped by you' });
+    wbusy = false;
+    if (r?.failed?.length) toast(`Stopped ${r.done.length}; could not stop: ${r.failed.join('; ')}`);
+    else toast(`Stopped ${r?.done?.length || 0}`);
+    loadWatching();
+  }
+  $effect(() => { if (tab === 'watching') loadWatching(); });
   // ── heartbeat: one standing checklist, looked through quietly every so often ──
   let hb = $state({ enabled: false, every_min: 30, agent: 'Atlas', checklist: '', beats: [], next_run: '' });
   async function loadHb() { const r = await call('heartbeat.get', {}, { quiet: true }); if (r) hb = { ...hb, ...r, beats: r.beats || [] }; }
@@ -187,11 +207,36 @@
     <span class="sm mute" title="After a cron or standing run, a reviewer checks that what the agent said it did — or would do (&quot;if it is released I will download it&quot;) — really happened: a tool call did it, or a watch / cron will. fix = tell you and ask the agent once to make it real; report = only tell you (Today → Needs your attention); off = no review.">promise review</span>
     <Segmented size="sm" value={cfg.promise_review || 'fix'} options={[{ value: 'fix', label: 'fix' }, { value: 'report', label: 'report' }, { value: 'off', label: 'off' }]} onchange={(v) => { cfg.promise_review = v; saveCfg(); }} />
   </div>
-  <Tabs tabs={[{ id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
+  <Tabs tabs={[{ id: 'watching', label: 'Watching', badge: watching.length || '' }, { id: 'intents', label: 'Intents & watches', badge: intents.filter((i) => i.status === 'active').length }, { id: 'cron', label: 'Schedules', badge: crons.length },
     { id: 'brief', label: 'Briefings', badge: briefBadge }, { id: 'evo', label: 'Evolution', badge: props.filter((p) => p.status === 'pending').length },
     { id: 'heartbeat', label: 'Heartbeat' }, { id: 'team', label: 'Team' }, { id: 'audit', label: 'Audit' }]} bind:active={tab} />
 
-  {#if tab === 'intents'}
+  {#if tab === 'watching'}
+    <div class="sm mute" style="margin:6px 0 2px">Everything that waits for something or checks on it. When a show is out and downloaded, search for it here and stop what is still looking.</div>
+    <div class="bar"><span class="grow"></span>
+      <div style="width:220px"><Input bind:value={wq} size="sm" placeholder="search a show, product, place…" onenter={loadWatching} /></div>
+      <Button size="sm" variant="ghost" onclick={loadWatching}>Search</Button>
+      <Button size="sm" variant="accent" disabled={!wpicked.length} loading={wbusy} onclick={() => stopWatching(wpicked)}>Stop selected{wpicked.length ? ` (${wpicked.length})` : ''}</Button></div>
+    <Panel flush grow>
+      <div class="scroll">
+        <table class="t">
+          <thead><tr><th style="width:30px"></th><th style="width:110px">Kind</th><th>What</th><th style="width:70px"></th></tr></thead>
+          <tbody>
+            {#each watching as w (w.ref)}
+              <tr>
+                <td><Checkbox bind:checked={wsel[w.ref]} /></td>
+                <td><Badge tone={w.kind === 'job' ? 'accent' : w.kind === 'watch' ? 'ok' : 'mute'}>{WKIND[w.kind] || w.kind}</Badge></td>
+                <td class="dim"><Tip text={w.detail} max={260} /></td>
+                <td class="end"><Button size="sm" variant="ghost" onclick={() => stopWatching([w.ref])}>Stop</Button></td>
+              </tr>
+            {:else}
+              <tr><td colspan="4"><Empty>{wq ? 'nothing is watching for that' : 'nothing is watching or scheduled'}</Empty></td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  {:else if tab === 'intents'}
     <div class="bar"><span class="sm mute">“Tell me when X ships.” Checked on a cadence; when it holds, the owner agent is woken with the evidence. Watches just track progress and notify.</span><span class="grow"></span><Button size="sm" onclick={newIntent}><Icon name="plus" size={11} /> New</Button></div>
     <Panel flush grow>
       <div class="scroll">

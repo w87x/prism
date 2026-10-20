@@ -17,7 +17,7 @@ func TestRecallPutsFactsAboutOtherNamedThingsBehind(t *testing.T) {
 		{ID: 5, Kind: "fact", Text: "Rick and Morty seasons are stored under the TV folder in per-season directories"},
 	}
 	infra := infraWords(&Profile{Tools: []string{"mcp__mcp_toolbox__jackett_search", "mcp__mcp_toolbox__synology_ds_add"}})
-	got := rankForTask("get a torrent of Rick and Morty S01", fs, infra)
+	got := memory.RankForRequest("get a torrent of Rick and Morty S01", fs, infra)
 	var ids []int64
 	for _, f := range got {
 		ids = append(ids, f.ID)
@@ -32,7 +32,7 @@ func TestRecallPutsFactsAboutOtherNamedThingsBehind(t *testing.T) {
 		}
 	}
 	// a task that names nothing specific changes nothing except dropping conclusions
-	got = rankForTask("find me something to watch tonight", fs, infra)
+	got = memory.RankForRequest("find me something to watch tonight", fs, infra)
 	if len(got) != 4 || got[0].ID != 1 {
 		t.Fatalf("an unspecific task keeps the order: %+v", got)
 	}

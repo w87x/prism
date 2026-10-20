@@ -60,6 +60,17 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				if len(facts) == 0 {
 					return "No matching facts. Banks searched: " + strings.Join(banks, ", "), nil
 				}
+				// a fact about another named thing than the task's (a different show, game or product) goes behind the rest; what the
+				// search itself names (Synology, Jackett…) is not "another thing"
+				if req := s.taskRequest(ctx, env.TaskID); req != "" {
+					infra := map[string]bool{}
+					for _, w := range strings.Fields(strings.ToLower(a.Query)) {
+						if w = strings.Trim(w, ".,:;()\"'"); len(w) >= 4 {
+							infra[w] = true
+						}
+					}
+					facts = RankForRequest(req, facts, infra)
+				}
 				var sb strings.Builder
 				for _, f := range facts {
 					flag := FactFlags(f)

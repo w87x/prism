@@ -23,6 +23,58 @@ type watchHit struct {
 	line string
 }
 
+// WatchItem is one thing that watches, for the Watching view.
+type WatchItem struct {
+	Ref    string `json:"ref"`    // cron:ID, intent:ID, tracker:NAME, row:NAME/KEY — what watch_stop takes
+	Kind   string `json:"kind"`   // job | watch | tracker | row
+	Detail string `json:"detail"` // one line
+}
+
+// WatchList lists what watches for something, optionally only for a topic.
+func (s *Service) WatchList(ctx context.Context, query string) ([]WatchItem, error) {
+	hits, err := s.watchHits(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if q := strings.TrimSpace(query); q != "" {
+		docs := make([]string, len(hits))
+		for i, h := range hits {
+			docs[i] = h.text
+		}
+		var kept []watchHit
+		for _, r := range textmatch.Rank(q, docs, 200) {
+			kept = append(kept, hits[r.Index])
+		}
+		hits = kept
+	}
+	out := make([]WatchItem, 0, len(hits))
+	for _, h := range hits {
+		kind := "job"
+		switch {
+		case strings.HasPrefix(h.ref, "intent:"):
+			kind = "watch"
+		case strings.HasPrefix(h.ref, "tracker:"):
+			kind = "tracker"
+		case strings.HasPrefix(h.ref, "row:"):
+			kind = "row"
+		}
+		out = append(out, WatchItem{Ref: h.ref, Kind: kind, Detail: h.line})
+	}
+	return out, nil
+}
+
+// StopWatches ends the named things; it reports what stopped and what could not.
+func (s *Service) StopWatches(ctx context.Context, refs []string, note string) (done, failed []string) {
+	for _, ref := range refs {
+		if err := s.stopWatch(ctx, strings.TrimSpace(ref), note); err != nil {
+			failed = append(failed, ref+": "+err.Error())
+		} else {
+			done = append(done, ref)
+		}
+	}
+	return done, failed
+}
+
 func (s *Service) watchHits(ctx context.Context) ([]watchHit, error) {
 	var out []watchHit
 	cs, err := s.Crons(ctx)
