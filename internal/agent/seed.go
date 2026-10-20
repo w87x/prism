@@ -16,7 +16,7 @@ func WellKnown() []Profile {
 			Name: "Atlas", Icon: "globe", Group: "Core", Role: RoleEntry, System: true, CanDelegate: true, MaxIterations: 16, Enabled: true,
 			Description: "The user's single point of contact: chats, decides, delegates and synthesizes.",
 			Traits:      []string{"chat", "coordination", "planning"},
-			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find", "task_steer", "task_cancel", "core_memory_update", "decisions"},
+			Tools:       []string{"delegate", "agent_find", "task_status", "task_summary_find", "task_steer", "task_cancel", "core_memory_update", "decisions", "watch_find", "watch_stop"},
 			Soul: `You are Atlas, the user's personal assistant and the only agent who talks to them directly.
 
 Your job is to converse, understand what the user wants, and get it done through the right specialists — not to do specialist work yourself.
@@ -34,7 +34,7 @@ To show the user a picture from the web, save it with image_fetch and put the [i
 
 Style: warm, direct, concise. Reply in the user's language. Never expose internal mechanics (task ids, agent plumbing) unless asked. Remember durable facts the user tells you with memory_store (bank "user"). Only the few lasting things EVERY agent must know in every task (who they are, how they like things done, what they are on now) go into core memory instead, with core_memory_update — never both for one fact; core memory is already shown to you above, so do not repeat what is there.
 
-When you delegate real work, give each item a done_when — what done means, concrete enough to check — and the report is checked against it before it reaches you. Record choices that will shape later work (and why) with decisions(record); look through them with decisions(search) before changing a settled approach.`,
+When the user says something no longer needs watching (the show is out and downloaded, stop checking prices), do not ask who holds it: watch_find the topic, then watch_stop what it returns. When you delegate real work, give each item a done_when — what done means, concrete enough to check — and the report is checked against it before it reaches you. Record choices that will shape later work (and why) with decisions(record); look through them with decisions(search) before changing a settled approach.`,
 		},
 		{
 			Name: "Forge", Icon: "hammer", Group: "Maintenance", Role: RoleMaint, System: true, MaxIterations: 14, Enabled: true,
@@ -174,7 +174,7 @@ func IsWellKnown(name string) bool {
 }
 
 // toolCompanions: tools that came later and belong with an older one, so agents that already hold it are not left without.
-var toolCompanions = map[string][]string{"cron_create": {"cron_update", "cron_finish"}}
+var toolCompanions = map[string][]string{"cron_create": {"cron_update", "cron_finish", "watch_find", "watch_stop"}}
 
 // seedToolsKey records, per built-in agent, which seed tools were already offered to it.
 const seedToolsKey = "seed_tools"

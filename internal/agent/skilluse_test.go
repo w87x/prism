@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"prism/internal/llm"
 	"prism/internal/memory"
 	"prism/internal/tasks"
+	"prism/internal/testutil"
 )
 
 type fakeSkills struct {
@@ -132,5 +134,67 @@ func TestLessonsAreKeptOnceAndPitfallFactsFold(t *testing.T) {
 	}
 	if n := h.e.FoldPitfalls(ctx); n != 0 {
 		t.Fatalf("folded again: %d", n)
+	}
+}
+
+// The acceptance judge must see what the agent really did. A task that starts its own session used to reach the check with no session id, so
+// the trail read "(none)" and every report was called unsupported.
+func TestAcceptanceJudgeSeesTheToolTrailOfAFreshTask(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var judgeInput string
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		_, last, _ := msgAt(req, -1)
+		switch {
+		case strings.Contains(sys, "team lead checking"):
+			judgeInput = last
+			return testutil.Reply{Content: `{"met":true,"gap":""}`}
+		case call == 0:
+			return testutil.Reply{Tools: []llm.ToolCall{{ID: "c1", Name: "clock", Arguments: `{}`}}}
+		}
+		return testutil.Reply{Content: "It is late."}
+	}
+	tk, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "Atlas", ToAgent: "Atlas", Title: "time", Input: "what time is it", Depth: 1}, true)
+	h.e.Tasks.SetCriteria(ctx, tk.ID, "the time is reported")
+	h.e.RunTask(ctx, tk, TaskOpts{})
+	if !strings.Contains(judgeInput, "clock") {
+		t.Fatalf("the judge was not shown the tool calls: %q", judgeInput)
+	}
+}
+
+// A tool the user keeps allowing, with no refusal, is offered for arming; one refused once, a read-only one, a dangerous-sounding one and a
+// dismissed one are not.
+func TestEarnedAutonomyOffersToolsTheUserKeepsAllowing(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var pick, refused string
+	for _, tl := range h.e.Tools.All() {
+		if tl.Risk != 0 && !tl.Auto && !neverAuto.MatchString(tl.Name) && !h.e.Tools.State(tl.Name).Armed && h.e.Tools.State(tl.Name).Enabled {
+			if pick == "" {
+				pick = tl.Name
+			} else if refused == "" {
+				refused = tl.Name
+				break
+			}
+		}
+	}
+	if pick == "" || refused == "" {
+		t.Skip("no suitable tools registered in this harness")
+	}
+	for i := 0; i < 9; i++ {
+		h.e.noteApproval(ctx, pick, "Mira", int64(i%4+1), true)
+		h.e.noteApproval(ctx, refused, "Mira", int64(i%4+1), true)
+	}
+	h.e.noteApproval(ctx, refused, "Mira", 9, false)
+	got := h.e.ArmSuggestions(ctx)
+	if len(got) != 1 || got[0].Tool != pick || got[0].Allows != 9 {
+		t.Fatalf("suggestions: %+v (want only %s)", got, pick)
+	}
+	if err := h.e.DismissArmSuggestion(ctx, pick); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.e.ArmSuggestions(ctx); len(got) != 0 {
+		t.Fatalf("a dismissed suggestion must not come back: %+v", got)
 	}
 }

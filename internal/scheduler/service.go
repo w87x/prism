@@ -361,6 +361,9 @@ func (s *Service) fireCron(ctx context.Context, c Cron) error {
 		priority = systemCronPriority
 	}
 	input := c.Prompt
+	if !c.System {
+		input += jobLifecycle(c.ID)
+	}
 	if c.System && c.Agent == "Oneiros" {
 		input += s.dismissedNote(ctx)
 	}

@@ -40,6 +40,7 @@ var predicateProps = []tools.Prop{
 
 // RegisterTools installs intent, watch, cron and briefing tools.
 func (s *Service) RegisterTools(reg *tools.Registry) {
+	s.registerWatching(reg)
 	reg.Register(
 		&tools.Tool{
 			Name: "intent_create", Category: "autonomy", Risk: tools.RiskWrite, Auto: true,

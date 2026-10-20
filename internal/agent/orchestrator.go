@@ -863,6 +863,10 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		sess, err = e.Sessions.Create(tctx, p.Name, "task", "", t.ID)
 		if err == nil {
 			_ = e.Tasks.SetSession(tctx, t.ID, sess.ID)
+			// the copy of the task this run works with must know its session too: the acceptance check reads the tool trail through it,
+			// and with no session it saw "(none)" and called every report unsupported
+			sid := sess.ID
+			t.SessionID = &sid
 		}
 	}
 	if err != nil {

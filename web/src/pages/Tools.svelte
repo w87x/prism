@@ -27,7 +27,12 @@
   let filter = $state('');
   let master = $state(false);
   let ignoreTaint = $state(false);
+  // tools you keep allowing and never refuse, offered for arming (nothing changes until you say so)
+  let offers = $state([]);
+  async function armOffer(o) { if (await call('tools.set', { name: o.tool, armed: true })) { toast(`${o.tool} is armed — it will run without asking`); loadT(); } }
+  async function skipOffer(o) { await call('tools.arm_dismiss', { name: o.tool }); offers = offers.filter((x) => x.tool !== o.tool); }
   async function loadT() {
+    offers = (await call('tools.arm_suggestions', {}, { quiet: true })) || [];
     tools = (await loadTools(true)) || [];
     const m = await call('tools.master', {}, { quiet: true });
     master = !!m?.armed;
@@ -198,6 +203,10 @@
       <span class="grow"></span>
       <button type="button" class="lg" onclick={toggleLegend}>{legendOpen ? '▾' : '▸'} legend</button>
     </div>
+    {#each offers as o (o.tool)}
+      <div class="offer sm"><span>You have allowed <b>{o.tool}</b> {o.allows} times in {o.tasks} tasks{o.agents?.length ? ` (${o.agents.join(', ')})` : ''} and never refused it. Arm it so it stops asking?</span>
+        <Button size="sm" variant="accent" onclick={() => armOffer(o)}>Arm</Button><Button size="sm" variant="ghost" onclick={() => skipOffer(o)}>Not now</Button></div>
+    {/each}
     {#if legendOpen}
       <div class="legend sm mute"><b class="nmb">name</b> base tool · <b class="nme">name</b> returns external content · <i>name</i> deferred &nbsp;|&nbsp; <b class="hi">SAFE</b> asks before every run · <b class="hi">ARMED</b> runs on its own (still asks when untrusted web/MCP content is in the turn) · click a name for details</div>
     {/if}
@@ -419,6 +428,7 @@
 </Modal>
 
 <style>
+  .offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; margin: 4px 0; border: 1px solid var(--line-2); }
   .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
   .gcard { display: flex; flex-direction: column; gap: 3px; text-align: left; background: var(--bg-1); border: 1px solid var(--line-2); padding: 8px 10px; color: inherit; }
   .gcard:hover { border-color: var(--fg); background: var(--bg-2); }

@@ -207,6 +207,19 @@ func (s *Service) byID(ctx context.Context, id int64) (*Tracker, error) {
 	return &t, nil
 }
 
+// Archive switches a tracker off without deleting it: its rows and history stay, it just stops being listed as live.
+func (s *Service) Archive(ctx context.Context, name string) error {
+	tag, err := s.DB.Exec(ctx, `UPDATE trackers SET status='archived' WHERE name=$1`, name)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("no tracker named %q", name)
+	}
+	s.changed()
+	return nil
+}
+
 func (s *Service) Delete(ctx context.Context, name string) error {
 	tag, err := s.DB.Exec(ctx, `DELETE FROM trackers WHERE name=$1`, name)
 	if err != nil {

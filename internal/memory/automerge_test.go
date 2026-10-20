@@ -36,11 +36,16 @@ func TestAutoMergeBanksGroupsSameTopicAndLeavesOthersAlone(t *testing.T) {
 				body = fmt.Sprint(last["content"])
 			}
 		}
-		switch {
-		case strings.Contains(body, "GLM"):
-			return testutil.Reply{Content: fmt.Sprintf(`{"groups":[{"name":"GLM","ids":[%d,%d,%d,999999]}]}`, glm.ID, glm46.ID, glm53.ID)}
-		case strings.Contains(body, "Trip"):
-			return testutil.Reply{Content: fmt.Sprintf(`{"groups":[{"name":"Trip","ids":[%d,%d]}]}`, plan.ID, notes.ID)}
+		// the bank list is one list of project and domain banks now: answer for every topic in it
+		var groups []string
+		if strings.Contains(body, "GLM") {
+			groups = append(groups, fmt.Sprintf(`{"name":"GLM","ids":[%d,%d,%d,999999]}`, glm.ID, glm46.ID, glm53.ID))
+		}
+		if strings.Contains(body, "Trip") {
+			groups = append(groups, fmt.Sprintf(`{"name":"Trip","ids":[%d,%d]}`, plan.ID, notes.ID))
+		}
+		if len(groups) > 0 {
+			return testutil.Reply{Content: `{"groups":[` + strings.Join(groups, ",") + `]}`}
 		}
 		return testutil.Reply{Content: `{"groups":[]}`}
 	}

@@ -776,7 +776,7 @@ var minimalBase = map[string]bool{"memory_find": true, "memory_banks": true, "me
 // is and is listed on their profile — a coder does not need web or orchestration tools just because they exist.
 var workerBase = map[string]bool{
 	"clock": true, "sleep": true, "escalate": true, "ask_colleague": true, "ask_user": true, "report_blocked": true, "tool_search": true,
-	"memory_find": true, "memory_check": true, "memory_store": true, "memory_banks": true, "memory_feedback": true, "memory_verify": true,
+	"memory_find": true, "memory_check": true, "memory_store": true, "memory_banks": true, "memory_verify": true,
 	"artifact_read": true, "artifact_save": true, "scratchpad_read": true, "scratchpad_write": true, "scratchpad_share": true,
 	"skill_load": true, "skill_search": true,
 }
@@ -800,6 +800,9 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 	}
 	if p.CanDelegate && spec.Depth < MaxDepth && !spec.Restricted {
 		active["delegate"], active["agent_find"] = true, true
+	}
+	if spec.Task != nil && spec.Task.FromKind == "cron" { // a scheduled job may end itself when its purpose is done (see scheduler.jobLifecycle)
+		active["cron_finish"] = true
 	}
 	if spec.Depth >= MaxDepth || spec.Leaf {
 		delete(active, "delegate")
@@ -1185,6 +1188,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 				Text: fmt.Sprintf("%s wants to run %s [%s] — %s.", env.Agent, tc.Name, tool.Risk, why), Options: []string{"allow", "allow for this task", "deny"}})
 			if strings.EqualFold(strings.TrimSpace(ans), "allow for this task") {
 				ar.approved.Store(tc.Name, true)
+			}
+			if err == nil {
+				e.noteApproval(ctx, tc.Name, env.Agent, env.TaskID, isYes(ans))
 			}
 			if err != nil || !isYes(ans) {
 				if err == nil {

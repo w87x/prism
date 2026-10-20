@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"prism/internal/agent"
 
 	"prism/internal/plugins"
 	"prism/internal/tools"
@@ -45,6 +46,19 @@ func (s *Server) registerTools() {
 		Armed   *bool  `json:"armed"`
 	}) (bool, error) {
 		return true, a.Tools.SetState(ctx, r.Name, r.Enabled, r.Armed)
+	})
+	// tools the user keeps allowing, offered for arming (earned autonomy); "not now" is remembered
+	rpc(s, "tools.arm_suggestions", func(ctx context.Context, _ none) ([]agent.ArmSuggestion, error) {
+		out := a.Engine.ArmSuggestions(ctx)
+		if out == nil {
+			out = []agent.ArmSuggestion{}
+		}
+		return out, nil
+	})
+	rpc(s, "tools.arm_dismiss", func(ctx context.Context, r struct {
+		Name string `json:"name"`
+	}) (bool, error) {
+		return true, a.Engine.DismissArmSuggestion(ctx, r.Name)
 	})
 	// tools.set_many applies a state to several tools (group toggles in the UI)
 	rpc(s, "tools.set_many", func(ctx context.Context, r struct {
