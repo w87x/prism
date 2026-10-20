@@ -166,6 +166,7 @@ func (e *Engine) sweepNature(ctx context.Context) {
 	_, _ = e.DB.Exec(ctx, `DELETE FROM antibodies WHERE COALESCE(last_hit, created_at) < now() - make_interval(secs => $1)`, antibodyTTL.Seconds())
 	e.FoldPitfalls(ctx)
 	e.tidySkills(ctx)
+	e.learnRecurringSkills(ctx)
 	e.sweepRepairs(ctx)
 	e.checkEvolutionWatches(ctx)
 }

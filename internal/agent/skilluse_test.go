@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"prism/internal/llm"
 	"prism/internal/memory"
@@ -196,5 +197,49 @@ func TestEarnedAutonomyOffersToolsTheUserKeepsAllowing(t *testing.T) {
 	}
 	if got := h.e.ArmSuggestions(ctx); len(got) != 0 {
 		t.Fatalf("a dismissed suggestion must not come back: %+v", got)
+	}
+}
+
+// Work done again and again in short runs — no single run worth a skill — is noticed as a group: three or more finished tasks for the same
+// kind of job on at least two days, uncovered by any skill, go to Daedalus once.
+func TestRecurringWorkIsHandedToDaedalusOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.Skills = &fakeSkills{}
+	if _, err := h.e.Profiles.Save(ctx, Profile{Name: "Niko", Role: RoleWorker, Enabled: true}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	add := func(goal string, daysAgo int) {
+		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "Atlas", ToAgent: "Niko", Title: "t", Input: goal, Depth: 1}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.e.DB.Exec(ctx, `INSERT INTO task_summaries(task_id,agent,title,status,goal,created_at) VALUES($1,'Niko','t','done',$2, now()-make_interval(days=>$3))`, tk.ID, goal, daysAgo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("Search Jackett for the torrent of the series Futurama season 11 and add the best release to Synology Download Station", 3)
+	add("Search Jackett for the torrent of the series Haunted Hotel season 2 and add the best release to Synology Download Station", 2)
+	add("Search Jackett for the torrent of the series Widow's Bay season 1 and add the best release to Synology Download Station", 0)
+	add("Tell me the current weather forecast for Moscow tomorrow morning", 1)
+	if n := h.e.learnRecurringSkills(ctx); n != 1 {
+		t.Fatalf("one recurring job should be offered, got %d", n)
+	}
+	var title, input string
+	_ = h.e.DB.QueryRow(ctx, `SELECT title, input FROM tasks WHERE to_agent='Daedalus'`).Scan(&title, &input)
+	if !strings.Contains(title, "recurring") || !strings.Contains(input, "Jackett") || strings.Contains(input, "weather") || !strings.Contains(input, "Niko") {
+		t.Fatalf("the request to Daedalus: %q / %q", title, input)
+	}
+	// not again: gated for a day, and the tasks were handed over already
+	_ = h.e.Settings.Delete(ctx, recurringOfferKey)
+	var st recurringState
+	_, _ = h.e.Settings.Get(ctx, recurringOfferKey, &st)
+	st.At = time.Time{}
+	st.Offered = nil
+	if n := h.e.learnRecurringSkills(ctx); n != 1 { // state was wiped on purpose: offers again
+		t.Fatalf("with the record wiped it is offered again: %d", n)
+	}
+	if n := h.e.learnRecurringSkills(ctx); n != 0 {
+		t.Fatalf("a second run the same day does nothing: %d", n)
 	}
 }

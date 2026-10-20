@@ -219,15 +219,18 @@ func (s *Store) Match(ctx context.Context, query string, limit int, allow func(n
 			continue
 		}
 		k := cand[h.Index]
+		score := 0.0
 		if qv != nil {
-			if v := s.skillVec(ctx, k); v != nil && memory.Dot(qv, v) < skillMinSim {
-				continue
+			if v := s.skillVec(ctx, k); v != nil {
+				if score = memory.Dot(qv, v); score < skillMinSim {
+					continue
+				}
 			}
 		} else if shared < 3 { // no embedding model: shared words alone must be stronger evidence
 			continue
 		}
 		body, _ := ParseFrontmatter(k.Body)
-		out = append(out, agent.SkillMatch{Name: k.Name, Description: k.Description, Body: strings.TrimSpace(body)})
+		out = append(out, agent.SkillMatch{Name: k.Name, Description: k.Description, Body: strings.TrimSpace(body), Score: score})
 		if len(out) >= limit {
 			break
 		}

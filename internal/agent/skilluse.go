@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,4 +127,171 @@ func (e *Engine) tidySkills(ctx context.Context) {
 	if msg, err := e.Skills.Tidy(ctx); err == nil && !strings.Contains(msg, "nothing to merge") {
 		e.NotifyHousekeeping(ctx, "info", "Skills merged", Notice{Agent: "Daedalus", Level: "info", Text: msg}, false)
 	}
+}
+
+// ── recurring work ──
+//
+// A skill written from one long task misses the jobs done many times in short runs: "search Jackett for a show, queue the torrent on
+// Download Station" runs ten times a week in five steps each, and no single run is worth a skill. So once a day the finished tasks of the
+// last weeks are grouped by what they were for (embedding of the goal), and a group of three or more, on at least two days, that no skill
+// covers is handed to Daedalus once, with the task ids, to write one skill and pin it to the agents that did the work.
+const (
+	recurringDays       = 45
+	recurringMinSize    = 3
+	recurringMinSim     = 0.65 // measured on real task goals: the same job reads 0.65+, a different job on the same tools less
+	recurringPerRun     = 2
+	recurringCoveredSim = 0.62 // a skill this alike to the job covers it
+	recurringOfferKey   = "skill_recurring"
+)
+
+type recurringState struct {
+	At      time.Time `json:"at"`
+	Offered []int64   `json:"offered"` // task ids already handed to Daedalus
+}
+
+type goalRow struct {
+	task  int64
+	agent string
+	goal  string
+	day   string
+	vec   []float32
+}
+
+// learnRecurringSkills finds recurring work no skill covers. It reports how many requests it sent to Daedalus.
+func (e *Engine) learnRecurringSkills(ctx context.Context) int {
+	if e.Skills == nil || e.LLM == nil || e.LLMDown() || !e.LLM.HasEmbedding(ctx) {
+		return 0
+	}
+	var st recurringState
+	_, _ = e.Settings.Get(ctx, recurringOfferKey, &st)
+	if time.Since(st.At) < 24*time.Hour {
+		return 0
+	}
+	st.At = time.Now()
+	_ = e.Settings.Set(ctx, recurringOfferKey, st)
+
+	rows, err := e.DB.Query(ctx, `SELECT s.task_id, s.agent, s.goal, to_char(s.created_at,'YYYY-MM-DD') FROM task_summaries s
+		JOIN agent_profiles p ON p.name=s.agent AND p.role='worker'
+		WHERE s.status='done' AND btrim(s.goal)<>'' AND s.created_at > now()-make_interval(days=>$1) ORDER BY s.id DESC LIMIT 300`, recurringDays)
+	if err != nil {
+		return 0
+	}
+	var gs []goalRow
+	for rows.Next() {
+		var g goalRow
+		if rows.Scan(&g.task, &g.agent, &g.goal, &g.day) == nil {
+			gs = append(gs, g)
+		}
+	}
+	rows.Close()
+	if len(gs) < recurringMinSize {
+		return 0
+	}
+	ref := e.LLM.RoleRef(ctx, "embedding")
+	for i := 0; i < len(gs); i += 32 {
+		end := min(i+32, len(gs))
+		in := make([]string, 0, end-i)
+		for _, g := range gs[i:end] {
+			in = append(in, textutil.Cut(g.goal, 500))
+		}
+		vs, err := e.LLM.Embed(ctx, ref, in)
+		if err != nil || len(vs) != len(in) {
+			return 0
+		}
+		for j, v := range vs {
+			n := float32(0)
+			for _, x := range v {
+				n += x * x
+			}
+			n = float32(math.Sqrt(float64(n)))
+			if n > 0 {
+				for k := range v {
+					v[k] /= n
+				}
+			}
+			gs[i+j].vec = v
+		}
+	}
+	dot := func(a, b []float32) float64 {
+		if len(a) != len(b) {
+			return -1
+		}
+		var s float64
+		for i := range a {
+			s += float64(a[i]) * float64(b[i])
+		}
+		return s
+	}
+	var clusters [][]int
+	for i := range gs {
+		placed := false
+		for ci, c := range clusters {
+			if dot(gs[i].vec, gs[c[0]].vec) >= recurringMinSim {
+				clusters[ci] = append(c, i)
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			clusters = append(clusters, []int{i})
+		}
+	}
+	sort.SliceStable(clusters, func(a, b int) bool { return len(clusters[a]) > len(clusters[b]) })
+	offered := map[int64]bool{}
+	for _, id := range st.Offered {
+		offered[id] = true
+	}
+	sent := 0
+	for _, c := range clusters {
+		if len(c) < recurringMinSize || sent >= recurringPerRun {
+			continue
+		}
+		days, agents := map[string]bool{}, map[string]int{}
+		seen := false
+		for _, i := range c {
+			days[gs[i].day] = true
+			agents[gs[i].agent]++
+			seen = seen || offered[gs[i].task]
+		}
+		if len(days) < 2 || seen {
+			continue
+		}
+		rep := gs[c[0]]
+		// "covers" is stricter than "worth showing": a skill about polling downloads does not cover searching for and queueing one
+		if ms := e.Skills.Match(ctx, rep.goal, 1, nil); len(ms) > 0 && (ms[0].Score == 0 || ms[0].Score >= recurringCoveredSim) {
+			for _, i := range c {
+				st.Offered = append(st.Offered, gs[i].task)
+			}
+			continue
+		}
+		var who []string
+		for a := range agents {
+			who = append(who, a)
+		}
+		sort.Slice(who, func(i, j int) bool { return agents[who[i]] > agents[who[j]] })
+		if len(who) > 4 {
+			who = who[:4]
+		}
+		var sb strings.Builder
+		for n, i := range c {
+			if n >= 8 {
+				break
+			}
+			fmt.Fprintf(&sb, "- task #%d (%s, %s): %s\n", gs[i].task, gs[i].agent, gs[i].day, textutil.Brief(gs[i].goal, 160))
+		}
+		input := fmt.Sprintf("%d finished tasks over %d days look like ONE recurring job that nobody has written down, and no skill covers it:\n%s\nRead two or three of them with task_transcript(id) — prefer the cleanest runs — and work out the procedure that is the same each time: the tools in order, the arguments that mattered, the checks, the gotchas that cost time. If they are really different jobs, or nothing in them is repeatable (a plain lookup), write nothing and say so in one line. Otherwise write ONE skill for the job with skill_write, generalised (no specific title, URL or id), and pass agents=%q so it is offered to the agents that do this work.",
+			len(c), len(days), sb.String(), who)
+		title := fmt.Sprintf("Skill from task #%d (recurring: %s)", rep.task, strings.Join(who, ", "))
+		if _, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "skills", ToAgent: "Daedalus", Title: title, Input: input}); err == nil {
+			sent++
+			for _, i := range c {
+				st.Offered = append(st.Offered, gs[i].task)
+			}
+		}
+	}
+	if len(st.Offered) > 600 {
+		st.Offered = st.Offered[len(st.Offered)-600:]
+	}
+	_ = e.Settings.Set(ctx, recurringOfferKey, st)
+	return sent
 }

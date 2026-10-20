@@ -29,7 +29,11 @@ import (
 type SkillSummary struct{ Name, Description string }
 
 // SkillMatch is a saved skill that fits a piece of work, with its procedure.
-type SkillMatch struct{ Name, Description, Body string }
+type SkillMatch struct {
+	Name, Description, Body string
+	// Score is how alike the task and the skill are (embedding cosine); 0 when there was no embedding model to say.
+	Score float64
+}
 
 // SkillSource supplies skill summaries for the system prompt, the skills that fit a task, and a record of which skills get used.
 type SkillSource interface {
