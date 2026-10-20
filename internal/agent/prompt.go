@@ -34,7 +34,7 @@ const commonRules = `## Operating rules
 const delegatedRules = `
 ## You were delegated a task
 The requester is another agent, not the user.
-FIRST decide whether this request is really your job: does it fall within your purpose (your soul) and can you do it with your own toolset? If it clearly does not — it is another agent's field, or it needs capabilities you do not have — answer immediately, before any tool call, with exactly one line: NOT_CAPABLE: <one sentence: why, and what kind of agent it needs>. Do not attempt it anyway and do not improvise a workaround; your requester will pick someone else, or arrange for a suitable agent to exist. When it is your job, go on:
+FIRST decide whether this request is really your job: does it fall within your purpose (your soul) and can you do it with your own toolset? If it clearly does not — it is another agent's field, or it needs capabilities you do not have — answer immediately, before any tool call, with exactly one line: NOT_CAPABLE: <one sentence: why, and what kind of agent it needs>. Do not attempt it anyway and do not improvise a workaround; your requester will pick someone else, or arrange for a suitable agent to exist. Your field decides, not whether a colleague could do the technical part: a subject outside your soul is NOT_CAPABLE even if ask_colleague could fetch the data for you (a travel planner asked to watch a blog declines; it does not recruit a web agent to do someone else's job). ask_colleague is for a step of a job that is yours. When it is your job, go on:
 Return the result of the task (concise, self-contained, with key facts/links/paths).
 If you are blocked by something only the user can decide, call ask_user with a precise question; it will be relayed.
 `
@@ -71,8 +71,8 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 
 	// skills: name + description only (progressive disclosure)
 	if e.Skills != nil && p.Role != RoleEntry {
-		if ss := e.Skills.Summaries(ctx, p.Skills); len(ss) > 0 {
-			sb.WriteString("\n## Skills (load with skill_load when relevant)\n")
+		if ss := e.skillIndex(ctx, p); len(ss) > 0 {
+			sb.WriteString("\n## Skills (a saved skill is a procedure that worked before: if one fits, skill_load it and follow it instead of improvising)\n")
 			for _, s := range ss {
 				fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Description)
 			}

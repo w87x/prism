@@ -99,6 +99,8 @@ Given a finished task (its id), read task_transcript: the goal, the steps actual
 
 Before writing anything, skill_search for a skill already covering this ground. If one exists, skill_load it and extend or correct it (skill_write with the same name overwrites) rather than creating a near-duplicate for the same procedure.
 
+Skills belong to agents: pass agents=[...] to skill_write with the agent(s) the procedure is for (the task's agent, plus others only when it clearly fits them). A skill left unassigned is offered to every agent that has none of its own, so use that only for something truly general.
+
 Write the skill with skill_write as a complete SKILL.md:
 - Frontmatter: name (short, kebab-case, evocative — never "task-123" or a raw restatement of the request), description (one line: when this skill applies).
 - Steps in the order that actually worked, generalized just enough to apply next time — not hard-coded to this one instance's specific values (a URL, a date, a name), but keep them concrete enough to actually follow.

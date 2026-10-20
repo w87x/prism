@@ -39,6 +39,8 @@ type Skill struct {
 type Store struct {
 	db      *pgxpool.Pool
 	dataDir string
+	// Assign pins a skill to agents (it is added to their skill list) and returns the names it really pinned it to; set by the app.
+	Assign func(ctx context.Context, skill string, agents []string) []string
 }
 
 func NewStore(db *pgxpool.Pool, dataDir string) *Store {
@@ -165,6 +167,53 @@ func (s *Store) Summaries(ctx context.Context, names []string) []agent.SkillSumm
 	return out
 }
 
+// Match returns the enabled skills that fit a piece of work, best first. A skill fits when the work shares at least two meaningful words with
+// its name and description (one shared word is how an unrelated skill gets pushed on an agent).
+func (s *Store) Match(ctx context.Context, query string, limit int, allow func(name string) bool) []agent.SkillMatch {
+	all, err := s.List(ctx)
+	if err != nil {
+		return nil
+	}
+	var cand []Skill
+	var docs []string
+	for _, k := range all {
+		if k.Enabled && (allow == nil || allow(k.Name)) {
+			cand = append(cand, k)
+			docs = append(docs, strings.ReplaceAll(k.Name, "-", " ")+" "+k.Description)
+		}
+	}
+	want := map[string]bool{}
+	for _, w := range textmatch.Tokens(query) {
+		want[w] = true
+	}
+	var out []agent.SkillMatch
+	for _, h := range textmatch.Rank(query, docs, limit*2) {
+		shared := 0
+		seen := map[string]bool{}
+		for _, w := range textmatch.Tokens(docs[h.Index]) {
+			if want[w] && !seen[w] {
+				seen[w] = true
+				shared++
+			}
+		}
+		if shared < 2 {
+			continue
+		}
+		k := cand[h.Index]
+		body, _ := ParseFrontmatter(k.Body)
+		out = append(out, agent.SkillMatch{Name: k.Name, Description: k.Description, Body: strings.TrimSpace(body)})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// NoteUse records that a skill was put in front of an agent (how = injected) or loaded by it (loaded).
+func (s *Store) NoteUse(ctx context.Context, skill, agentName string, taskID int64, how string) {
+	_, _ = s.db.Exec(ctx, `INSERT INTO skill_uses(skill,agent,task_id,how) VALUES($1,$2,$3,$4)`, skill, agentName, taskID, how)
+}
+
 func listFiles(dir string) []string {
 	if dir == "" {
 		return nil
@@ -288,6 +337,7 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 					}
 					return string(b), nil
 				}
+				s.NoteUse(ctx, k.Name, env.Agent, env.TaskID, "loaded")
 				body, _ := ParseFrontmatter(k.Body)
 				out := "# Skill: " + k.Name + "\n" + body
 				if len(k.Files) > 0 {
@@ -299,9 +349,13 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 		&tools.Tool{
 			Name: "skill_write", Category: "skills", Risk: tools.RiskWrite, Only: []string{"Daedalus"},
 			Description: "Save a local skill from a complete SKILL.md body (YAML frontmatter with name + description, then the procedure). Writing a name that already exists overwrites that skill — use this to correct or extend one, not to fork a near-duplicate. Load it back with skill_load.",
-			Params:      tools.Obj("body", tools.Str("body", "the complete SKILL.md content: --- frontmatter (name, description) --- then the body")),
+			Params: tools.Obj("body", tools.Str("body", "the complete SKILL.md content: --- frontmatter (name, description) --- then the body"),
+				tools.StrList("agents", "the agents that should use this skill (pinned to them: it is offered only to them, so name every agent it fits and no more); leave out for a skill that suits everyone")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
-				a, err := tools.Decode[struct{ Body string }](raw)
+				a, err := tools.Decode[struct {
+					Body   string
+					Agents []string
+				}](raw)
 				if err != nil {
 					return "", err
 				}
@@ -314,7 +368,13 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 					return "", err
 				}
 				name := SafeName(fm["name"])
-				return fmt.Sprintf("Saved skill %q (#%d). Reusable with skill_load(name=%q).", name, id, name), nil
+				pinned := ""
+				if len(a.Agents) > 0 && s.Assign != nil {
+					if got := s.Assign(ctx, name, a.Agents); len(got) > 0 {
+						pinned = " Pinned to " + strings.Join(got, ", ") + "."
+					}
+				}
+				return fmt.Sprintf("Saved skill %q (#%d). Reusable with skill_load(name=%q).%s", name, id, name, pinned), nil
 			},
 		},
 	)

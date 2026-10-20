@@ -131,7 +131,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 	return &tools.Tool{
 		Name: "ask_colleague", Category: "agents", Base: true, Risk: tools.RiskRead,
 		Description: "Ask another specialist agent to do one thing you cannot do with your own tools (e.g. fetch a web page, search the web, read a PDF) and wait for the result. " +
-			"Use this instead of improvising with shell commands such as curl. The colleague answers once and cannot pass the request on. Write a complete, self-contained request. " +
+			"Use this instead of improvising with shell commands such as curl. Only for a step of a job that is in YOUR field: never to hand on a whole task that is not (a delegated task outside your field is declined with NOT_CAPABLE instead). The colleague answers once and cannot pass the request on. Write a complete, self-contained request. " +
 			"Name the agent if you know who (see agent_find), or leave it out and the best-matching specialist is asked. " +
 			"The maintenance staff can be asked too, each in their own field (Mnemosyne: memory — moving, merging or retiring facts, by id; Forge: designing agents; Metis: improving an agent; Oneiros: reflection and briefings; Daedalus: turning a finished task into a skill; Sentinel: monitors on a page, download, process or file). They review the request and may refuse it.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),

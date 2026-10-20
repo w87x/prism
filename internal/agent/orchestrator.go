@@ -886,8 +886,12 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			}
 		}
 	}
+	skillCovered := false
 	if !o.Scout {
 		input += e.antibodyNote(tctx, p, input)
+		var sn string
+		sn, skillCovered = e.skillNote(tctx, p, input, t.ID)
+		input += sn
 	}
 	rbState, rb := "", Runbook{}
 	onMain := true
@@ -974,6 +978,9 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		}
 	default:
 		_ = e.Tasks.Finish(ctx, t.ID, tasks.Done, res.Text, "", "")
+		if !o.Scout {
+			e.maybeLearnSkill(ctx, t, p, res, skillCovered)
+		}
 	}
 	out, _ := e.Tasks.Get(ctx, t.ID)
 	if rbState != "" {

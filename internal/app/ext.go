@@ -58,6 +58,27 @@ func (a *App) buildExtensions(ctx context.Context) error {
 
 	// skills
 	x.Skills = skills.NewStore(a.DB.Pool, a.Cfg.DataDir)
+	x.Skills.Assign = func(ctx context.Context, skill string, names []string) []string {
+		var done []string
+		for _, n := range names {
+			p, err := a.Profiles.Get(ctx, strings.TrimSpace(n))
+			if err != nil || p.System {
+				continue
+			}
+			has := false
+			for _, k := range p.Skills {
+				has = has || strings.EqualFold(k, skill)
+			}
+			if !has {
+				p.Skills = append(p.Skills, skill)
+				if _, err := a.Profiles.Save(ctx, *p, "skill pinned: "+skill); err != nil {
+					continue
+				}
+			}
+			done = append(done, p.Name)
+		}
+		return done
+	}
 	skills.RegisterTools(a.Tools, x.Skills)
 	skills.RegisterHubTools(a.Tools, x.Skills, skills.Adapter(a.LLM, func() []string {
 		var out []string

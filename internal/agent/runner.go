@@ -28,9 +28,14 @@ import (
 // SkillSummary is the progressive-disclosure view of a skill (name + description only).
 type SkillSummary struct{ Name, Description string }
 
-// SkillSource supplies skill summaries for the system prompt.
+// SkillMatch is a saved skill that fits a piece of work, with its procedure.
+type SkillMatch struct{ Name, Description, Body string }
+
+// SkillSource supplies skill summaries for the system prompt, the skills that fit a task, and a record of which skills get used.
 type SkillSource interface {
 	Summaries(ctx context.Context, names []string) []SkillSummary
+	Match(ctx context.Context, query string, limit int, allow func(name string) bool) []SkillMatch
+	NoteUse(ctx context.Context, skill, agent string, taskID int64, how string)
 }
 
 // Deps are the collaborators an Engine needs.
