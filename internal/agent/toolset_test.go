@@ -314,8 +314,8 @@ func TestBudgetIsExtendedOnlyWhileTheRunMakesProgress(t *testing.T) {
 	}
 }
 
-// A stall leaves a lesson in the agent's own memory, and the recall that starts the next similar task shows it.
-func TestAStallLeavesAPitfallLessonThatIsRecalledForSimilarTasks(t *testing.T) {
+// A stall leaves a lesson (immune memory, one store), and the next similar task is shown it.
+func TestAStallLeavesALessonThatIsShownForSimilarTasks(t *testing.T) {
 	h, task := recoveryHarness(t, "retry")
 	ctx := context.Background()
 	created, err := h.e.Tasks.Create(ctx, task, true)
@@ -323,12 +323,15 @@ func TestAStallLeavesAPitfallLessonThatIsRecalledForSimilarTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.e.RunTask(ctx, created, TaskOpts{})
-	fs, err := h.e.Memory.Find(ctx, memory.FindReq{Query: "find out something polling the clock", Banks: []string{"profile:Grinder2"}, K: 5, Agent: "Grinder2", NoReinforce: true})
-	if err != nil || len(fs) == 0 || !strings.HasPrefix(fs[0].Text, "Pitfall: When asked to find out something") {
-		t.Fatalf("the stall must leave a pitfall lesson in the agent's bank: %+v %v", fs, err)
+	abs, err := h.e.Antibodies(ctx)
+	if err != nil || len(abs) == 0 || abs[0].Agent != "Grinder2" || !strings.HasPrefix(abs[0].Rule, "When asked to find out something") {
+		t.Fatalf("the stall must leave a lesson for the agent: %+v %v", abs, err)
 	}
-	got := h.e.recall(ctx, RunSpec{Input: "find out something"}, "Grinder2")
-	if !strings.Contains(got, "Pitfall") || !strings.Contains(got, "polling the clock") {
-		t.Fatalf("the lesson must be recalled when a similar task starts: %q", got)
+	if fs, _ := h.e.Memory.Find(ctx, memory.FindReq{Query: "find out something polling the clock", Banks: []string{"profile:Grinder2"}, K: 5, Agent: "Grinder2", NoReinforce: true}); len(fs) != 0 {
+		t.Fatalf("the lesson must not also be written as a memory fact: %+v", fs)
+	}
+	p, _ := h.e.Profiles.Get(ctx, "Grinder2")
+	if note := h.e.antibodyNote(ctx, p, "find out something by polling the clock"); !strings.Contains(note, "polling the clock") {
+		t.Fatalf("the lesson must be shown when a similar task starts: %q", note)
 	}
 }
