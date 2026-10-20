@@ -164,6 +164,8 @@ func (e *Engine) sweepRepairs(ctx context.Context) {
 // sweepNature is the periodic housekeeping: expired lessons go, due repairs are judged.
 func (e *Engine) sweepNature(ctx context.Context) {
 	_, _ = e.DB.Exec(ctx, `DELETE FROM antibodies WHERE COALESCE(last_hit, created_at) < now() - make_interval(secs => $1)`, antibodyTTL.Seconds())
+	e.FoldPitfalls(ctx)
+	e.tidySkills(ctx)
 	e.sweepRepairs(ctx)
 	e.checkEvolutionWatches(ctx)
 }
@@ -203,7 +205,13 @@ func (e *Engine) handoverNote(ctx context.Context, id int64) string {
 
 // Charter is "how we work here", given to every agent.
 func (e *Engine) charterText(ctx context.Context) string {
-	t := strings.TrimSpace(settings.Load(ctx, e.Settings, settings.KeyCharter, settings.Charter{}).Text)
+	var t string
+	if e.Memory != nil { // the charter lives in core memory
+		t = e.Memory.CharterText(ctx)
+	}
+	if t == "" { // an install from before the charter moved there
+		t = strings.TrimSpace(settings.Load(ctx, e.Settings, settings.KeyCharter, settings.Charter{}).Text)
+	}
 	if r := []rune(t); len(r) > 1600 {
 		t = string(r[:1600])
 	}

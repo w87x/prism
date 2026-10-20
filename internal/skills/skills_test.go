@@ -135,3 +135,33 @@ func TestSkillWriteSavesAndOverwritesByName(t *testing.T) {
 		t.Fatalf("expected exactly one price-check skill, found %d", n)
 	}
 }
+
+func TestTidyMergesSkillsThatTeachTheSameThing(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, _ := testutil.Setup(t, d, fake)
+	s := NewStore(d.Pool, t.TempDir())
+	s.LLM = r
+	var rehomed string
+	s.Rehome = func(ctx context.Context, from []string, to string) { rehomed = strings.Join(from, ",") + ">" + to }
+	ctx := context.Background()
+	for _, k := range [][2]string{{"avoid-ajax-loop", "do not loop on ajax guesses"}, {"fetch-pattern-switch", "switch url pattern when fetches repeat"}, {"rail-booking", "book rail tickets"}} {
+		if _, err := s.Save(ctx, Skill{Name: k[0], Description: k[1], Body: "---\nname: " + k[0] + "\ndescription: " + k[1] + "\n---\nsteps", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.Handler = func(map[string]any, int) testutil.Reply {
+		return testutil.Reply{Content: `{"groups":[{"members":["avoid-ajax-loop","fetch-pattern-switch","rail-booking-typo"],"body":"---\nname: stop-looping-on-fetches\ndescription: when fetches repeat, change approach\n---\n1. switch pattern"}]}`}
+	}
+	if msg, err := s.Tidy(ctx); err != nil || !strings.Contains(msg, "1 groups merged") || rehomed != "avoid-ajax-loop,fetch-pattern-switch>stop-looping-on-fetches" {
+		t.Fatalf("msg=%q err=%v rehomed=%q (an invented member is ignored, the rest merge)", msg, err, rehomed)
+	}
+	on, _ := s.Summaries(ctx, nil), 0
+	names := ""
+	for _, x := range on {
+		names += x.Name + " "
+	}
+	if !strings.Contains(names, "stop-looping-on-fetches") || !strings.Contains(names, "rail-booking") || strings.Contains(names, "avoid-ajax-loop") {
+		t.Fatalf("enabled skills after the merge: %s", names)
+	}
+}

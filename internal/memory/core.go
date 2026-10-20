@@ -18,6 +18,9 @@ const (
 	maxCoreBlocks   = 8
 	maxCoreBlockLen = 800
 	maxCoreTotal    = 2400 // what is put into a prompt, in characters
+	// CharterLabel is the block that holds the team charter: it is shown under its own heading and may be longer than other blocks.
+	CharterLabel  = "charter"
+	maxCharterLen = 1600
 )
 
 var coreLabelRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,23}$`)
@@ -59,7 +62,7 @@ func (s *Service) CoreText(ctx context.Context) string {
 	var sb strings.Builder
 	for _, b := range bs {
 		t := strings.TrimSpace(b.Text)
-		if t == "" {
+		if t == "" || b.Label == CharterLabel { // the charter has its own section (CharterText)
 			continue
 		}
 		if sb.Len()+len(t) > maxCoreTotal {
@@ -70,6 +73,19 @@ func (s *Service) CoreText(ctx context.Context) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// CharterText is the team charter ("" when there is none), for the prompt section of its own.
+func (s *Service) CharterText(ctx context.Context) string {
+	var t string
+	if s.db.QueryRow(ctx, `SELECT text FROM core_blocks WHERE label=$1`, CharterLabel).Scan(&t) != nil {
+		return ""
+	}
+	t = strings.TrimSpace(t)
+	if r := []rune(t); len(r) > maxCharterLen {
+		t = string(r[:maxCharterLen])
+	}
+	return t
+}
+
 // SetCoreBlock writes a block (creating it when new), keeping what it said before in the history. description is kept when empty.
 func (s *Service) SetCoreBlock(ctx context.Context, label, text, description, by string) error {
 	label = strings.ToLower(strings.TrimSpace(label))
@@ -77,8 +93,12 @@ func (s *Service) SetCoreBlock(ctx context.Context, label, text, description, by
 		return errors.New("a block's label is 2-24 lowercase letters, digits or underscores, starting with a letter")
 	}
 	text = strings.TrimSpace(text)
-	if len([]rune(text)) > maxCoreBlockLen {
-		return fmt.Errorf("a block holds at most %d characters — core memory is for the few things every agent must always know; put the rest in ordinary memory", maxCoreBlockLen)
+	limit := maxCoreBlockLen
+	if label == CharterLabel {
+		limit = maxCharterLen
+	}
+	if len([]rune(text)) > limit {
+		return fmt.Errorf("a block holds at most %d characters — core memory is for the few things every agent must always know; put the rest in ordinary memory", limit)
 	}
 	var old string
 	var exists bool

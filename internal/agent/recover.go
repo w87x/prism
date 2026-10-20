@@ -3,12 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"prism/internal/llm"
-	"prism/internal/memory"
 	"prism/internal/settings"
 	"prism/internal/tasks"
+	"prism/internal/textmatch"
 	"prism/internal/textutil"
 )
 
@@ -144,22 +145,37 @@ func (e *Engine) learnFromStall(ctx context.Context, t tasks.Task, p *Profile, r
 	_, _ = e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: "recovery", ToAgent: worker, Title: title, Input: input})
 }
 
-// rememberPitfall keeps what a stall taught as a lesson in the agent's own memory bank. The auto-recall that runs at
-// the start of every task retrieves lessons that match the new task, so the agent meets "when a task looks like this,
-// do not loop on that; do this instead" BEFORE it repeats the mistake — without anyone editing its soul. Maintenance
-// agents are skipped (no maintainers learning from maintainers), and Store's own duplicate handling folds a repeat
-// of the same pitfall into the existing fact instead of piling up copies.
+// rememberPitfall keeps what a stall taught as a lesson (immune memory): one store, shown with the task only when its trigger fires, so it
+// costs no context otherwise. (It used to be written a second time as a "Pitfall:" memory fact; two copies of one lesson drifted apart.)
+// Maintenance agents are skipped (no maintainers learning from maintainers). A lesson the model gave no triggers for gets the telling
+// words of the task it came from, so it never turns into an always-on line.
 func (e *Engine) rememberPitfall(ctx context.Context, t tasks.Task, p *Profile, plan recovery) {
-	if e.Memory == nil || p.System || strings.TrimSpace(plan.Pitfall) == "" {
+	if p.System || strings.TrimSpace(plan.Pitfall) == "" {
 		return
 	}
-	text := "Pitfall: " + strings.TrimSpace(plan.Pitfall)
-	if r := []rune(text); len(r) > 400 {
-		text = string(r[:400]) + "…"
+	trig := plan.Triggers
+	if len(trig) == 0 {
+		trig = telltaleWords(t.Title+" "+t.Input, 4)
 	}
-	if len(plan.Triggers) > 0 { // immune memory: the same lesson, shown deterministically when a similar request shows up, and expiring if it never does
-		_ = e.AddAntibody(ctx, p.Name, plan.Triggers, strings.TrimSpace(plan.Pitfall), "a stalled task (#"+fmt.Sprint(t.ID)+")")
+	if len(trig) == 0 {
+		return
 	}
-	_, _ = e.Memory.Store(ctx, memory.StoreReq{Bank: "profile", Agent: p.Name, Text: text, Tags: []string{"pitfall", "stall"},
-		Source: "recovery", Confidence: 0.85, ValueRatio: 0.9, TaskID: t.ID})
+	_ = e.AddAntibody(ctx, p.Name, trig, strings.TrimSpace(plan.Pitfall), "a stalled task (#"+fmt.Sprint(t.ID)+")")
+}
+
+// telltaleWords are the longest distinct words of a text: what a later, similar request is likely to contain too.
+func telltaleWords(text string, n int) []string {
+	seen := map[string]bool{}
+	var ws []string
+	for _, w := range textmatch.Tokens(text) {
+		if len([]rune(w)) >= 5 && !seen[w] {
+			seen[w] = true
+			ws = append(ws, w)
+		}
+	}
+	sort.SliceStable(ws, func(i, j int) bool { return len(ws[i]) > len(ws[j]) })
+	if len(ws) > n {
+		ws = ws[:n]
+	}
+	return ws
 }

@@ -36,6 +36,8 @@ type SkillSource interface {
 	Summaries(ctx context.Context, names []string) []SkillSummary
 	Match(ctx context.Context, query string, limit int, allow func(name string) bool) []SkillMatch
 	NoteUse(ctx context.Context, skill, agent string, taskID int64, how string)
+	// Tidy merges skills that teach the same procedure; it returns a one-line report.
+	Tidy(ctx context.Context) (string, error)
 }
 
 // Deps are the collaborators an Engine needs.

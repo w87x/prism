@@ -52,7 +52,7 @@
   let profile = $state('');
   let refreshing = $state(false);
   const loadProfile = async () => { const bs = (await call('core.list', {}, { quiet: true })) || []; profile = (bs.find((b) => b.label === 'working_with_user') || {}).text || ''; };
-  const saveCharter = () => saveSetting('charter', { text: charter.text }, 'Charter saved');
+  const saveCharter = async () => { if (await call('core.save', { label: 'charter', text: charter.text, description: 'how we work here: the house rules every agent follows' })) toast('Charter saved'); };
   async function promote(l) { charter.text = (charter.text.trim() + '\n- ' + l.rule).trim(); await saveCharter(); toast('Added to the charter'); }
   async function refreshProfile() { refreshing = true; const r = await call('person.refresh', {}); refreshing = false; if (r) { profile = r; toast('Profile updated'); } else toast('Not enough to go on yet — it needs a dozen or more of your messages'); }
 
@@ -95,7 +95,7 @@
 
   $effect(() => {
     loadBooks(); loadRv(); loadUps(); loadHealth(); loadTrust(); loadLessons(); loadProfile(); loadDial();
-    loadSetting('charter', { text: '' }).then((c) => (charter = { text: c.text || '' }));
+    call('core.list', {}, { quiet: true }).then((bs) => (charter = { text: ((bs || []).find((b) => b.label === 'charter') || {}).text || '' }));
     loadSetting('autonomy', { runbooks_off: false, audit_one_in: 0 }).then((c) => (auto = { runbooks_off: !!c.runbooks_off, audit_one_in: c.audit_one_in || 0 }));
     loadSetting('review', { enabled: false, always_ask: [] }).then((c) => (rv = { enabled: !!c.enabled, always_ask: c.always_ask || [] }));
     loadSetting('standup', { off: false, weekday: 1, hour: 9 }).then((c) => (su = { off: !!c.off, weekday: c.weekday ?? 1, hour: c.hour ?? 9 }));
@@ -211,7 +211,7 @@
     {:else}<Empty>No lessons yet.</Empty>{/each}
 
   {:else if view === 'charter'}
-    <div class="sm mute" style="margin:8px 0">The charter is “how we work here”: house rules every agent is given. Keep it short — a handful of lines about what the team always or never does.</div>
+    <div class="sm mute" style="margin:8px 0">The charter is “how we work here”: house rules every agent is given. It is a block of core memory (also editable in Memory → Core memory). Keep it short — a handful of lines about what the team always or never does.</div>
     <Textarea bind:value={charter.text} rows={8} mono={false} placeholder={'- Never download anything without telling me first.\n- Prices always come with the store and the date.\n- When unsure which of two things I meant, ask once, in one message.'} />
     <div class="row end" style="margin:6px 0 14px"><Button variant="primary" onclick={saveCharter}>Save</Button></div>
     <h4>How to work with you</h4>

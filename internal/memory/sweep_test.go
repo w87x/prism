@@ -133,3 +133,23 @@ func TestHealConclusionsRepairsOrRetires(t *testing.T) {
 		t.Fatal("the surviving conclusion should no longer be stale")
 	}
 }
+
+// The charter is a core block with a longer limit and its own prompt section: it is not repeated in the core text.
+func TestCharterLivesInCoreMemory(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	long := strings.Repeat("- never download without asking. ", 40) // > 800, < 1600
+	if err := s.SetCoreBlock(ctx, "charter", long, "house rules", "user"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCoreBlock(ctx, "preferences", long, "", "user"); err == nil {
+		t.Fatal("an ordinary block keeps its 800-character limit")
+	}
+	_ = s.SetCoreBlock(ctx, "preferences", "Answers in Russian", "", "user")
+	if got := s.CharterText(ctx); !strings.Contains(got, "never download") {
+		t.Fatalf("charter text: %q", got)
+	}
+	if core := s.CoreText(ctx); strings.Contains(core, "download") || !strings.Contains(core, "Russian") {
+		t.Fatalf("core text must carry the other blocks only: %q", core)
+	}
+}

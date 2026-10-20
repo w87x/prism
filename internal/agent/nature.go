@@ -286,8 +286,100 @@ func (e *Engine) AddAntibody(ctx context.Context, agent string, triggers []strin
 	if agent = strings.TrimSpace(agent); agent == "" {
 		agent = "*"
 	}
+	// the same lesson worded differently is one lesson: it keeps the older row, gains the new triggers and counts as seen again
+	if rows, err := e.DB.Query(ctx, `SELECT id, rule, triggers FROM antibodies WHERE agent=$1`, agent); err == nil {
+		var dupID int64
+		var dupTr []string
+		for rows.Next() {
+			var id int64
+			var r string
+			var tg []string
+			if rows.Scan(&id, &r, &tg) == nil && dupID == 0 && sameLesson(rule, r) {
+				dupID, dupTr = id, tg
+			}
+		}
+		rows.Close()
+		if dupID != 0 {
+			merged := append([]string{}, dupTr...)
+			for _, t := range tr {
+				have := false
+				for _, m := range merged {
+					have = have || m == t
+				}
+				if !have && len(merged) < 6 && len(dupTr) > 0 { // an always-on lesson (no triggers) stays always-on
+					merged = append(merged, t)
+				}
+			}
+			_, err := e.DB.Exec(ctx, `UPDATE antibodies SET triggers=$2, last_hit=now() WHERE id=$1`, dupID, merged)
+			return err
+		}
+	}
 	_, err := e.DB.Exec(ctx, `INSERT INTO antibodies (agent, triggers, rule, source) VALUES ($1,$2,$3,$4) ON CONFLICT (agent, rule) DO UPDATE SET triggers=EXCLUDED.triggers, last_hit=now()`, agent, tr, rule, source)
 	return err
+}
+
+// sameLesson: two lessons are the same when most of their meaningful words are shared.
+func sameLesson(a, b string) bool {
+	wa, wb := map[string]bool{}, map[string]bool{}
+	for _, w := range textmatch.Tokens(a) {
+		wa[w] = true
+	}
+	for _, w := range textmatch.Tokens(b) {
+		wb[w] = true
+	}
+	if len(wa) == 0 || len(wb) == 0 {
+		return false
+	}
+	inter := 0
+	for w := range wa {
+		if wb[w] {
+			inter++
+		}
+	}
+	return float64(inter)/float64(len(wa)+len(wb)-inter) >= 0.55
+}
+
+// FoldPitfalls moves the "Pitfall:" memory facts older versions wrote into immune memory (where the same lesson is kept now) and retires
+// them, so each lesson lives in one place. Nothing is lost: the lesson text is kept, with the words of the task it came from as triggers.
+func (e *Engine) FoldPitfalls(ctx context.Context) int {
+	if e.Memory == nil {
+		return 0
+	}
+	rows, err := e.DB.Query(ctx, `SELECT f.id, f.text, COALESCE(NULLIF(b.owner,''), b.name), COALESCE(t.title||' '||t.input,''), COALESCE(f.task_id,0)
+		FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id LEFT JOIN tasks t ON t.id=f.task_id
+		WHERE f.valid_to IS NULL AND 'pitfall'=ANY(f.tags) AND f.text LIKE 'Pitfall: %' LIMIT 100`)
+	if err != nil {
+		return 0
+	}
+	type pf struct {
+		id, task    int64
+		text, owner string
+		from        string
+	}
+	var all []pf
+	for rows.Next() {
+		var x pf
+		if rows.Scan(&x.id, &x.text, &x.owner, &x.from, &x.task) == nil {
+			all = append(all, x)
+		}
+	}
+	rows.Close()
+	n := 0
+	for _, x := range all {
+		rule := strings.TrimSpace(strings.TrimPrefix(x.text, "Pitfall: "))
+		if x.owner == "" {
+			continue
+		}
+		if tr := telltaleWords(x.from, 4); len(tr) > 0 {
+			if e.AddAntibody(ctx, x.owner, tr, rule, "folded from a pitfall fact") != nil {
+				continue
+			}
+		}
+		if e.Memory.Retract(ctx, "system", x.id, "folded into immune memory") == nil {
+			n++
+		}
+	}
+	return n
 }
 
 func (e *Engine) Antibodies(ctx context.Context) ([]Antibody, error) {

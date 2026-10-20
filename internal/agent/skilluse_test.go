@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"prism/internal/memory"
 	"prism/internal/tasks"
 )
 
@@ -32,6 +33,10 @@ func (f *fakeSkills) Match(ctx context.Context, q string, limit int, allow func(
 		}
 	}
 	return out
+}
+
+func (f *fakeSkills) Tidy(ctx context.Context) (string, error) {
+	return "skills: nothing to merge", nil
 }
 
 func (f *fakeSkills) NoteUse(ctx context.Context, skill, agent string, taskID int64, how string) {
@@ -97,5 +102,35 @@ func TestLongUncoveredTaskIsOfferedToDaedalusOnce(t *testing.T) {
 	h.e.maybeLearnSkill(ctx, tk, p, long, false)
 	if count() != 1 {
 		t.Fatalf("offered %d times, want once per agent", count())
+	}
+}
+
+// One lesson lives in one place: a lesson worded differently folds into the one already there, and an old "Pitfall:" memory fact moves into
+// immune memory (with the words of its task as triggers) and is retired.
+func TestLessonsAreKeptOnceAndPitfallFactsFold(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	_ = h.e.AddAntibody(ctx, "Mira", []string{"avito"}, "When scraping Avito, stop retrying the same URL variants across fetches.", "a")
+	_ = h.e.AddAntibody(ctx, "Mira", []string{"listing"}, "Stop retrying the same URL variants across fetches when scraping Avito.", "b")
+	abs, _ := h.e.Antibodies(ctx)
+	if len(abs) != 1 || len(abs[0].Triggers) != 2 {
+		t.Fatalf("a reworded lesson must fold into the first, adding its triggers: %+v", abs)
+	}
+	tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: "Mira", Title: "Extract exchange rates", Input: "Extract the exchange rates table from the central bank website"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.e.Memory.Store(ctx, memory.StoreReq{Bank: "profile", Agent: "Mira", Text: "Pitfall: When extracting tables, stop paging once the rows repeat.", Tags: []string{"pitfall"}, TaskID: tk.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.e.FoldPitfalls(ctx); n != 1 {
+		t.Fatalf("folded %d", n)
+	}
+	abs, _ = h.e.Antibodies(ctx)
+	if len(abs) != 2 {
+		t.Fatalf("the pitfall should now be a lesson: %+v", abs)
+	}
+	if n := h.e.FoldPitfalls(ctx); n != 0 {
+		t.Fatalf("folded again: %d", n)
 	}
 }

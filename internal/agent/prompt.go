@@ -162,6 +162,18 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	if err != nil || len(facts) == 0 {
 		return ""
 	}
+	// what core memory already puts in the prompt is not recalled a second time
+	if core := strings.ToLower(strings.Join(strings.Fields(e.Memory.CoreText(ctx)), " ")); core != "" {
+		kept := facts[:0]
+		for _, f := range facts {
+			if t := strings.ToLower(strings.Join(strings.Fields(f.Text), " ")); len(t) < 12 || !strings.Contains(core, t) {
+				kept = append(kept, f)
+			}
+		}
+		if facts = kept; len(facts) == 0 {
+			return ""
+		}
+	}
 	var sb strings.Builder
 	sb.WriteString("\n## Relevant memory (auto-recalled for this turn — not exhaustive; memory_find can search further)\n")
 	used := 0

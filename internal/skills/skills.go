@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"prism/internal/agent"
+	"prism/internal/llm"
 	"prism/internal/textmatch"
 	"prism/internal/textutil"
 	"prism/internal/tools"
@@ -41,6 +42,9 @@ type Store struct {
 	dataDir string
 	// Assign pins a skill to agents (it is added to their skill list) and returns the names it really pinned it to; set by the app.
 	Assign func(ctx context.Context, skill string, agents []string) []string
+	// Rehome swaps merged-away skills for the merged one in every agent's pinned list; LLM judges what to merge. Both set by the app.
+	Rehome func(ctx context.Context, from []string, to string)
+	LLM    *llm.Router
 }
 
 func NewStore(db *pgxpool.Pool, dataDir string) *Store {

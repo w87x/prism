@@ -39,6 +39,7 @@ var Actions = []Action{
 	{"task_summary", "Summarise finished tasks", "Tasks", "aux"},
 	{"memory_extract", "Distil raw messages into facts", "Memory", "aux"},
 	{"memory_dedupe", "Decide whether a new fact repeats or corrects an old one", "Memory", "aux"},
+	{"skill_tidy", "Merge skills that teach the same procedure", "Autonomy", "main"},
 	{"memory_sweep", "Judge look-alike facts across the whole memory and merge true duplicates", "Memory", "main"},
 	{"memory_rerank", "Re-rank memory search results", "Memory", "aux"},
 	{"memory_reflect", "Draw conclusions from facts (reflection)", "Memory", "aux"},

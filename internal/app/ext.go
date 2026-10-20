@@ -79,6 +79,43 @@ func (a *App) buildExtensions(ctx context.Context) error {
 		}
 		return done
 	}
+	x.Skills.LLM = a.LLM
+	x.Skills.Rehome = func(ctx context.Context, from []string, to string) {
+		ps, err := a.Profiles.List(ctx)
+		if err != nil {
+			return
+		}
+		for _, p := range ps {
+			var next []string
+			changed, hasTo := false, false
+			for _, k := range p.Skills {
+				switch {
+				case strings.EqualFold(k, to):
+					if !hasTo {
+						next, hasTo = append(next, k), true
+					}
+				case func() bool {
+					for _, f := range from {
+						if strings.EqualFold(f, k) {
+							return true
+						}
+					}
+					return false
+				}():
+					changed = true
+					if !hasTo {
+						next, hasTo = append(next, to), true
+					}
+				default:
+					next = append(next, k)
+				}
+			}
+			if changed {
+				p.Skills = next
+				_, _ = a.Profiles.Save(ctx, p, "skills merged into "+to)
+			}
+		}
+	}
 	skills.RegisterTools(a.Tools, x.Skills)
 	skills.RegisterHubTools(a.Tools, x.Skills, skills.Adapter(a.LLM, func() []string {
 		var out []string

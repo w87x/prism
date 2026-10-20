@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"prism/internal/tasks"
 	"prism/internal/textutil"
@@ -13,7 +14,7 @@ import (
 // does not stop to skill_load. So the skill that fits a task is put in front of the agent with the task (the best one with its procedure),
 // and a long successful task that no skill covered is handed to Daedalus to turn into one.
 const (
-	skillBodyMax      = 3000
+	skillBodyMax      = 2200
 	skillAfterSteps   = 6 // a task needing this many model turns was worth writing down
 	skillLearnPerDay  = 4
 	skillLearnByAgent = 6 // hours between two skill requests for one agent
@@ -102,4 +103,26 @@ func (e *Engine) skillIndex(ctx context.Context, p *Profile) []SkillSummary {
 		}
 	}
 	return out
+}
+
+// tidySkills merges skills that teach the same procedure, at most once a week and only when new skills have appeared since.
+func (e *Engine) tidySkills(ctx context.Context) {
+	if e.Skills == nil || e.LLMDown() {
+		return
+	}
+	var last struct{ At time.Time }
+	_, _ = e.Settings.Get(ctx, "skill_tidy", &last)
+	if time.Since(last.At) < 7*24*time.Hour {
+		return
+	}
+	var fresh int
+	_ = e.DB.QueryRow(ctx, `SELECT count(*) FROM skills WHERE enabled AND created_at > $1`, last.At).Scan(&fresh)
+	if fresh == 0 && !last.At.IsZero() {
+		return
+	}
+	last.At = time.Now()
+	_ = e.Settings.Set(ctx, "skill_tidy", last)
+	if msg, err := e.Skills.Tidy(ctx); err == nil && !strings.Contains(msg, "nothing to merge") {
+		e.NotifyHousekeeping(ctx, "info", "Skills merged", Notice{Agent: "Daedalus", Level: "info", Text: msg}, false)
+	}
 }
