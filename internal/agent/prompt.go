@@ -162,6 +162,14 @@ func (e *Engine) recall(ctx context.Context, spec RunSpec, agent string) string 
 	if err != nil || len(facts) == 0 {
 		return ""
 	}
+	// facts about another named thing than the task's (a different title) go behind the rest, and derived conclusions are left to memory_find
+	var self *Profile
+	if pr, perr := e.Profiles.Get(ctx, agent); perr == nil {
+		self = pr
+	}
+	if facts = rankForTask(spec.Input, facts, infraWords(self)); len(facts) == 0 {
+		return ""
+	}
 	// what core memory already puts in the prompt is not recalled a second time
 	if core := strings.ToLower(strings.Join(strings.Fields(e.Memory.CoreText(ctx)), " ")); core != "" {
 		kept := facts[:0]
