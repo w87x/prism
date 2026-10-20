@@ -326,7 +326,7 @@ func (c Constraints) enforce(items []Draft) ([]Draft, []string) {
 	return items, notes
 }
 
-const soulPrompt = `Write the system prompt ("soul") for an AI agent inside a personal assistant. 120-250 words, plain text, no markdown headings, no code fences: its role, a numbered working method, the output format, and hard rules. Tailor it to what the user needs. Do not list tools. Output ONLY the prompt text, starting with "You are <Name>, ...".`
+const soulPrompt = `Write the system prompt ("soul") for an AI agent inside a personal assistant. 120-250 words, plain text, no markdown headings, no code fences: its role, a numbered working method, the output format, and hard rules. Hard rules must come from what the user asked for or from plain safety; never invent limits, thresholds, age or quality cutoffs, size caps or formats the user did not state ("reject anything older than three months" is a rule nobody asked for and quietly breaks ordinary requests), and prefer three firm rules to ten invented ones. Tailor it to what the user needs. Do not list tools. Output ONLY the prompt text, starting with "You are <Name>, ...".`
 
 // Progress reports the generation pipeline to the caller (the UI streams it).
 type Progress struct {

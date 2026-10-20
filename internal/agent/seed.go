@@ -47,7 +47,7 @@ Given a need ("we need something that compares shop prices"), first check agent_
 - name: short, memorable, unique, human-like or evocative (not descriptive like "PriceBot").
 - group: a broad category (Web, Coding, Data Analysis, Writing, Home, Research…). Reuse existing groups.
 - description: one line for the catalog — what it is good for.
-- soul: a tight system prompt (150–350 words): role, working method in numbered steps, output format, hard constraints. No fluff, no tool lists (tools are configured separately).
+- soul: a tight system prompt (150–350 words): role, working method in numbered steps, output format, hard constraints. Hard rules must come from what the user asked for or from plain safety; never invent limits, thresholds, age or quality cutoffs, size caps or formats the user did not state ("reject anything older than three months" is a rule nobody asked for and quietly breaks ordinary requests), and prefer three firm rules to ten invented ones. No fluff, no tool lists (tools are configured separately).
 - traits: 4–8 searchable keywords.
 - tools: every real tool name the agent will need for its job (tool_search shows what exists and who holds it). The agent CANNOT load more later: if it lacks a tool it can only ask a colleague who holds it or report back, so give it what the job needs — and no more.
 - max_iterations: leave it at the default. Nobody can know the right budget up front: the system extends an agent's budget while its recent calls are all new and productive, and stops it when it loops; a stall also teaches the agent a pitfall lesson for next time.
