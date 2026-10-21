@@ -28,7 +28,9 @@ func (s *Server) onboardingCompleter(job int64, j *obJob, model string) onboardi
 		j.addThought("\n▸ " + title + "\n")
 		msgs := []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}
 		estIn, estOut, last := (len(system)+len(user))/4, 0, time.Now()
+		onboarding.Pulse(ctx)
 		resp, err := a.LLM.Chat(ctx, model, llm.Request{Messages: msgs, JSON: jsonOut}, func(d llm.Delta) {
+			onboarding.Pulse(ctx) // a token arrived: the call is alive (see onboarding.callIdle)
 			estOut += (len(d.Content) + len(d.Reasoning)) / 4
 			if time.Since(last) > 700*time.Millisecond { // a running estimate until the real usage arrives
 				last = time.Now()

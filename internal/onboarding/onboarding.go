@@ -336,6 +336,15 @@ type Progress struct {
 	Total int
 }
 
+// How long a call may go without producing a token before it is given up on, and how long it may run in all. A local model that is
+// slow but steadily writing is never cut off by the first; the second only stops a call that never ends.
+const (
+	planIdle = 8 * time.Minute
+	planMax  = 2 * time.Hour
+	soulIdle = 6 * time.Minute
+	soulMax  = time.Hour
+)
+
 // SoulParallelism bounds how many agents' souls are written at the same time.
 var SoulParallelism = 4
 
@@ -367,7 +376,12 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	complete := po.complete
 	if complete == nil {
 		complete = func(ctx context.Context, _, system, user string, jsonOut bool) (string, error) {
-			return r.Complete(ctx, model, system, user, jsonOut)
+			// streamed, so every token tells callIdle the model is still working
+			resp, err := r.Chat(ctx, model, llm.Request{Messages: []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}, JSON: jsonOut}, func(llm.Delta) { Pulse(ctx) })
+			if err != nil {
+				return "", err
+			}
+			return resp.Content, nil
 		}
 	}
 	if progress == nil {
@@ -428,7 +442,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 
 	progress(Progress{Stage: "planning", Note: "Planning the team…", Total: cons.agentCap()})
 	system := cons.render(strings.Join(existing, ", "), strings.Join(tl, "\n"))
-	askPlan := func(user string) ([]Draft, error) {
+	askWith := func(system, user string) ([]Draft, error) {
 		var out string
 		var err error
 		if po.plan != nil {
@@ -440,9 +454,10 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			}
 		}
 		if po.plan == nil || err != nil {
-			pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			out, err = complete(pctx, "Onboarding: planning the team", system, user, true)
-			cancel()
+			// judged by whether the model is still writing, not by the clock: a slow local model needs as long as it needs
+			out, err = callIdle(ctx, planIdle, planMax, func(c context.Context) (string, error) {
+				return complete(c, "Onboarding: planning the team", system, user, true)
+			})
 		}
 		if err != nil {
 			return nil, err
@@ -458,6 +473,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}
 		return plan.Agents, nil
 	}
+	askPlan := func(user string) ([]Draft, error) { return askWith(system, user) }
 	// clean drops unknown tools (and unknown-tool-only noise) and duplicate names; it keeps the model's order
 	clean := func(in []Draft) []Draft {
 		seen := map[string]bool{}
@@ -476,9 +492,40 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}
 		return out
 	}
-	raw, perr := askPlan(userHints)
-	if perr != nil {
-		return fallback(fmt.Sprintf("planning failed (%v)", perr))
+	var raw []Draft
+	var perr error
+	if po.plan == nil && shouldDivide(cons, eligible) {
+		// two steps: a short call divides the work into domains, then each domain is planned by a smaller call of its own
+		progress(Progress{Stage: "planning", Note: "Dividing your needs into domains…", Total: cons.agentCap()})
+		divs, derr := planDivisions(ctx, func(c context.Context, sys, usr string) (string, error) {
+			return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
+				return complete(cc, "Onboarding: dividing into domains", sys, usr, true)
+			})
+		}, cons, userHints, existing, eligible)
+		if derr != nil {
+			progress(Progress{Stage: "planning", Note: derr.Error(), Total: cons.agentCap()})
+		} else {
+			parse := func(out string) ([]Draft, error) {
+				var plan struct {
+					Agents []Draft `json:"agents"`
+				}
+				if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
+					return nil, fmt.Errorf("no plan in the reply")
+				}
+				return plan.Agents, nil
+			}
+			raw = planByDomains(ctx, divs, cons, userHints, existing, eligible, func(c context.Context, sys, usr string) (string, error) {
+				return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
+					return complete(cc, "Onboarding: planning a domain", sys, usr, true)
+				})
+			}, parse, progress)
+		}
+	}
+	if len(raw) == 0 { // no division, or it produced nothing: the whole plan in one call
+		raw, perr = askPlan(userHints)
+		if perr != nil {
+			return fallback(fmt.Sprintf("planning failed (%v)", perr))
+		}
 	}
 	items := clean(raw)
 	// The check-and-repair loop: a plan that breaks a limit goes back to the model once, with the exact violations;
@@ -532,9 +579,9 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			n := started
 			pmu.Unlock()
 			report(Progress{Stage: "writing", Note: fmt.Sprintf("Writing %s (%d of %d started)…", items[i].Name, n, len(items)), Total: len(items)})
-			wctx, wcancel := context.WithTimeout(ctx, 5*time.Minute)
-			soul, err := complete(wctx, "Onboarding: writing "+items[i].Name, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
-			wcancel()
+			soul, err := callIdle(ctx, soulIdle, soulMax, func(c context.Context) (string, error) {
+				return complete(c, "Onboarding: writing "+items[i].Name, soulPrompt, fmt.Sprintf("%s\n\nAgent: %s\nGroup: %s\nPurpose: %s\nTraits: %s", userHints, items[i].Name, items[i].Group, items[i].Description, strings.Join(items[i].Traits, ", ")), false)
+			})
 			soul = strings.TrimSpace(strings.Trim(strings.TrimSpace(soul), "`"))
 			if err != nil || len(soul) < 40 {
 				// keep going: a matching template soul (or a minimal one) still yields a usable agent

@@ -271,7 +271,7 @@
       {/each}
     </div>
 
-    <div class="body">
+    <div class="body" class:narrow={step !== 3}>
       {#if step === 0}
         <h2>PostgreSQL</h2>
         <p class="dim">PRISM keeps memory, tasks, agents and settings in PostgreSQL. Point it at a server; the <b class="hi">prism</b> database is created for you if it does not exist. pgvector is used automatically when the server has it.</p>
@@ -350,6 +350,7 @@
         <div class="row end"><Button variant="ghost" onclick={() => (step = 1)}>← Back</Button><Button variant="primary" onclick={saveMe}>Next →</Button></div>
 
       {:else if step === 3}
+        <div class="ag2"><div class="cfgcol">
         <h2>Agents</h2>
         <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
         {#if mcpConnected.length}
@@ -369,11 +370,14 @@
           <div class="sm mute" style="flex-basis:100%">Limits are written into the planner's prompt and enforced afterwards: a plan that breaks one is sent back once with the exact violations, and whatever still breaks is trimmed. Agents cannot load tools later, so keep the limit generous enough for the job.</div>
           <div class="gm"><Field label="Model (fast = finishes sooner)"><Select bind:value={genModel} options={[{ value: '', label: 'chat model (default)' }, { value: 'role:fast', label: 'fast model' }, ...modelOptions('chat')]} /></Field></div>
           {#if planOpts.length > 1}<div class="gm"><Field label="Plan the team with" hint="an outside model plans who is on the team (slow — minutes; your hints and the tool list leave this machine, no secrets); each agent is still written here"><Select bind:value={planWith} options={planOpts} /></Field></div>{/if}
+        </div>
+        {#if regen}<Checkbox bind:checked={replace} label="overwrite existing — replace my current specialist agents with the selected ones (well-known agents stay)" />{/if}
+        </div><div class="rescol">
+        <div class="row wrap gen">
           <Checkbox bind:checked={autosave} label="save each agent as soon as it is written (no review step — you can edit or delete them on the Agents page)" />
           <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>
           <Button onclick={templates}>Use built-in templates</Button>
         </div>
-        {#if regen}<Checkbox bind:checked={replace} label="overwrite existing — replace my current specialist agents with the selected ones (well-known agents stay)" />{/if}
         {#if gBusy && (liveThinking.length || thinkTail)}
           <div class="think scroll" title="what the model is writing right now">
             {#each liveThinking as r (r.id)}<div class="tk"><b class="hi">▸ {r.title.replace('Onboarding: ', '')}</b></div><div class="tx"><RunText text={r.buf} /></div>{:else}<div class="tx pre">{thinkTail}</div>{/each}
@@ -407,6 +411,7 @@
           <Empty>generate a team or start from templates</Empty>
         {/if}
         <div class="row end"><Button variant="ghost" onclick={() => (step = 2)}>← Back</Button><Button variant="ghost" onclick={() => (step = 4)}>Skip</Button><Button variant="primary" disabled={!Object.values(pick).some(Boolean)} onclick={apply}>Create selected</Button></div>
+        </div></div>
 
       {:else}
         <h2>Ready</h2>
@@ -424,8 +429,8 @@
 </div>
 
 <style>
-  .ov { position: fixed; inset: 0; z-index: 2000; background: radial-gradient(ellipse at 50% 30%, color-mix(in srgb, rgb(var(--rgb-fg)) 10%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 75%); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 12px 12px; overflow: auto; }
-  .dlg { width: min(880px, 100%); background: var(--bg-1); border: 1px solid var(--line-3); box-shadow: var(--glow), 0 24px 80px rgba(0, 0, 0, 0.8); display: flex; flex-direction: column; max-height: 92vh; }
+  .ov { position: fixed; inset: 0; z-index: 2000; background: radial-gradient(ellipse at 50% 30%, color-mix(in srgb, rgb(var(--rgb-fg)) 10%, #000) 0%, color-mix(in srgb, rgb(var(--rgb-fg)) 2%, #000) 75%); display: flex; }
+  .dlg { width: 100%; height: 100%; background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--bg-2); }
   .wm { font-weight: 700; letter-spacing: 0.34em; font-size: 17px; background: linear-gradient(90deg, var(--fg), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .sub { color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.14em; font-size: var(--fs-sm); }
@@ -435,7 +440,18 @@
   .st .n { width: 17px; height: 17px; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; border-radius: 50%; }
   .st.on { color: var(--fg-hi); border-bottom-color: var(--fg); text-shadow: var(--glow-sm); }
   .st.done { color: var(--fg-dim); }
-  .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
+  .body { padding: 18px clamp(14px, 4vw, 56px); display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; flex: 1; }
+  .body.narrow > :global(*) { width: 100%; max-width: 940px; margin-inline: auto; }
+  header { padding: 10px clamp(14px, 4vw, 56px); }
+  .steps { padding: 0 clamp(14px, 4vw, 56px); }
+  /* the agents step: the controls on the left, what is being generated on the right, side by side */
+  .ag2 { display: grid; grid-template-columns: minmax(320px, 400px) 1fr; gap: 24px; flex: 1; min-height: 0; align-items: start; }
+  .cfgcol, .rescol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .cfgcol { position: sticky; top: 0; max-height: 100%; overflow: auto; padding-right: 6px; }
+  .cfgcol .genrow { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+  .cfgcol .gm { width: 100%; }
+  .gen { align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line-2); background: var(--bg-2); }
+  @media (max-width: 860px) { .ag2 { grid-template-columns: 1fr; } .cfgcol { position: static; } }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
   .ok-box { border: 1px solid var(--line-2); background: var(--bg); padding: 6px 10px; display: flex; flex-direction: column; gap: 3px; }
   .mcpbox { border: 1px solid var(--accent-dim); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 6px 10px; display: flex; flex-direction: column; gap: 5px; }
@@ -443,7 +459,7 @@
   .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 10px; }
   .tst { margin-top: 4px; }
   .list { max-height: 220px; border: 1px solid var(--line); }
-  .drafts { display: flex; flex-direction: column; gap: 4px; max-height: 330px; }
+  .drafts { display: flex; flex-direction: column; gap: 4px; }
   .draft { border: 1px solid var(--line); background: var(--bg); padding: 5px 8px; display: flex; flex-direction: column; gap: 4px; }
   .draft.exists { opacity: 0.55; }
   .draft pre { max-height: 220px; }
@@ -454,6 +470,6 @@
   .danger { border: 1px solid var(--err-dim); background: color-mix(in srgb, var(--err) 6%, transparent); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
   .genrow { align-items: flex-end; }
   .next { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; color: var(--fg-dim); }
-  .think { max-height: 190px; overflow: auto; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line-2); background: var(--bg); font-size: var(--fs-sm); color: var(--fg-dim); display: flex; flex-direction: column; gap: 2px; }
+  .think { max-height: 300px; overflow: auto; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line-2); background: var(--bg); font-size: var(--fs-sm); color: var(--fg-dim); display: flex; flex-direction: column; gap: 2px; }
   .think .tx { white-space: pre-wrap; word-break: break-word; }
 </style>
