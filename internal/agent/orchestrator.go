@@ -1113,7 +1113,7 @@ func (e *Engine) worthTelling(ctx context.Context, t tasks.Task, txt string) boo
 	var out struct {
 		Tell *bool `json:"tell"`
 	}
-	cctx, cancel := context.WithTimeout(ctx, time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "notice_filter", "fast"), worthTellingPrompt, "WHAT THE JOB WAS ASKED:\n"+textutil.Brief(t.Input, 700)+"\n\nMESSAGE:\n"+textutil.Brief(txt, 1500), &out); err != nil || out.Tell == nil {
 		return true

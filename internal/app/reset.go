@@ -27,6 +27,7 @@ func (a *App) ResetData(ctx context.Context, scope string) error {
 	if err := maint.Reset(ctx, a.DB.Pool, scope, a.Cfg.DataDir); err != nil {
 		return err
 	}
+	a.Settings.Forget() // the reset changed settings behind the store's back
 	if err := a.Profiles.Seed(ctx); err != nil {
 		return err
 	}

@@ -101,6 +101,9 @@ func jobsDistance(a, b string) float64 {
 	return 1 - float64(inter)/float64(len(sa)+len(sb)-inter)
 }
 
+// llmCallTimeout bounds one model call of the job review: generous, because a slow local model needs minutes for a big prompt.
+const llmCallTimeout = 15 * time.Minute
+
 const mergePrompt = `You manage a user's scheduled jobs. Below are several jobs that look alike. Decide whether they are really ONE kind of check run over different items (or plain duplicates), which should be a single job.
 If yes: write the single merged prompt. It must cover every item, keep every threshold, condition and instruction of each job, keep telling the agent to reply exactly NO_REPLY when there is nothing to report, and name each item explicitly. Choose the schedule (cron expression) that serves the most demanding of them.
 If any job needs different logic, a different agent's tools or a different schedule for a real reason, answer same=false.
@@ -260,7 +263,7 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 			Expr   string `json:"expr"`
 			Why    string `json:"why"`
 		}
-		cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 		err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), mergePrompt, sb.String(), &v)
 		cancel()
 		if err != nil || v.Same == nil || !*v.Same || strings.TrimSpace(v.Prompt) == "" {
@@ -307,7 +310,7 @@ func (s *Service) ReviewJobs(ctx context.Context) (int, error) {
 			Prompt string `json:"prompt"`
 			Why    string `json:"why"`
 		}
-		cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 		err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), rewritePrompt, "THE JOB #"+fmt.Sprint(j.ID)+" "+j.Name+" (agent "+j.Agent+", "+j.Expr+")\nPROMPT: "+j.Prompt+"\n\n"+evidence, &v)
 		cancel()
 		if err != nil || v.Revise == nil || !*v.Revise || strings.TrimSpace(v.Prompt) == "" || strings.TrimSpace(v.Prompt) == strings.TrimSpace(j.Prompt) || !keepsNumbers([]string{j.Prompt}, v.Prompt) {
@@ -370,7 +373,7 @@ func (s *Service) proposeTracker(ctx context.Context, c []jobRow, jobsText strin
 		Expr   string `json:"expr"`
 		Why    string `json:"why"`
 	}
-	cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	err := s.Engine.LLM.CompleteJSON(cctx, s.Engine.LLM.ActionRef(cctx, "jobs_review", "chat"), trackerPrompt, jobsText, &v)
 	cancel()
 	if err != nil || v.Fit == nil || !*v.Fit || strings.TrimSpace(v.Name) == "" || len(v.Items) < 2 || len(v.Columns) < 1 {

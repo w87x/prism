@@ -144,7 +144,7 @@ func (e *Engine) restartReview(ctx context.Context, t tasks.Task, findings strin
 	if findings == "" || e.LLM == nil {
 		return nil
 	}
-	rctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	rctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	var v restartVerdict
 	in := "TASK: " + textutil.Brief(t.Input, 600) + "\n\nEVIDENCE:\n" + textutil.Brief(findings, 5000)

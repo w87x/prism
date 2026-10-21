@@ -192,7 +192,7 @@ func (s *Server) registerLLM() {
 		Ref  string `json:"ref"`
 		Kind string `json:"kind"`
 	}) (map[string]any, error) {
-		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		start := time.Now()
 		if r.Kind == "embedding" {

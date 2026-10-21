@@ -96,7 +96,7 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		Commitments []promiseItem `json:"commitments"`
 	}
 	user := fmt.Sprintf("TASK:\n%s\n\nREPORT:\n%s\n\nTOOL CALLS:\n%s", textutil.Brief(t.Input, 1500), textutil.Brief(t.Result, 3000), trail)
-	rctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	rctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	if err := e.LLM.CompleteJSON(rctx, e.LLM.ActionRef(rctx, "promise_review", "fast"), promiseReviewPrompt, user, &out); err != nil {
 		return

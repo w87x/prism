@@ -122,7 +122,7 @@ func (e *Engine) antibodyFromComplaint(ctx context.Context, t tasks.Task, note s
 		Rule     string   `json:"rule"`
 		Triggers []string `json:"triggers"`
 	}
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "recover", "fast"), complaintPrompt, fmt.Sprintf("TASK: %s\n%s\n\nTHE USER SAID: %s", t.Title, textutil.Brief(t.Input, 600), note), &v); err != nil || strings.TrimSpace(v.Rule) == "" {
 		return
@@ -186,7 +186,7 @@ func (e *Engine) writeHandover(ctx context.Context, t tasks.Task) {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "TASK: %s\nINSTRUCTION: %s\nENDED: %s %s %s\n\nWHAT IT DID:\n%s\nITS LAST WORDS:\n%s", t.Title, textutil.Brief(t.Input, 900), t.Status, t.Error, t.Question, orNone(e.toolTrail(ctx, *t.SessionID)), textutil.Brief(t.Result, 700))
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "handover", "fast"), handoverPrompt, sb.String(), false)
 	if note := strings.TrimSpace(out); err == nil && len(note) > 20 {

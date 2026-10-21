@@ -240,6 +240,8 @@ func (s *ProfileStore) Save(ctx context.Context, p Profile, reason string) (*Pro
 }
 
 func (s *ProfileStore) Delete(ctx context.Context, id int64) error {
+	var name string
+	_ = s.db.QueryRow(ctx, `SELECT name FROM agent_profiles WHERE id=$1 AND NOT system`, id).Scan(&name)
 	tag, err := s.db.Exec(ctx, `DELETE FROM agent_profiles WHERE id=$1 AND NOT system`, id)
 	if err != nil {
 		return err
@@ -247,6 +249,12 @@ func (s *ProfileStore) Delete(ctx context.Context, id int64) error {
 	if tag.RowsAffected() == 0 {
 		return errors.New("well-known agents cannot be deleted (disable them instead)")
 	}
+	// what was learned about this agent goes with it: a new agent that takes the name (re-onboarding does) must not start with the old
+	// one's lessons, trust or trails, and nothing may keep watching a profile that no longer exists
+	_, _ = s.db.Exec(ctx, `DELETE FROM antibodies WHERE lower(agent)=lower($1)`, name)
+	_, _ = s.db.Exec(ctx, `DELETE FROM trust WHERE lower(agent)=lower($1)`, name)
+	_, _ = s.db.Exec(ctx, `DELETE FROM trails WHERE lower(agent)=lower($1)`, name)
+	_, _ = s.db.Exec(ctx, `DELETE FROM evolution_watch WHERE profile_id=$1`, id)
 	if s.OnChange != nil {
 		s.OnChange()
 	}

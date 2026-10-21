@@ -108,7 +108,7 @@ func (e *Engine) BuildStandup(ctx context.Context, since, until time.Time) (stri
 
 	text := ""
 	if e.LLM != nil && e.LLM.RoleRef(ctx, "chat") != "" || e.LLM != nil && e.LLM.RoleRef(ctx, "fast") != "" {
-		cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 		defer cancel()
 		out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "standup", "fast"),
 			"You write the weekly team standup of a personal AI assistant team for its user. Use ONLY the facts given; invent nothing. Short, plain, warm; no headline, no filler. Three short parts in this order, each only if there is something to say: what the team got done; what went wrong or needs the user (failures, bad ratings, missed criteria, problems found, outages, promises not kept); what is worth a look (due decisions, runbook changes). Mention agents by name. At most 160 words. Reply in the user's language if the facts hint at one, otherwise English.",

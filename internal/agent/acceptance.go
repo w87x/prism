@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"prism/internal/textutil"
 )
@@ -32,7 +31,7 @@ func (e *Engine) judgeAcceptance(ctx context.Context, criteria, instruction, tex
 		trail = e.toolTrail(ctx, *session)
 	}
 	var v acceptanceVerdict
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	in := fmt.Sprintf("ACCEPTANCE CRITERIA:\n%s\n\nTHE REQUEST:\n%s\n\nWHAT THE COLLEAGUE DID (tool calls):\n%s\n\nTHE REPORT:\n%s", criteria, textutil.Brief(instruction, 800), orNone(trail), textutil.Brief(text, 3500))
 	if err := e.LLM.CompleteJSON(cctx, e.LLM.ActionRef(cctx, "acceptance", "chat"), acceptancePrompt, in, &v); err != nil || v.Met == nil {

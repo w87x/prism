@@ -144,3 +144,45 @@ func TestResetToleratesTablesTheDatabaseDoesNotHaveYet(t *testing.T) {
 		t.Fatalf("produced data must go (%d left) and settings stay (%d)", n, kept)
 	}
 }
+
+// A reset wipes EVERY table that is not configuration, including ones added after the reset code was written: task_meta survived one, the
+// task ids restarted, and new tasks were judged against old criteria.
+func TestResetWipesEveryProducedTableIncludingNewOnes(t *testing.T) {
+	d := testutil.DB(t)
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO antibodies(agent,triggers,rule,source) VALUES('Mira','{x}','a lesson that must go','t')`,
+		`INSERT INTO skill_uses(skill,agent,task_id,how) VALUES('s','Mira',1,'injected')`,
+		`INSERT INTO tool_approvals(tool,agent,task_id,allowed) VALUES('t','Mira',1,true)`,
+		`INSERT INTO runbooks(key,agent,title,steps) VALUES('cron:x','Mira','t','1. step')`,
+		`UPDATE core_blocks SET text='about me' WHERE label='about_user'`,
+		`INSERT INTO chats(topic,title,auto_title) VALUES('side','Side',false)`,
+		`INSERT INTO settings(key,value) VALUES('general','{}') ON CONFLICT (key) DO NOTHING`,
+		`INSERT INTO settings(key,value) VALUES('harvest.bookmarks','{"last_id":23138}') ON CONFLICT (key) DO NOTHING`,
+	} {
+		if _, err := d.Exec(ctx, q); err != nil {
+			t.Fatalf("fixture does not match the schema: %v (%s)", err, q)
+		}
+	}
+	if err := Reset(ctx, d.Pool, ScopeData, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string) int { var n int; _ = d.QueryRow(ctx, q).Scan(&n); return n }
+	for _, tbl := range []string{"antibodies", "skill_uses", "tool_approvals", "runbooks", "task_meta"} {
+		if n := count(`SELECT count(*) FROM ` + tbl); n != 0 {
+			t.Errorf("%s still holds %d rows after a reset", tbl, n)
+		}
+	}
+	if count(`SELECT count(*) FROM core_blocks WHERE label='about_user' AND text=''`) != 1 || count(`SELECT count(*) FROM core_blocks`) != 3 {
+		t.Error("core memory keeps its default blocks, emptied")
+	}
+	if count(`SELECT count(*) FROM chats WHERE topic=''`) != 1 || count(`SELECT count(*) FROM chats`) != 1 {
+		t.Error("only the Main chat stays")
+	}
+	if count(`SELECT count(*) FROM settings WHERE key='harvest.bookmarks'`) != 0 {
+		t.Error("a setting that remembers an id must go with the data: the ids start again")
+	}
+	if count(`SELECT count(*) FROM memory_predicates`) == 0 || count(`SELECT count(*) FROM schema_migrations`) == 0 || count(`SELECT count(*) FROM settings`) == 0 {
+		t.Error("seeded rules, the migration record and the settings must stay")
+	}
+}

@@ -79,6 +79,13 @@ func (s *Store) Set(ctx context.Context, key string, v any) error {
 	return nil
 }
 
+// Forget drops every cached value, so the next read goes to the database: after settings were changed behind the store's back (a reset).
+func (s *Store) Forget() {
+	s.mu.Lock()
+	s.cache = map[string]json.RawMessage{}
+	s.mu.Unlock()
+}
+
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if _, err := s.db.Exec(ctx, `DELETE FROM settings WHERE key=$1`, key); err != nil {
 		return err

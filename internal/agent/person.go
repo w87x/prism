@@ -137,7 +137,7 @@ func (e *Engine) RefreshPersonModel(ctx context.Context) (string, error) {
 		}
 	}
 	sb.WriteString("\nCURRENT PROFILE:\n" + orNone(cur))
-	cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "person_model", "chat"), personPrompt, sb.String(), false)
 	text := strings.TrimSpace(out)

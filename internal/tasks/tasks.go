@@ -125,6 +125,9 @@ func (s *Store) Create(ctx context.Context, t Task, running bool) (Task, error) 
 	if err != nil {
 		return out, err
 	}
+	// a new task starts with no history: leftovers of an earlier task with the same id (after a reset that restarted the ids) must not
+	// become its acceptance criteria, rating or handover
+	_, _ = s.db.Exec(ctx, `DELETE FROM task_meta WHERE task_id=$1`, out.ID)
 	if out.RootID == 0 { // root of its own tree
 		out.RootID = out.ID
 		_, _ = s.db.Exec(ctx, `UPDATE tasks SET root_id=id WHERE id=$1`, out.ID)

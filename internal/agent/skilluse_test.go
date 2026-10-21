@@ -243,3 +243,34 @@ func TestRecurringWorkIsHandedToDaedalusOnce(t *testing.T) {
 		t.Fatalf("a second run the same day does nothing: %d", n)
 	}
 }
+
+// Daedalus writes skills from what already happened: it must not be able to send colleagues off to redo the work.
+func TestDaedalusCannotAskColleagues(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p := &Profile{Name: "Daedalus", Role: RoleMaint, System: true, Tools: []string{"task_transcript", "skill_write"}}
+	active := h.e.initialTools(ctx, p, RunSpec{})
+	if active["ask_colleague"] || active["delegate"] || !active["task_transcript"] {
+		t.Fatalf("Daedalus's tools: %v", active)
+	}
+}
+
+// What was learned about an agent goes when it is deleted, so a new agent with the same name does not start with the old one's lessons.
+func TestDeletingAnAgentDropsWhatWasLearnedAboutIt(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Wren", Role: RoleWorker, Enabled: true}, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = h.e.AddAntibody(ctx, "Wren", []string{"avito"}, "When scraping Avito, stop retrying the same URL variants.", "t")
+	_, _ = h.e.DB.Exec(ctx, `INSERT INTO trust(agent,tool,wins,losses) VALUES('Wren','web_fetch',3,0)`)
+	if err := h.e.Profiles.Delete(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = h.e.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM antibodies WHERE agent='Wren') + (SELECT count(*) FROM trust WHERE agent='Wren')`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d leftovers of a deleted agent", n)
+	}
+}

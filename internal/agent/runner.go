@@ -814,6 +814,12 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 	if spec.Leaf {
 		delete(active, "ask_colleague")
 	}
+	// Daedalus reads a finished task's transcript and writes a skill; asking colleagues to redo the task's work (one run chased the same
+	// fetch through four agents for three hours) is never part of that
+	if p.Name == "Daedalus" {
+		delete(active, "ask_colleague")
+		delete(active, "delegate")
+	}
 	for n := range active {
 		t, ok := e.Tools.Get(n)
 		if !ok {

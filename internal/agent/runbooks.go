@@ -195,7 +195,7 @@ func (e *Engine) writeRunbook(ctx context.Context, t tasks.Task, old Runbook) {
 	if old.Status == "stale" && old.Steps != "" {
 		in += fmt.Sprintf("\n\nEARLIER RUNBOOK (it stopped working: %s):\n%s", orNone(old.Note), old.Steps)
 	}
-	cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "runbook", "chat"), runbookPrompt, in, false)
 	steps := strings.TrimSpace(out)
@@ -226,7 +226,7 @@ func (e *Engine) maybeAudit(ctx context.Context, t tasks.Task, rb Runbook) {
 	}
 	go func() {
 		bg := context.WithoutCancel(ctx)
-		cctx, cancel := context.WithTimeout(bg, 5*time.Minute)
+		cctx, cancel := context.WithTimeout(bg, llmCallTimeout)
 		defer cancel()
 		var v struct {
 			OK      *bool  `json:"ok"`

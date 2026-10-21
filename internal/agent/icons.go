@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"prism/internal/llm"
 	"prism/internal/textmatch"
@@ -68,7 +67,7 @@ func (e *Engine) AssignIcon(ctx context.Context, id int64) {
 	if len(soul) > 1200 {
 		soul = soul[:1200]
 	}
-	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "icons", "fast"), "You choose a Font Awesome icon that best represents an AI agent. Pick exactly one name from this list: "+strings.Join(names, ", ")+
 		`. Answer JSON only: {"icon":"<name>"}`, "Agent: "+p.Name+"\nGroup: "+p.Group+"\nPurpose: "+p.Description+"\nSoul:\n"+soul, true)
 	cancel()
