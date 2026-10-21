@@ -226,17 +226,17 @@
     });
   });
   function inBackground() { toast('Generating in the background — you will be notified when the team draft is ready'); close(); }
-  async function generate() {
+  async function generate(mixed = false) {
     gBusy = true; note = ''; drafts = []; pick = {}; job = 0; stageNote = 'Starting…';
     const limits = { count, max_agents: maxAgents, max_tools: maxTools, style, allow_delegate: allowDelegate, cover_all: coverAll };
     try { localStorage.setItem(LIMITS_KEY, JSON.stringify(limits)); } catch {}
-    const r = await call('onboarding.propose', { hints, ...limits, model: genModel, plan_with: planWith, autosave });
+    const r = await call('onboarding.propose', { hints, ...limits, model: genModel, plan_with: planWith, autosave, mixed });
     if (!r) { gBusy = false; return; }
     if (!job) job = r.job;
   }
   async function templates() {
     const t = await call('onboarding.templates');
-    if (t) { drafts = t; note = 'Built-in templates.'; pick = {}; t.forEach((d, i) => { if (!d.exists) pick[i] = true; }); }
+    if (t) { drafts = t; note = 'Built-in agents.'; pick = {}; t.forEach((d, i) => { if (!d.exists) pick[i] = true; }); }
   }
   async function apply() {
     const chosen = drafts.filter((_, i) => pick[i]);
@@ -355,7 +355,7 @@
         <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
         {#if mcpConnected.length}
           <div class="mcpbox sm">
-            <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Built-in profiles + my tools" (instant, no model) gives each domain of them — downloads, NAS files, film and TV, music, books, travel, feeds — its own ready-made agent, and folds the rest into the closest built-in profile; "Generate with the model" plans a team from everything, in two steps, and can take a while on a local model
+            <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Built-in agents + MCP by domain" keeps the ready-made agents for PRISM's own tools and has the model design agents for these tools, grouped by what they are used for; "Built-in agents only" is instant and needs no model; "Generate everything" plans the whole team with the model. Planning is split in two steps and can take a while on a local model
             <div class="mcprow">{#each mcpConnected as s}<Badge tone="accent">{s.name} · {s.status.tools?.length || 0} tools</Badge>{/each}</div>
           </div>
         {/if}
@@ -375,8 +375,9 @@
         </div><div class="rescol">
         <div class="row wrap gen">
           <Checkbox bind:checked={autosave} label="save each agent as soon as it is written (no review step — you can edit or delete them on the Agents page)" />
-          <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>
-          <Button variant={mcpConnected.length ? 'primary' : 'default'} title="Ready-made profiles for what PRISM can do, plus an agent per domain of your connected MCP tools. No model needed: instant." onclick={templates}>Built-in profiles + my tools</Button>
+          {#if mcpConnected.length}<Button variant="primary" loading={gBusy} disabled={gBusy} title="PRISM's own tools get the ready-made agents; the model designs agents only for your connected MCP tools, grouped by domain of use — MCP servers differ from user to user, so these are planned from what is really connected." onclick={() => generate(true)}>Built-in agents + MCP by domain</Button>{/if}
+          <Button variant={mcpConnected.length ? 'default' : 'primary'} loading={gBusy} disabled={gBusy} title="The model plans the whole team from everything available." onclick={() => generate(false)}>Generate everything with the model</Button>
+          <Button title="Only the ready-made agents for PRISM's built-in tools (MCP tools are folded into the closest one, or get an agent per server). No model needed: instant." onclick={templates}>Built-in agents only</Button>
         </div>
         {#if gBusy && (liveThinking.length || thinkTail)}
           <div class="think scroll" title="what the model is writing right now">

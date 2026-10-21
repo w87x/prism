@@ -899,6 +899,7 @@ func (s *Server) registerOnboarding() {
 		Model    string `json:"model"`
 		PlanWith string `json:"plan_with"` // "" = plan on this machine; else a consult provider (codex, chatgpt, …) plans the team
 		AutoSave bool   `json:"autosave"`  // create each agent as soon as its draft is written, without waiting for the review
+		Mixed    bool   `json:"mixed"`     // built-in agents for the built-in tools, agents planned by the model only for the MCP tools, by domain
 	}) (map[string]any, error) {
 		ps, _ := a.Profiles.List(ctx)
 		var names []string
@@ -922,7 +923,7 @@ func (s *Server) registerOnboarding() {
 				}
 				st.progress(p)
 				a.Emit("onboarding.progress", map[string]any{"job": job, "stage": p.Stage, "note": p.Note, "draft": p.Draft, "total": p.Total})
-			}, planOptions(s, st, r.Model, job, r.PlanWith)...)
+			}, append(planOptions(s, st, r.Model, job, r.PlanWith), mixedOption(r.Mixed)...)...)
 			for i := range drafts {
 				if saved[strings.ToLower(drafts[i].Name)] {
 					drafts[i].Exists = true
@@ -1054,4 +1055,12 @@ type skillUsage struct {
 	Total  int        `json:"total"`
 	LastAt *time.Time `json:"last_at,omitempty"`
 	Agents []string   `json:"agents"`
+}
+
+// mixedOption: in mixed mode the ready-made agents (what is built in) are taken as they are, and only the MCP tools are planned by the model.
+func mixedOption(on bool) []onboarding.Option {
+	if !on {
+		return nil
+	}
+	return []onboarding.Option{onboarding.WithBuiltin(onboarding.Templates())}
 }

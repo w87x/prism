@@ -65,9 +65,13 @@ func Templates() []Draft {
 		{Name: "Archivist", Icon: "book-open", Group: "Knowledge", Description: "Ingests documents into the knowledge base and finds things in it by meaning, not just keywords.",
 			Traits: []string{"knowledge base", "semantic search", "document ingestion", "indexing", "retrieval"}, Tools: []string{"doc_ingest", "doc_read", "semantic_index", "semantic_search", "kb_list", "kb_read", "kb_request", "folder_index", "folder_map"},
 			Soul: "You are Archivist, keeper of the knowledge base.\n\nMethod:\n1. To answer a question, semantic_search first — it finds relevant material by meaning even when the wording differs; fall back to kb_list/kb_read for browsing known documents by name.\n2. When given a new document, doc_ingest it, then semantic_index it if it needs to become searchable by meaning; confirm what was ingested (title, size, where it now lives).\n3. If something the user expects isn't findable, say so plainly and use kb_request to flag it rather than inventing an answer.\n4. Quote the actual retrieved passage and its source when answering — never answer from a document's title alone.\n\nRules: never claim a document says something you didn't actually read in the retrieved passage; keep ingested material organized, don't duplicate what's already indexed."},
-		{Name: "Hearth", Icon: "house", Group: "Home & Life", Description: "Personal organizer: reminders, one-off waits and recurring routines, downloads and follow-ups; ends what is no longer needed.",
-			Traits: []string{"reminders", "schedule", "organizer", "downloads", "watch", "routines", "follow-ups"}, Tools: []string{"notify_user", "mac_notify", "intent_create", "intent_list", "intent_cancel", "cron_create", "cron_list", "cron_update", "cron_finish", "cron_delete", "watch_command", "watch_find", "watch_stop", "monitor_start", "monitor_list", "monitor_adjust", "briefing_add", "download_start", "download_status", "download_cancel", "clock"},
-			Soul: "You are Hearth, the user's personal organizer.\n\nYou set reminders, schedule recurring routines, wait for things to happen (downloads, copies, releases), and make sure the user is told at the right moment — and you end what is no longer needed.\n\nMethod:\n1. Get the exact time from clock before creating anything time-based; state absolute times back to the user.\n2. For a recurring routine or job, cron_create; for “tell me when X happens” (a one-shot event), intent_create; for a running task's progress, watch_command. Look at cron_list first: change a similar job instead of adding another, and give a list of things to check to one job.\n3. A list of items whose changes you must keep evidence of (prices across listings, a shortlist) is a tracker: hand that to Ledger rather than building it here.\n4. Confirm what you set up in one line, including when it fires or what it now watches.\n5. When the user says something no longer needs watching (the episode is out and downloaded, stop checking that price), watch_find the topic and watch_stop what it returns. A recurring job you create should end itself with cron_finish once what it waits for has happened.\n\nRules: never create noisy schedules; prefer one well-worded reminder over many; don't start a second watch for something one already covers.",
+		{Name: "Hearth", Icon: "house", Group: "Home & Life", Description: "Reminders and recurring routines: schedules the user's repeating jobs and briefings, keeps them tidy and ends the ones that are done.",
+			Traits: []string{"reminders", "schedule", "routines", "recurring", "briefings", "organizer", "cron"}, Tools: []string{"notify_user", "mac_notify", "cron_create", "cron_list", "cron_update", "cron_finish", "cron_delete", "briefing_add", "watch_find", "watch_stop", "clock"},
+			Soul: "You are Hearth, the user's organizer for things that repeat.\n\nYou schedule recurring routines and briefings and make sure the user is told at the right moment — and you end what is no longer needed.\n\nMethod:\n1. Get the exact time from clock before creating anything time-based; state absolute times back to the user.\n2. Look at cron_list first: change a similar job with cron_update instead of adding another, and give a list of things to check to ONE job rather than one job each. Write the standing prompt so it is self-contained and says what to report and when to stay silent.\n3. Waiting for a single event (\"tell me when X ships\") is Vigil's job, a changing table of items is Ledger's, a short-lived watch of a page, process or file is Sentinel's: hand those over.\n4. Confirm what you set up in one line, including when it fires next.\n5. When the user says something no longer needs doing (the episode is out and downloaded, stop checking that price), watch_find the topic and watch_stop what it returns. A recurring job you create should end itself with cron_finish once what it waits for has happened.\n\nRules: never create noisy schedules; prefer one well-worded reminder over many; do not leave a finished job running.",
+		},
+		{Name: "Vigil", Icon: "eye", Group: "Home & Life", Description: "Waits for something to happen — a release, a price, a condition — and tells the user; runs the user's own downloads.",
+			Traits: []string{"waiting", "events", "alerts", "conditions", "releases", "downloads", "intents"}, Tools: []string{"intent_create", "intent_list", "intent_cancel", "watch_find", "watch_stop", "download_start", "download_status", "download_cancel", "notify_user", "clock"},
+			Soul: "You are Vigil, who waits for things so the user does not have to.\n\nMethod:\n1. Turn the wish (\"tell me when X\") into one checkable condition and a cadence that fits how fast it can change; say what you chose.\n2. Look at intent_list first: if something already watches for it, say so instead of adding a second.\n3. Create the intent with intent_create, and confirm in one line what it checks, how often, and what happens when it fires.\n4. For a download the user asked for, download_start, then report its progress with download_status.\n5. When the user says it is no longer needed, or what was awaited has happened and been dealt with, watch_find the topic and watch_stop it.\n\nRules: one watch per thing; never check more often than the situation needs; a quick look at a page, process or file over the next minutes or hours is Sentinel's work, and a recurring routine is Hearth's: hand those over.",
 		},
 		{Name: "Ledger", Icon: "table-columns", Group: "Home & Life", Description: "Keeps tracker tables for lists that change over time — prices, shortlists, releases — and reports what moved.",
 			Traits: []string{"tracking", "tables", "prices", "shortlist", "changes", "monitoring"}, Tools: []string{"tracker_create", "tracker_list", "tracker_row_upsert", "tracker_rows", "tracker_changes", "tracker_row_retire", "tracker_snapshot", "tracker_alert", "tracker_alert_remove", "tracker_delete", "web_fetch", "web_structured", "clock", "artifact_save"},
@@ -104,21 +108,11 @@ const mcpFitThreshold = 8.0
 // prompt lists every registered tool, MCP included.
 func TemplatesWithMCP(reg *tools.Registry) []Draft {
 	base := Templates()
-	var mcp []*tools.Tool
-	for _, t := range reg.All() {
-		if t.Deferred && strings.HasPrefix(t.Category, "mcp:") && reg.State(t.Name).Enabled {
-			mcp = append(mcp, t)
-		}
-	}
-	if len(mcp) == 0 {
-		return base
-	}
-	// every MCP tool goes to the domain it belongs to (downloads, NAS files, film and TV, music…), each with its own profile; only what no
-	// domain recognises is folded into a template or given a per-server agent below
-	dom, rest := DomainProfiles(mcp, func(n string) bool { _, ok := reg.Get(n); return ok })
-	base = append(base, dom...)
 	byServer := map[string][]*tools.Tool{}
-	for _, t := range rest {
+	for _, t := range reg.All() {
+		if !t.Deferred || !strings.HasPrefix(t.Category, "mcp:") || !reg.State(t.Name).Enabled {
+			continue
+		}
 		server := strings.TrimPrefix(t.Category, "mcp:")
 		byServer[server] = append(byServer[server], t)
 	}
@@ -367,13 +361,21 @@ var SoulParallelism = 4
 // (so its thinking shows in the UI); without it Propose uses the router directly.
 type Completer func(ctx context.Context, title, system, user string, jsonOut bool) (string, error)
 
-type proposeOpts struct{ complete, plan Completer }
+type proposeOpts struct {
+	complete, plan Completer
+	builtin        []Draft // mixed mode: ready-made agents for PRISM's own tools; the model plans only for the MCP tools
+}
 
 // Option tunes Propose.
 type Option func(*proposeOpts)
 
 // WithCompleter makes Propose route its model calls through c.
 func WithCompleter(c Completer) Option { return func(o *proposeOpts) { o.complete = c } }
+
+// WithBuiltin switches Propose to MIXED mode: ds are the ready-made agents for PRISM's built-in tools, taken as they are, and the model plans
+// agents only for the connected MCP tools — which differ from one user to the next, so they are designed from what is actually there, by
+// domain, instead of from a fixed catalogue. Every MCP tool is placed.
+func WithBuiltin(ds []Draft) Option { return func(o *proposeOpts) { o.builtin = ds } }
 
 // WithPlanner sends only the team-planning call (the one that decides who is on the team) to c — typically a stronger
 // outside model via consult. Writing every agent's soul stays on the regular model. If c fails, planning falls back to
@@ -412,8 +414,9 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}
 		return ds
 	}
+	mixed := po.builtin != nil
 	fallback := func(why string) ([]Draft, bool, error) {
-		return mark(Templates()), false, errors.New(why + " — showing built-in templates")
+		return mark(TemplatesWithMCP(reg)), false, errors.New(why + " — showing built-in profiles")
 	}
 	if !r.HasChat(ctx) {
 		return fallback("no chat model configured")
@@ -439,6 +442,9 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			eligible = append(eligible, ToolInfo{t.Name, t.Category, d})
 			continue
 		}
+		if mixed { // the built-in tools already have their agents
+			continue
+		}
 		if t.Base || t.Deferred || strings.HasPrefix(t.Name, "agent_") || strings.HasPrefix(t.Name, "memory_") || t.Name == "delegate" || t.Name == "evolve_propose" || t.Name == "task_status" || t.Name == "notify_user" {
 			continue
 		}
@@ -455,8 +461,24 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		userHints = "The user gave no hints: propose a broadly useful starting team."
 	}
 
+	planExisting := existing
+	var builtin []Draft
+	if mixed {
+		builtin = mark(append([]Draft(nil), po.builtin...))
+		for _, d := range builtin {
+			planExisting = append(append([]string(nil), planExisting...), d.Name)
+			dd := d
+			progress(Progress{Stage: "writing", Draft: &dd, Total: len(builtin)}) // the ready-made agents are there at once (and autosave takes them)
+		}
+		if len(eligible) == 0 { // no MCP tools connected: nothing to plan
+			progress(Progress{Stage: "done", Total: len(builtin)})
+			return builtin, false, nil
+		}
+		cons.CoverAll = true // no MCP tool may be left without an agent
+		userHints += "\n\nThe built-in tools already have their agents (" + strings.Join(namesOf(builtin), ", ") + "). Plan agents ONLY for the connected MCP tools listed below: group them by domain of use — tools of one service belong together, and one server may hold several unrelated services — and give each domain an agent (or a few) that owns it end to end."
+	}
 	progress(Progress{Stage: "planning", Note: "Planning the team…", Total: cons.agentCap()})
-	system := cons.render(strings.Join(existing, ", "), strings.Join(tl, "\n"))
+	system := cons.render(strings.Join(planExisting, ", "), strings.Join(tl, "\n"))
 	askWith := func(system, user string) ([]Draft, error) {
 		var out string
 		var err error
@@ -516,7 +538,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 			return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
 				return complete(cc, "Onboarding: dividing into domains", sys, usr, true)
 			})
-		}, cons, userHints, existing, eligible)
+		}, cons, userHints, planExisting, eligible)
 		if derr != nil {
 			progress(Progress{Stage: "planning", Note: derr.Error(), Total: cons.agentCap()})
 		} else {
@@ -529,7 +551,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 				}
 				return plan.Agents, nil
 			}
-			raw = planByDomains(ctx, divs, cons, userHints, existing, eligible, func(c context.Context, sys, usr string) (string, error) {
+			raw = planByDomains(ctx, divs, cons, userHints, planExisting, eligible, func(c context.Context, sys, usr string) (string, error) {
 				return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
 					return complete(cc, "Onboarding: planning a domain", sys, usr, true)
 				})
@@ -559,7 +581,7 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	items, notes = cons.enforce(items)
 	if cons.CoverAll { // what the model still left unused is placed mechanically (after trimming, which may free tools up)
 		taken := map[string]bool{}
-		for _, n := range existing {
+		for _, n := range planExisting {
 			taken[strings.ToLower(n)] = true
 		}
 		for _, d := range items {
@@ -612,8 +634,8 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}(i)
 	}
 	wg.Wait()
-	progress(Progress{Stage: "done", Total: len(items)})
-	return mark(items), true, nil
+	progress(Progress{Stage: "done", Total: len(items) + len(builtin)})
+	return append(builtin, mark(items)...), true, nil
 }
 
 func fallbackSoul(d Draft) string {
@@ -729,4 +751,12 @@ func snip(s string, n int, tail bool) string {
 		return "…" + string(r[len(r)-n:])
 	}
 	return string(r[:n]) + "…"
+}
+
+func namesOf(ds []Draft) []string {
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = d.Name
+	}
+	return out
 }

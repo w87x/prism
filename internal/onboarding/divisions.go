@@ -72,9 +72,54 @@ type toolGroup struct {
 	tools []ToolInfo
 }
 
-func groupOf(t ToolInfo) string {
+// mcpFamily names the family an MCP tool belongs to: one server can carry many unrelated services (a toolbox with torrents, NAS files and
+// timetables), and the services show in the tool names (jackett_search, synology_fs_list, rasp_search). The family is the name's first
+// word; a family of more than familySplit tools in one server is split by its second word too (synology_ds_*, synology_fs_*).
+func mcpFamily(name string, counts map[string]int) string {
+	rest := strings.TrimPrefix(name, "mcp__")
+	server, short := rest, ""
+	if i := strings.Index(rest, "__"); i >= 0 {
+		server, short = rest[:i], rest[i+2:]
+	}
+	parts := strings.Split(short, "_")
+	first := parts[0]
+	if first == "" || len(parts) < 2 || actionWords[first] { // "list", "create_issue": the name says what is done, not which service — the server is the unit
+		return server
+	}
+	if counts[server+"/"+first] > familySplit && len(parts) > 2 {
+		return first + "_" + parts[1]
+	}
+	return first
+}
+
+const familySplit = 12
+
+// actionWords start the names of tools that are named verb-first (create_issue, list_prs); their first word is no service.
+var actionWords = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields("list get create add delete remove update set search find read write run start stop show check send fetch query describe open close save upload download move copy rename pause resume cancel clear mark refresh subscribe unsubscribe resolve browse view post put push pull merge approve reject schedule trigger toggle enable disable import export apply commit") {
+		actionWords[w] = true
+	}
+}
+
+func mcpFamilyCounts(ts []ToolInfo) map[string]int {
+	counts := map[string]int{}
+	for _, t := range ts {
+		if !strings.HasPrefix(t.Category, "mcp:") {
+			continue
+		}
+		rest := strings.TrimPrefix(t.Name, "mcp__")
+		if i := strings.Index(rest, "__"); i >= 0 {
+			counts[rest[:i]+"/"+strings.Split(rest[i+2:], "_")[0]]++
+		}
+	}
+	return counts
+}
+
+func groupOf(t ToolInfo, counts map[string]int) string {
 	if strings.HasPrefix(t.Category, "mcp:") {
-		return strings.TrimPrefix(t.Category, "mcp:")
+		return mcpFamily(t.Name, counts)
 	}
 	if t.Category == "" {
 		return "general"
@@ -84,9 +129,19 @@ func groupOf(t ToolInfo) string {
 
 func toolGroups(eligible []ToolInfo) []toolGroup {
 	by := map[string][]ToolInfo{}
+	counts := mcpFamilyCounts(eligible)
 	for _, t := range eligible {
-		g := groupOf(t)
+		g := groupOf(t, counts)
 		by[g] = append(by[g], t)
+	}
+	// a "family" of one tool is no service: it goes back to its server's group
+	for g, ts := range by {
+		if len(ts) == 1 && strings.HasPrefix(ts[0].Category, "mcp:") {
+			if srv := strings.TrimPrefix(ts[0].Category, "mcp:"); srv != g {
+				delete(by, g)
+				by[srv] = append(by[srv], ts[0])
+			}
+		}
 	}
 	names := make([]string, 0, len(by))
 	for n := range by {

@@ -113,3 +113,30 @@ func TestPlanByDomainsGivesEachDomainItsOwnToolsAndGroup(t *testing.T) {
 }
 
 func jsonUnmarshal(s string, v any) error { return json.Unmarshal([]byte(s), v) }
+
+// An MCP server often carries several services; the tool names show them. Verb-first and one-word names say nothing about a service, so the
+// server stays the unit there.
+func TestMCPFamiliesFollowTheServiceInTheToolName(t *testing.T) {
+	var ts []ToolInfo
+	add := func(server string, names ...string) {
+		for _, n := range names {
+			ts = append(ts, ToolInfo{Name: "mcp__" + server + "__" + n, Category: "mcp:" + server})
+		}
+	}
+	add("box", "jackett_search", "jackett_list_indexers", "tvmaze_search", "tvmaze_schedule", "rasp_search", "rasp_find_station")
+	for i := 0; i < 8; i++ {
+		add("box", fmt.Sprintf("synology_fs_op%d", i), fmt.Sprintf("synology_ds_op%d", i))
+	}
+	add("github", "create_issue", "list_prs", "comment")
+	add("solo", "ping")
+	got := map[string]int{}
+	for _, g := range toolGroups(ts) {
+		got[g.name] = len(g.tools)
+	}
+	want := map[string]int{"jackett": 2, "tvmaze": 2, "rasp": 2, "synology_fs": 8, "synology_ds": 8, "github": 3, "solo": 1}
+	for k, n := range want {
+		if got[k] != n {
+			t.Errorf("group %s has %d tools, want %d (all: %v)", k, got[k], n, got)
+		}
+	}
+}
