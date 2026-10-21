@@ -301,9 +301,11 @@ func TestMergeAndSplitBanks(t *testing.T) {
 	cook, _ := s.BankBySpec(ctx, "domain:Cooking", "", false)
 	ub, _ := s.BankBySpec(ctx, "user", "", false)
 
-	if _, err := s.MergeBanks(ctx, []int64{plan.ID, cook.ID}, 0, "Mixed"); err == nil {
-		t.Fatal("merged banks of different kinds")
+	// a project and a domain bank on one subject may be merged now (see DedupeBanks); the user and profile banks never
+	if _, err := s.MergeBanks(ctx, []int64{plan.ID, ub.ID}, 0, "Mixed"); err == nil {
+		t.Fatal("merged the user bank into a project")
 	}
+	_ = cook
 	if _, err := s.MergeBanks(ctx, []int64{ub.ID}, 0, "Mixed"); err == nil {
 		t.Fatal("merged the user bank")
 	}

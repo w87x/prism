@@ -186,3 +186,25 @@ func TestResetWipesEveryProducedTableIncludingNewOnes(t *testing.T) {
 		t.Error("seeded rules, the migration record and the settings must stay")
 	}
 }
+
+// The summary of a finished task is the durable record of what was tried; cleaning up the task must not take it along.
+func TestCleanupKeepsTaskSummaries(t *testing.T) {
+	d := testutil.DB(t)
+	ctx := context.Background()
+	var id int64
+	if err := d.QueryRow(ctx, `INSERT INTO tasks(from_kind,to_agent,input,status,finished_at) VALUES('user','Mira','x','done', now()-interval '30 days') RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(ctx, `INSERT INTO task_summaries(task_id,agent,title,status,goal) VALUES($1,'Mira','t','done','find the thing')`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Cleanup(ctx, d.Pool, 0, 5); err != nil {
+		t.Fatal(err)
+	}
+	var tasks, sums int
+	_ = d.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE id=$1`, id).Scan(&tasks)
+	_ = d.QueryRow(ctx, `SELECT count(*) FROM task_summaries WHERE task_id=$1`, id).Scan(&sums)
+	if tasks != 0 || sums != 1 {
+		t.Fatalf("the task goes (%d left), its summary stays (%d)", tasks, sums)
+	}
+}

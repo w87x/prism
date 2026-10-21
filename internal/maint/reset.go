@@ -76,6 +76,10 @@ func Reset(ctx context.Context, db *pgxpool.Pool, scope, dataDir string) error {
 		}
 		rows.Close()
 	}
+	// skills' bundled files live on disk next to their rows: a new skill of the same name must not find the old one's files
+	if dataDir != "" {
+		_ = os.RemoveAll(filepath.Join(filepath.Clean(dataDir), "skills"))
+	}
 	if len(tables) > 0 {
 		if _, err := db.Exec(ctx, `TRUNCATE `+strings.Join(tables, ", ")+` RESTART IDENTITY CASCADE`); err != nil {
 			return err

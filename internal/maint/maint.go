@@ -33,6 +33,10 @@ func Cleanup(ctx context.Context, db *pgxpool.Pool, logsDays, tasksDays int, sta
 			return r, err
 		}
 		r.Tasks = int(t.RowsAffected())
+		// the distilled record of finished tasks outlives the tasks, but not for ever
+		_, _ = db.Exec(ctx, `DELETE FROM task_summaries WHERE created_at < now() - interval '180 days'`)
+		_, _ = db.Exec(ctx, `DELETE FROM skill_uses WHERE at < now() - interval '180 days'`)
+		_, _ = db.Exec(ctx, `DELETE FROM tool_approvals WHERE at < now() - interval '180 days'`)
 		t, err = db.Exec(ctx, `DELETE FROM sessions WHERE kind='task' AND (task_id IS NULL OR task_id NOT IN (SELECT id FROM tasks))`)
 		if err != nil {
 			return r, err
