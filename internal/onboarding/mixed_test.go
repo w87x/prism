@@ -11,7 +11,7 @@ import (
 	"prism/internal/tools"
 )
 
-// Mixed mode: the ready-made agents come as they are, and the model designs agents only for the MCP tools, by domain — here three unrelated
+// Mixed mode: the ready-made agents come as they are, and the MCP tools go through sort → describe → write — here three unrelated
 // services behind ONE server, which a per-server split would have lumped into a single agent.
 func TestMixedModePlansMCPToolsByDomainAndKeepsTheBuiltinAgents(t *testing.T) {
 	d := testutil.DB(t)
@@ -36,17 +36,29 @@ func TestMixedModePlansMCPToolsByDomainAndKeepsTheBuiltinAgents(t *testing.T) {
 		switch {
 		case strings.Contains(sys, "Write the system prompt"):
 			return testutil.Reply{Content: "You are a specialist. Method: 1. do the work carefully. 2. report concisely with evidence. Rules: never invent facts."}
-		case strings.Contains(sys, "divide a user's world"):
-			if strings.Contains(sys, "web_search") {
-				t.Errorf("the built-in tools must not be offered to the MCP planner")
+		case strings.Contains(sys, "You sort a user's connected tools"):
+			if strings.Contains(usr, "web_search") {
+				t.Errorf("the built-in tools must not be offered to the MCP sorter")
 			}
-			return testutil.Reply{Content: `{"domains":[{"name":"Media","scope":"torrents","groups":["torrent"],"agents":1},{"name":"Storage","scope":"files","groups":["files"],"agents":1},{"name":"Travel","scope":"timetables","groups":["timetable"],"agents":1}]}`}
-		case strings.Contains(usr, `"Media" domain`):
-			return testutil.Reply{Content: `{"agents":[{"name":"Hunter","description":"finds releases","tools":["mcp__box__torrent_op0"]}]}`}
-		case strings.Contains(usr, `"Storage" domain`):
-			return testutil.Reply{Content: `{"agents":[{"name":"Keeperfs","description":"files","tools":["mcp__box__files_op0"]}]}`}
-		case strings.Contains(usr, `"Travel" domain`):
-			return testutil.Reply{Content: `{"agents":[{"name":"Rover","description":"journeys","tools":["mcp__box__timetable_op0"]}]}`}
+			// the model sorts by what the tools are for: the three services behind one server
+			fam := map[string][]string{}
+			for _, l := range strings.Split(usr, "\n") {
+				if i := strings.Index(l, " — "); i > 0 && strings.HasPrefix(l, "mcp__") {
+					name := l[:i]
+					for _, f := range []string{"torrent", "files", "timetable"} {
+						if strings.Contains(name, "__"+f+"_") {
+							fam[f] = append(fam[f], `"`+name+`"`)
+						}
+					}
+				}
+			}
+			return testutil.Reply{Content: `{"groups":[{"name":"Media","tools":[` + strings.Join(fam["torrent"], ",") + `]},{"name":"Storage","tools":[` + strings.Join(fam["files"], ",") + `]},{"name":"Travel","tools":[` + strings.Join(fam["timetable"], ",") + `]}]}`}
+		case strings.Contains(sys, "GROUP: Media"):
+			return testutil.Reply{Content: `{"agents":[{"name":"Hunter","description":"finds releases","traits":["torrent"]}]}`}
+		case strings.Contains(sys, "GROUP: Storage"):
+			return testutil.Reply{Content: `{"agents":[{"name":"Keeperfs","description":"files","traits":["nas"]}]}`}
+		case strings.Contains(sys, "GROUP: Travel"):
+			return testutil.Reply{Content: `{"agents":[{"name":"Rover","description":"journeys","traits":["trains"]}]}`}
 		}
 		return testutil.Reply{Content: `{"agents":[]}`}
 	}
@@ -92,8 +104,8 @@ func TestMixedModePlansMCPToolsByDomainAndKeepsTheBuiltinAgents(t *testing.T) {
 			t.Errorf("%s was left without an agent", name)
 		}
 	}
-	if !contains(by["Hunter"].Tools, "mcp__box__torrent_op0") || contains(by["Hunter"].Tools, "mcp__box__files_op0") {
-		t.Errorf("Hunter's tools: %v", by["Hunter"].Tools)
+	if len(by["Hunter"].Tools) != 10 || contains(by["Hunter"].Tools, "mcp__box__files_op0") || by["Hunter"].Group != "Media" {
+		t.Errorf("Hunter holds its group's 10 tools only: %v", by["Hunter"].Tools)
 	}
 }
 
@@ -103,4 +115,64 @@ func names(ds []Draft) []string {
 		out = append(out, d.Name)
 	}
 	return out
+}
+
+// Step 1 repairs what a model does: names it invented are dropped, a tool listed twice stays with its first group, a tool it forgot goes with
+// its family, and an answer that is no use at all leaves the name-based families to carry on.
+func TestSortToolsRepairsTheModelsGrouping(t *testing.T) {
+	ts := []ToolInfo{
+		{"mcp__box__jackett_search", "mcp:box", "search"}, {"mcp__box__jackett_list", "mcp:box", "list"},
+		{"mcp__box__rasp_search", "mcp:box", "routes"}, {"mcp__box__rasp_station", "mcp:box", "station"},
+	}
+	ask := func(_ context.Context, _, _, _ string) (string, error) {
+		return `{"groups":[{"name":"Downloads","tools":["mcp__box__jackett_search","mcp__box__invented"]},{"name":"Downloads","tools":["mcp__box__jackett_search"]},{"name":"Empty","tools":["nope"]}]}`, nil
+	}
+	got := sortTools(context.Background(), ask, "h", ts)
+	by := map[string][]string{}
+	for _, g := range got {
+		for _, tl := range g.tools {
+			by[g.name] = append(by[g.name], tl.Name)
+		}
+	}
+	if len(by["Downloads"]) != 2 || !contains(by["Downloads"], "mcp__box__jackett_list") {
+		t.Fatalf("the forgotten jackett tool joins its family's group: %v", by)
+	}
+	if len(by["Rasp"]) != 2 || len(by["Empty"]) != 0 {
+		t.Fatalf("forgotten tools of a family nobody grouped get a group named after it: %v", by)
+	}
+	failing := func(context.Context, string, string, string) (string, error) { return "", fmt.Errorf("down") }
+	fam := sortTools(context.Background(), failing, "h", ts)
+	if len(fam) != 2 {
+		t.Fatalf("a failed sort leaves the families: %+v", fam)
+	}
+}
+
+// How many agents each group gets: one by default, more for a big group, merged groups when a fixed size is smaller.
+func TestAllocateMeetsTheTeamSize(t *testing.T) {
+	mk := func(n int) []ToolInfo { return make([]ToolInfo, n) }
+	sets := []toolSet{{"A", mk(30)}, {"B", mk(6)}, {"C", mk(3)}, {"D", mk(2)}}
+	_, counts := allocate(sets, Constraints{MaxTools: 12})
+	sum := 0
+	for _, c := range counts {
+		sum += c
+	}
+	if len(counts) != 4 || counts[0] != 3 || sum != 6 { // A needs ceil(30/12)=3 agents, the others one each
+		t.Fatalf("by the tool limit: %v", counts)
+	}
+	merged, counts := allocate(sets, Constraints{Count: 3, MaxTools: 12})
+	sum = 0
+	for _, c := range counts {
+		sum += c
+	}
+	if len(merged) != 3 || sum != 3 || !strings.Contains(merged[2].name, " and ") {
+		t.Fatalf("a fixed size of 3: %d groups %v (%+v)", len(merged), counts, merged)
+	}
+	_, counts = allocate([]toolSet{{"A", mk(10)}, {"B", mk(4)}}, Constraints{Count: 4})
+	sum = 0
+	for _, c := range counts {
+		sum += c
+	}
+	if sum != 4 {
+		t.Fatalf("a fixed size above the group count gives extra agents to the biggest group: %v", counts)
+	}
 }

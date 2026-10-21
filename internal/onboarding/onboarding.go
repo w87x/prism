@@ -529,67 +529,75 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 		}
 		return out
 	}
-	var raw []Draft
-	var perr error
-	if po.plan == nil && shouldDivide(cons, eligible) {
-		// two steps: a short call divides the work into domains, then each domain is planned by a smaller call of its own
-		progress(Progress{Stage: "planning", Note: "Dividing your needs into domains…", Total: cons.agentCap()})
-		divs, derr := planDivisions(ctx, func(c context.Context, sys, usr string) (string, error) {
-			return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
-				return complete(cc, "Onboarding: dividing into domains", sys, usr, true)
-			})
-		}, cons, userHints, planExisting, eligible)
-		if derr != nil {
-			progress(Progress{Stage: "planning", Note: derr.Error(), Total: cons.agentCap()})
-		} else {
-			parse := func(out string) ([]Draft, error) {
-				var plan struct {
-					Agents []Draft `json:"agents"`
-				}
-				if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
-					return nil, fmt.Errorf("no plan in the reply")
-				}
-				return plan.Agents, nil
-			}
-			raw = planByDomains(ctx, divs, cons, userHints, planExisting, eligible, func(c context.Context, sys, usr string) (string, error) {
-				return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
-					return complete(cc, "Onboarding: planning a domain", sys, usr, true)
-				})
-			}, parse, progress)
-		}
-	}
-	if len(raw) == 0 { // no division, or it produced nothing: the whole plan in one call
-		raw, perr = askPlan(userHints)
-		if perr != nil {
-			return fallback(fmt.Sprintf("planning failed (%v)", perr))
-		}
-	}
-	items := clean(raw)
-	// The check-and-repair loop: a plan that breaks a limit goes back to the model once, with the exact violations;
-	// what still breaks afterwards is enforced mechanically (tools trimmed, delegation off, extra agents dropped).
-	if v := cons.violations(items, valid, eligible); len(v) > 0 {
-		progress(Progress{Stage: "planning", Note: "Checking the plan against your limits (" + fmt.Sprint(len(v)) + " to fix)…", Total: cons.agentCap()})
-		prev, _ := json.Marshal(map[string]any{"agents": items})
-		fixed, ferr := askPlan(userHints + "\n\nYour previous plan:\n" + string(prev) + "\n\nIt breaks these limits:\n- " + strings.Join(v, "\n- ") + "\n\nReturn the corrected FULL plan, in the same JSON shape, that respects every limit.")
-		if ferr == nil {
-			if again := clean(fixed); len(again) > 0 {
-				items = again
-			}
-		}
-	}
+	var items []Draft
 	var notes []string
-	items, notes = cons.enforce(items)
-	if cons.CoverAll { // what the model still left unused is placed mechanically (after trimming, which may free tools up)
-		taken := map[string]bool{}
-		for _, n := range planExisting {
-			taken[strings.ToLower(n)] = true
+	if mixed {
+		// the MCP tools: sort them into domains, describe each domain's agent, then (below) write the prompts
+		items = planMCPPipeline(ctx, func(c context.Context, title, sys, usr string) (string, error) {
+			return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) { return complete(cc, title, sys, usr, true) })
+		}, cons, userHints, planExisting, eligible, progress)
+	} else {
+		var raw []Draft
+		var perr error
+		if po.plan == nil && shouldDivide(cons, eligible) {
+			// two steps: a short call divides the work into domains, then each domain is planned by a smaller call of its own
+			progress(Progress{Stage: "planning", Note: "Dividing your needs into domains…", Total: cons.agentCap()})
+			divs, derr := planDivisions(ctx, func(c context.Context, sys, usr string) (string, error) {
+				return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
+					return complete(cc, "Onboarding: dividing into domains", sys, usr, true)
+				})
+			}, cons, userHints, planExisting, eligible)
+			if derr != nil {
+				progress(Progress{Stage: "planning", Note: derr.Error(), Total: cons.agentCap()})
+			} else {
+				parse := func(out string) ([]Draft, error) {
+					var plan struct {
+						Agents []Draft `json:"agents"`
+					}
+					if err := json.Unmarshal([]byte(llm.ExtractJSON(out)), &plan); err != nil || len(plan.Agents) == 0 {
+						return nil, fmt.Errorf("no plan in the reply")
+					}
+					return plan.Agents, nil
+				}
+				raw = planByDomains(ctx, divs, cons, userHints, planExisting, eligible, func(c context.Context, sys, usr string) (string, error) {
+					return callIdle(c, planIdle, planMax, func(cc context.Context) (string, error) {
+						return complete(cc, "Onboarding: planning a domain", sys, usr, true)
+					})
+				}, parse, progress)
+			}
 		}
-		for _, d := range items {
-			taken[strings.ToLower(d.Name)] = true
+		if len(raw) == 0 { // no division, or it produced nothing: the whole plan in one call
+			raw, perr = askPlan(userHints)
+			if perr != nil {
+				return fallback(fmt.Sprintf("planning failed (%v)", perr))
+			}
 		}
-		var cn []string
-		items, cn = cons.cover(items, eligible, taken)
-		notes = append(notes, cn...)
+		items = clean(raw)
+		// The check-and-repair loop: a plan that breaks a limit goes back to the model once, with the exact violations;
+		// what still breaks afterwards is enforced mechanically (tools trimmed, delegation off, extra agents dropped).
+		if v := cons.violations(items, valid, eligible); len(v) > 0 {
+			progress(Progress{Stage: "planning", Note: "Checking the plan against your limits (" + fmt.Sprint(len(v)) + " to fix)…", Total: cons.agentCap()})
+			prev, _ := json.Marshal(map[string]any{"agents": items})
+			fixed, ferr := askPlan(userHints + "\n\nYour previous plan:\n" + string(prev) + "\n\nIt breaks these limits:\n- " + strings.Join(v, "\n- ") + "\n\nReturn the corrected FULL plan, in the same JSON shape, that respects every limit.")
+			if ferr == nil {
+				if again := clean(fixed); len(again) > 0 {
+					items = again
+				}
+			}
+		}
+		items, notes = cons.enforce(items)
+		if cons.CoverAll { // what the model still left unused is placed mechanically (after trimming, which may free tools up)
+			taken := map[string]bool{}
+			for _, n := range planExisting {
+				taken[strings.ToLower(n)] = true
+			}
+			for _, d := range items {
+				taken[strings.ToLower(d.Name)] = true
+			}
+			var cn []string
+			items, cn = cons.cover(items, eligible, taken)
+			notes = append(notes, cn...)
+		}
 	}
 	if len(items) == 0 {
 		return fallback("the model returned no usable plan")
