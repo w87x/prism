@@ -80,15 +80,15 @@ func TestTemplatesWithMCP(t *testing.T) {
 
 	var spotify *Draft
 	for i, d := range ds {
-		if d.Group == "MCP" {
+		if d.Name == "Cadence" { // a music streamer belongs to the music domain, not to an agent of its own named after the server
 			spotify = &ds[i]
 		}
 	}
 	if spotify == nil {
-		t.Fatalf("no built-in template fits a music streamer — it should have gotten its own draft: %+v", ds)
+		t.Fatalf("a music streamer's tools should have gone to the Music domain profile: %+v", ds)
 	}
 	if !contains(spotify.Tools, "mcp__spotify__play") || !contains(spotify.Tools, "mcp__spotify__search") {
-		t.Fatalf("the new draft should carry all of the server's tools: %v", spotify.Tools)
+		t.Fatalf("the domain profile should carry all of the server's music tools: %v", spotify.Tools)
 	}
 	for _, d := range ds {
 		if d.Name != spotify.Name && contains(d.Tools, "mcp__spotify__play") {

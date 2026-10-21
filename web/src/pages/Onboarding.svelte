@@ -180,7 +180,7 @@
   const liveThinking = $derived(activeRuns().filter((r) => r.agent === 'Forge' && (r.title || '').startsWith('Onboarding')));
   $effect(() => { if (step === 3) loadTools(); });
   const toolOpts = $derived((S.tools || []).map((t) => ({ value: t.name, label: t.name, hint: t.category, badge: t.risk === 'exec' ? 'exec' : t.risk === 'write' ? 'write' : t.category?.startsWith('mcp:') ? 'mcp' : '' })));
-  // connected MCP servers, shown so it's clear what "built-in templates" can fold tools from before generating
+  // connected MCP servers, shown so it's clear what the built-in profiles can take tools from before generating
   let mcpServers = $state([]);
   $effect(() => { if (step === 3) call('mcp.list', {}, { quiet: true }).then((r) => (mcpServers = r || [])); });
   const mcpConnected = $derived(mcpServers.filter((s) => s.status?.state === 'connected'));
@@ -355,7 +355,7 @@
         <p class="dim">Atlas (your point of contact) and the maintenance staff — Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel — already exist. Now create your specialists from what you told me.</p>
         {#if mcpConnected.length}
           <div class="mcpbox sm">
-            <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Generate with the model" sees all of it directly; "Use built-in templates" folds each server's tools into whichever template fits, or drafts a new one when nothing does:
+            <b class="hi">{mcpConnected.length} MCP server{mcpConnected.length === 1 ? '' : 's'} connected</b> — "Built-in profiles + my tools" (instant, no model) gives each domain of them — downloads, NAS files, film and TV, music, books, travel, feeds — its own ready-made agent, and folds the rest into the closest built-in profile; "Generate with the model" plans a team from everything, in two steps, and can take a while on a local model
             <div class="mcprow">{#each mcpConnected as s}<Badge tone="accent">{s.name} · {s.status.tools?.length || 0} tools</Badge>{/each}</div>
           </div>
         {/if}
@@ -376,7 +376,7 @@
         <div class="row wrap gen">
           <Checkbox bind:checked={autosave} label="save each agent as soon as it is written (no review step — you can edit or delete them on the Agents page)" />
           <Button variant="primary" loading={gBusy} disabled={gBusy} onclick={generate}>Generate with the model</Button>
-          <Button onclick={templates}>Use built-in templates</Button>
+          <Button variant={mcpConnected.length ? 'primary' : 'default'} title="Ready-made profiles for what PRISM can do, plus an agent per domain of your connected MCP tools. No model needed: instant." onclick={templates}>Built-in profiles + my tools</Button>
         </div>
         {#if gBusy && (liveThinking.length || thinkTail)}
           <div class="think scroll" title="what the model is writing right now">
