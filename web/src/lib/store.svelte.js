@@ -52,6 +52,7 @@ export const S = $state({
   peekRun: null, // run whose live view is open (held by reference, so it outlives its removal from `runs`)
   onboardingOpen: false,
   skipOnboarding: lsGet('prism.skipOnboarding', false),
+  userName: '', // the name from Settings → General: what the chat calls you
   refresh: 0, // bumped when a page should reload its data
   activity: [], // agent activity feed (run/tool events) for the chat's activity mode
   activityMode: lsGet('prism.activity', 'off'), // off | agents | tools
@@ -337,10 +338,15 @@ export function modelOptions(kind = 'chat') {
 
 // tools the pain reflex has paused (the status bar shows them)
 export const loadPaused = () => call('breaker.list', {}, { quiet: true }).then((r) => { S.paused = r || []; });
+export async function loadUserName() {
+  const g = await call('settings.get', { key: 'general' }, { quiet: true });
+  S.userName = (g && typeof g.user_name === 'string' ? g.user_name : '').trim();
+}
 export async function refreshAll() {
   const st = await call('app.state', {}, { quiet: true });
   if (st) { S.status = st; S.startup = st.startup ? { ...st.startup, _at: Date.now() } : null; }
   loadPaused();
+  loadUserName();
   call('llm.health', {}, { quiet: true }).then((h) => { if (h) { S.llm.down = !!h.down; S.llm.reason = h.reason || ''; } });
   if (!st || st.setup || st.starting) return; // starting: the splash shows progress; a `startup` event brings us back here when ready
   await loadChats();
@@ -483,6 +489,7 @@ export async function loadSetting(key, def) {
 }
 export async function saveSetting(key, value, msg = 'Saved') {
   const r = await call('settings.set', { key, value: $state.snapshot(value) });
+  if (r && key === 'general') S.userName = String(value?.user_name || '').trim();
   if (r && msg) toast(msg);
   return !!r;
 }

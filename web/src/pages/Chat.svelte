@@ -189,7 +189,7 @@
   }
   function exportChat() {
     if (!S.chat.length) { toast('Nothing to export yet', 'warn'); return; }
-    const md = S.chat.map((m) => `### ${m.role === 'user' ? 'You' : m.agent || (m.role === 'system' ? 'System' : 'Agent')} · ${stamp(m.created_at)}\n\n${m.text}\n`).join('\n');
+    const md = S.chat.map((m) => `### ${m.role === 'user' ? (S.userName || 'You') : m.agent || (m.role === 'system' ? 'System' : 'Agent')} · ${stamp(m.created_at)}\n\n${m.text}\n`).join('\n');
     const url = URL.createObjectURL(new Blob([`# PRISM conversation\n\n${md}`], { type: 'text/markdown' }));
     const a = Object.assign(document.createElement('a'), { href: url, download: `prism-chat-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md` });
     a.click();
@@ -239,7 +239,7 @@
           {@const m = it.m}
           {#if m.moved_from && it.first}<div class="mv">↳ from “{m.moved_title}”</div>{/if}
           {#if m.role === 'user'}
-            <div class="m user" class:steer={m.steered}><span class="who">user:</span>{#if m.steered}<span class="steertag" title="sent while Atlas was working — it steers the current turn">↳ steering</span>{/if}<span class="tx"><span class="pre">{m.text}</span>
+            <div class="m user" class:steer={m.steered}><span class="who">{S.userName || 'user'}:</span>{#if m.steered}<span class="steertag" title="sent while Atlas was working — it steers the current turn">↳ steering</span>{/if}<span class="tx"><span class="pre">{m.text}</span>
               {#if m.images?.length}<span class="pics">{#each m.images as id}<a href={artifactUrl(id)} target="_blank" rel="noopener noreferrer"><img src={artifactUrl(id)} alt="attached" loading="lazy" /></a>{/each}</span>{/if}</span><span class="ts" title={stamp(m.created_at)}>{clock(m.created_at)}</span></div>
           {:else if m.role === 'system'}
             <div class="m sys" class:bad={m.text.startsWith('Error')}><span class="who">system:</span><span class="tx pre">{m.text}</span></div>
