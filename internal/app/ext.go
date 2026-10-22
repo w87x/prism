@@ -258,6 +258,10 @@ func (a *App) buildExtensions(ctx context.Context) error {
 			if !ok {
 				return "", fmt.Errorf("no such tool %q", name)
 			}
+			// a background check calls this every few minutes with nobody watching: reading tools only, whatever is armed
+			if t.Risk != tools.RiskRead {
+				return "", fmt.Errorf("tool %q changes things (risk %s), so a background check may not call it: poll a read-only tool", name, t.Risk)
+			}
 			if st := a.Tools.State(name); !st.Enabled || !st.Armed {
 				return "", fmt.Errorf("tool %q is not armed, so a background check may not call it (arm it in Settings → Tools, or pick a read-only tool)", name)
 			}

@@ -107,6 +107,11 @@ type Service struct {
 
 	mu      sync.Mutex
 	running bool
+	// intents being checked right now, and the cap on checks at once
+	inflight map[int64]bool
+	checkSem chan struct{}
+	// SyncChecks makes a tick wait for its intent checks (tests); normally they run on in the background.
+	SyncChecks bool
 }
 
 func (s *Service) emit(t string, d any) {
@@ -517,6 +522,9 @@ func (s *Service) UpdateIntent(ctx context.Context, id int64, status string, cad
 		if _, err := s.DB.Exec(ctx, `UPDATE intents SET status=$2, next_due=now(), last_error='' WHERE id=$1`, id, status); err != nil {
 			return err
 		}
+		if status == "active" { // a resumed watch starts with a clean slate: old failures must not count against it
+			_, _ = s.DB.Exec(ctx, `UPDATE intents SET predicate=jsonb_set(predicate,'{state}', COALESCE(predicate->'state','{}'::jsonb) - 'errs' - 'err_since' - 'held') WHERE id=$1`, id)
+		}
 		if status == "cancelled" {
 			var topic string
 			var bankID int64
@@ -557,14 +565,45 @@ func (s *Service) tickIntents(ctx context.Context) {
 		}
 	}
 	rows.Close()
+	// The checks run side by side (a few at a time) and the tick does not wait for them: a model-judged check can take minutes, and one after
+	// another they held up every schedule behind them. An intent being checked is not picked again.
+	var wg sync.WaitGroup
 	for _, i := range due {
 		if i.ExpiresAt != nil && !i.ExpiresAt.After(time.Now()) {
 			s.expire(ctx, i)
 			continue
 		}
-		s.check(ctx, i)
+		s.mu.Lock()
+		if s.inflight == nil {
+			s.inflight = map[int64]bool{}
+			s.checkSem = make(chan struct{}, maxParallelChecks)
+		}
+		busy := s.inflight[i.ID]
+		s.inflight[i.ID] = true
+		sem := s.checkSem
+		s.mu.Unlock()
+		if busy {
+			continue
+		}
+		wg.Add(1)
+		go func(i Intent) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() {
+				<-sem
+				s.mu.Lock()
+				delete(s.inflight, i.ID)
+				s.mu.Unlock()
+			}()
+			s.check(ctx, i)
+		}(i)
+	}
+	if s.SyncChecks { // tests: the outcome is wanted before the tick returns
+		wg.Wait()
 	}
 }
+
+const maxParallelChecks = 4
 
 // checkTimeout budgets a predicate check: most kinds are a single fast local/network call, but "llm" chains
 // a live web search (or page fetch) with an LLM judging up to 12000 chars of evidence, and "tool" can call
@@ -609,9 +648,17 @@ func (s *Service) check(ctx context.Context, i Intent) {
 		errs, _ := p.state()["errs"].(float64)
 		errs++
 		p.state()["errs"] = errs
+		if errs == 1 {
+			p.state()["err_since"] = float64(time.Now().Unix())
+		}
+		// a failing check is retried less and less often (a laptop that was offline, a restarting server), and given up on only when it has
+		// been failing for a good while: six quick failures of a one-minute watch used to be six minutes offline
+		delay := time.Duration(i.CadenceS) * time.Second << min(int(errs)-1, 5)
+		next = time.Now().Add(min(delay, 15*time.Minute))
+		since, _ := p.state()["err_since"].(float64)
 		pj, _ := json.Marshal(p)
 		status := "active"
-		if errs >= 6 {
+		if errs >= 6 && time.Since(time.Unix(int64(since), 0)) >= 30*time.Minute {
 			status = "error"
 		}
 		_, _ = s.DB.Exec(ctx, `UPDATE intents SET predicate=$2, last_check=now(), next_due=$3, last_error=$4, status=$5 WHERE id=$1`, i.ID, pj, next, err.Error(), status)
@@ -625,6 +672,17 @@ func (s *Service) check(ctx context.Context, i Intent) {
 		return
 	}
 	p.state()["errs"] = 0.0
+	delete(p.state(), "err_since")
+	// A repeating watch on a condition that STAYS true (a page contains X, a file exists, a status reads 200) used to fire at every check.
+	// It fires when the condition becomes true, and again only after it has been false in between. Checks that are events by nature
+	// (new mail, a page that changed) are left alone.
+	if i.Repeat && !p.edgeTriggered() {
+		held, _ := p.state()["held"].(bool)
+		p.state()["held"] = res.Fired
+		if res.Fired && held {
+			res.Fired, res.Progress = false, "still true — already reported"
+		}
+	}
 	ss := s.recordSample(ctx, i.ID, i.samples, res.Progress)
 	if i.Announce && !res.Fired && res.Progress != "" && res.Progress != i.Progress {
 		// a monitor that reports while it runs: at most one update per 5 minutes, with the estimate when there is one

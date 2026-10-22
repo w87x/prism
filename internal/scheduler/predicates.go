@@ -90,6 +90,9 @@ func (e Env) now() time.Time {
 	return time.Now()
 }
 
+// edgeTriggered: the check fires on an event (new mail, a change), not on a condition that can stay true.
+func (p *Predicate) edgeTriggered() bool { return p.Kind == "mail" || p.Changed }
+
 func (p *Predicate) state() map[string]any {
 	if p.State == nil {
 		p.State = map[string]any{}

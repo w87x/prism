@@ -65,6 +65,13 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if a.Kind == "shell" {
 					return "", errors.New("shell checks need the watch_command tool")
 				}
+				if a.Kind == "tool" { // polled unattended, every few minutes: only a tool that merely reads
+					if t, ok := reg.Get(a.Tool); !ok {
+						return "", fmt.Errorf("no such tool %q", a.Tool)
+					} else if t.Risk != tools.RiskRead {
+						return "", fmt.Errorf("%s changes things (risk %s) and a watch calls its tool on every check unattended: poll a read-only tool (a list, search or status call) instead", a.Tool, t.Risk)
+					}
+				}
 				if a.Type == "watch" {
 					if ex, err := s.watchGuard(ctx, env.Agent, a.Predicate); err != nil {
 						return "", err

@@ -26,7 +26,7 @@ func TestTopicResolutionAndRelease(t *testing.T) {
 	if err := e.Profiles.Seed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	s := &Service{DB: d.Pool, Engine: e, Settings: st, Env: Env{LLM: r}}
+	s := &Service{DB: d.Pool, Engine: e, Settings: st, Env: Env{LLM: r}, SyncChecks: true}
 	ctx := context.Background()
 	if _, err := e.Memory.EnsureBank(ctx, "project", "Trip", "", "Planning the Italy trip"); err != nil {
 		t.Fatal(err)

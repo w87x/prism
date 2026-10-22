@@ -60,7 +60,7 @@ func setupFake(t *testing.T) (*Service, *rec, *testutil.FakeLLM) {
 		t.Fatal(err)
 	}
 	_ = st.Set(context.Background(), settings.KeyAutonomy, settings.Autonomy{Enabled: true, DreamEnabled: true})
-	return &Service{DB: d.Pool, Engine: e, Settings: st, Emit: rc.emit, Env: Env{LLM: r}}, rc, fake
+	return &Service{DB: d.Pool, Engine: e, Settings: st, Emit: rc.emit, Env: Env{LLM: r}, SyncChecks: true}, rc, fake
 }
 
 func TestCronEnqueuesAndWatchesNotify(t *testing.T) {
