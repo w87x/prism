@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"prism/internal/llm"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ type Service struct {
 	// answer the need without spending a real search call. Kept as a function, not an import of
 	// internal/tools/builtin, to keep this package's dependencies pointed the other way.
 	Bookmarks func(ctx context.Context, query string, limit int) []BookmarkHit
+	// LLM judges queries that look personal before they are sent (nil: only the rule-based cleaning applies); see guard.go.
+	LLM *llm.Router
 }
 
 // BookmarkHit is the sliver of a saved bookmark web_search needs to surface it — deliberately not the full
@@ -59,7 +62,15 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				q, guardNote, gerr := s.Guard(ctx, env.RunID, a.Query)
+				if gerr != nil {
+					return "", gerr
+				}
+				a.Query = q
 				var sb strings.Builder
+				if guardNote != "" {
+					fmt.Fprintf(&sb, "Note: %s.\n\n", guardNote)
+				}
 				if s.Bookmarks != nil {
 					if bm := s.Bookmarks(ctx, a.Query, 3); len(bm) > 0 {
 						sb.WriteString("From your bookmarks (already known — check these before using a fresh result):\n")
@@ -97,6 +108,11 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				q, guardNote, gerr := s.Guard(ctx, env.RunID, a.Query)
+				if gerr != nil {
+					return "", gerr
+				}
+				a.Query = q
 				res, used, err := SearchImages(ctx, s.cfg(ctx), a.Query, a.Limit)
 				if err != nil {
 					return "", err
@@ -105,6 +121,9 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					return "No pictures found for that query; try other words.", nil
 				}
 				var sb strings.Builder
+				if guardNote != "" {
+					fmt.Fprintf(&sb, "Note: %s.\n\n", guardNote)
+				}
 				fmt.Fprintf(&sb, "Pictures (via %s):\n", used)
 				for i, r := range res {
 					size := ""

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -256,4 +257,105 @@ func TestFetchMarksHostDownOnDNSFailure(t *testing.T) {
 	if _, down := f.hostDownSince(host); !down {
 		t.Fatal("a DNS not-found failure must mark the host down")
 	}
+}
+
+// A query that is only an address on the user's own network is refused before any provider is called (the context is dead, so a provider call
+// would fail differently); one that merely contains an address is corrected (see TestSearchGuardCorrectsAndJudges).
+func TestSearchRefusesQueriesThatAreOnlyThePrivateNetwork(t *testing.T) {
+	st := settings.New(testutil.DB(t).Pool)
+	s := &Service{Settings: st}
+	reg := tools.NewRegistry(testutil.DB(t).Pool)
+	s.RegisterTools(reg)
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, name := range []string{"web_search", "image_search"} {
+		tool, ok := reg.Get(name)
+		if !ok {
+			t.Fatalf("%s not registered", name)
+		}
+		args, _ := json.Marshal(map[string]any{"query": `"192.168.88.2:8080"`})
+		_, err := tool.Run(dead, &tools.Env{Agent: "t"}, args)
+		if err == nil || !strings.Contains(err.Error(), "own setup") {
+			t.Fatalf("%s must refuse a query that is only a private address: %v", name, err)
+		}
+	}
+}
+
+// The guard cleans a query by rule, refuses near-repeats and a runaway number of searches in one task, and asks the model only where it is
+// worth it: a personal-looking query, a long search run, or strict mode.
+func TestSearchGuardCorrectsAndJudges(t *testing.T) {
+	d := testutil.DB(t)
+	fake := testutil.NewFakeLLM(t)
+	r, st := testutil.Setup(t, d, fake)
+	var calls atomic.Int32
+	verdict := `{"verdict":"search"}`
+	fake.Handler = func(req map[string]any, n int) testutil.Reply {
+		calls.Add(1)
+		return testutil.Reply{Content: verdict}
+	}
+	s := &Service{Settings: st, LLM: r}
+	ctx := context.Background()
+
+	// rule-based cleaning: the private address goes, the question stays; an address-only query is refused
+	if q, note, err := s.Guard(ctx, 0, `Jackett "192.168.88.2:8080" torrent indexing`); err != nil || q != "Jackett torrent indexing" || !strings.Contains(note, "network") {
+		t.Fatalf("clean: %q %q %v", q, note, err)
+	}
+	if _, _, err := s.Guard(ctx, 0, "http://192.168.88.2:8080"); err == nil {
+		t.Fatal("a query that is only a private address must be refused")
+	}
+	if q, _, err := s.Guard(ctx, 0, "contact danil@example.com iphone 17 release date"); err != nil || strings.Contains(q, "@") {
+		t.Fatalf("an email address must be cut out: %q %v", q, err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("a plain public query must not cost a model call: %d", calls.Load())
+	}
+
+	// a personal-looking query is read by the model; a rewrite is searched instead, a skip is refused with what to do instead
+	verdict = `{"verdict":"rewrite","safer_query":"synology download station destination folder error","why":"it named the user's NAS share"}`
+	q, note, err := s.Guard(ctx, 0, "my nas share /volume1/video error destination folder")
+	if err != nil || q != "synology download station destination folder error" || !strings.Contains(note, "instead") || calls.Load() != 1 {
+		t.Fatalf("rewrite: %q %q %v calls=%d", q, note, err, calls.Load())
+	}
+	verdict = `{"verdict":"skip","why":"the answer is in the user's own media library","instead":"list the library with the NAS tool"}`
+	if _, _, err := s.Guard(ctx, 0, "which movies do I already have on my nas"); err == nil || !strings.Contains(err.Error(), "not worth") || !strings.Contains(err.Error(), "NAS tool") {
+		t.Fatalf("skip must say why and what to do: %v", err)
+	}
+	verdict = `{"verdict":"private","why":"it asks for a password"}`
+	if _, _, err := s.Guard(ctx, 0, "what is my router password"); err == nil || !strings.Contains(err.Error(), "held back") {
+		t.Fatalf("private: %v", err)
+	}
+	// a model that fails never blocks a search
+	fake.Handler = func(map[string]any, int) testutil.Reply { return testutil.Reply{Status: 500} }
+	if q, _, err := s.Guard(ctx, 0, "my cat is sick what to feed it"); err != nil || q == "" {
+		t.Fatalf("a failing model must not block: %q %v", q, err)
+	}
+	fake.Handler = func(map[string]any, int) testutil.Reply {
+		calls.Add(1)
+		return testutil.Reply{Content: `{"verdict":"search"}`}
+	}
+
+	// one task: near-repeats are refused without the model, the model joins after a few searches, and the number is capped
+	before := calls.Load()
+	run := int64(77)
+	for _, q := range []string{"jackett torrent indexer setup", "synology download station api", "futurama season 11 release date", "rick and morty season 8 episodes", "tvmaze api schedule endpoint"} {
+		if _, _, err := s.Guard(ctx, run, q); err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+	}
+	if calls.Load() != before {
+		t.Fatalf("the first searches of a task cost no model call: %d", calls.Load()-before)
+	}
+	if _, _, err := s.Guard(ctx, run, "tvmaze api schedule endpoint docs"); err == nil || !strings.Contains(err.Error(), "almost the same") {
+		t.Fatalf("a near-repeat must be refused: %v", err)
+	}
+	if _, _, err := s.Guard(ctx, run, "kinopoisk unofficial api key"); err != nil || calls.Load() != before+1 {
+		t.Fatalf("after five searches the model looks at each one: %v calls=%d", err, calls.Load()-before)
+	}
+	for i := 0; i < 30; i++ {
+		_, _, err := s.Guard(ctx, run, fmt.Sprintf("topic%dalpha beta%dgamma", i, i))
+		if err != nil && strings.Contains(err.Error(), "enough") {
+			return
+		}
+	}
+	t.Fatal("a runaway search run must be stopped")
 }

@@ -56,3 +56,23 @@ func TestClientRefusesLoopbackAndRedirects(t *testing.T) {
 		t.Fatal("a redirect into loopback must be refused")
 	}
 }
+
+func TestPrivateInTextFindsTheUsersOwnNetworkInAQuery(t *testing.T) {
+	for q, want := range map[string]string{
+		`Jackett "192.168.88.2:8080" torrent`: "192.168.88.2",
+		"http://10.0.0.4/admin login":         "10.0.0.4",
+		"nas.local synology setup":            "nas.local",
+		"router at 172.16.5.1":                "172.16.5.1",
+		"open localhost:8080 jackett":         "localhost",
+		"100.64.1.2 tailscale node":           "100.64.1.2",
+		"jackett docker compose example":      "",
+		"cloudflare dns 1.1.1.1":              "",
+		"released on 2026.10.23.15":           "",
+		"google.com 8.8.8.8":                  "",
+	} {
+		got, ok := PrivateInText(q)
+		if ok != (want != "") || got != want {
+			t.Errorf("%q: got %q %v, want %q", q, got, ok, want)
+		}
+	}
+}

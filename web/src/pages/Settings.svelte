@@ -209,7 +209,7 @@
   const listModelOpts = $derived(models.filter((m) => m.kind === (lst?.kind || 'chat')).map((m) => ({ value: m.name, label: m.name })));
 
   // ── web ──
-  let web = $state({ search_order: [], tavily_key: '', yandex_key: '', yandex_folder: '', yandex_region: '', anysearch_key: '', anysearch_url: '', flaresolverr_url: '', translate_key: '', user_agent: '', allow_private: false });
+  let web = $state({ search_order: [], tavily_key: '', yandex_key: '', yandex_folder: '', yandex_region: '', anysearch_key: '', anysearch_url: '', flaresolverr_url: '', translate_key: '', user_agent: '', allow_private: false, guard_off: false, guard_strict: false });
   let wprov = $state([]);
   let wq = $state('');
   let wres = $state(null);
@@ -508,6 +508,8 @@
             <Field label="FlareSolverr URL" hint="solves Cloudflare challenges for web_fetch (optional)"><Input bind:value={web.flaresolverr_url} placeholder="http://localhost:8191" /></Field>
             <Field label="User agent" hint="empty = a current Safari UA"><Input bind:value={web.user_agent} /></Field>
             <Switch bind:checked={web.allow_private} label="allow fetching localhost / LAN addresses" tone="attn" />
+            <Switch checked={!web.guard_off} onchange={(v) => (web.guard_off = !v)} label="guard web searches: cut private details out of a query, refuse repeats and runaway search runs, and let the model judge a personal-looking query (worth searching? private? rewrite it)" />
+            {#if !web.guard_off}<Switch bind:checked={web.guard_strict} label="…and have the model judge EVERY search (slower on a local model)" />{/if}
             <div class="sm mute">Blocked by default so a web page cannot steer an agent at your local network.</div>
           </Panel>
           <Panel title="Language tools">

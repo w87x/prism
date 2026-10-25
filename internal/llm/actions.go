@@ -46,6 +46,7 @@ var Actions = []Action{
 	{"memory_analyze", "Deep analysis: insights, questions, contradictions", "Memory", "main"},
 	{"memory_banks", "Suggest merging and splitting banks", "Memory", "aux"},
 	{"entities", "Extract and merge entities", "Memory", "aux"},
+	{"web_guard", "Check a web search for private details before it is sent, and rewrite or hold it back", "Web", "aux"},
 	{"web_extract", "Pull data out of web pages", "Web", "aux"},
 }
 

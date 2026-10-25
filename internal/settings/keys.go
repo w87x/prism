@@ -75,6 +75,8 @@ type Web struct {
 	TranslateKey    string   `json:"translate_key"` // Google Cloud Translation API key
 	UserAgent       string   `json:"user_agent"`
 	AllowPrivate    bool     `json:"allow_private"` // let web tools reach localhost/LAN addresses
+	GuardOff        bool     `json:"guard_off"`     // do not clean and check search queries before they are sent
+	GuardStrict     bool     `json:"guard_strict"`  // have the model judge EVERY search, not only personal-looking ones and long search runs
 }
 
 type Telegram struct {

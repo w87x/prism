@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -98,4 +99,22 @@ func Client(allowPrivate bool, timeout time.Duration) *http.Client {
 			return nil
 		},
 	}
+}
+
+var dottedQuad = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
+var privateHostWord = regexp.MustCompile(`(?i)(?:^|[^\w.-])((?:[\w-]+\.)*(?:localhost|[\w-]+\.(?:local|lan|internal|localhost)))\b`)
+
+// PrivateInText finds an address of the user's own network in free text — a private or loopback IPv4 address, "localhost", a ".local" /
+// ".lan" / ".internal" name — and returns it. It is for text that is about to leave the machine (a web search query): a search engine
+// cannot know such an address, so the search finds nothing, and the query would hand the user's network layout to a third party.
+func PrivateInText(s string) (string, bool) {
+	for _, m := range dottedQuad.FindAllString(s, -1) {
+		if ip := net.ParseIP(m); ip != nil && Private(ip) {
+			return m, true
+		}
+	}
+	if m := privateHostWord.FindStringSubmatch(s); m != nil {
+		return m[1], true
+	}
+	return "", false
 }

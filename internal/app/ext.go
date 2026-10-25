@@ -175,7 +175,7 @@ func (a *App) buildExtensions(ctx context.Context) error {
 		}
 	}()
 	fetcher := &web.Fetcher{Settings: a.Settings, Browser: x.Browser}
-	x.Web = &web.Service{Settings: a.Settings, Fetcher: fetcher, Extract: &web.Extractor{LLM: a.LLM},
+	x.Web = &web.Service{Settings: a.Settings, Fetcher: fetcher, LLM: a.LLM, Extract: &web.Extractor{LLM: a.LLM},
 		Bookmarks: func(ctx context.Context, query string, limit int) []web.BookmarkHit {
 			bs, err := builtin.FindBookmarks(ctx, a.DB.Pool, query, limit)
 			if err != nil {
@@ -279,6 +279,10 @@ func (a *App) buildExtensions(ctx context.Context) error {
 			return body, nil
 		},
 		Search: func(ctx context.Context, q string) (string, error) {
+			q, _, gerr := x.Web.Guard(ctx, 0, q) // the watch's own searches are cleaned like an agent's
+			if gerr != nil {
+				return "", gerr
+			}
 			res, _, err := web.Search(ctx, settings.Load(ctx, a.Settings, settings.KeyWeb, settings.Web{}), q, 6)
 			if err != nil {
 				return "", err
