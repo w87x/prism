@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"prism/internal/redact"
 	"regexp"
 	"strconv"
 	"strings"
@@ -688,6 +689,7 @@ func (b *Bot) Deliver(ctx context.Context, n agent.Notice) (string, error) {
 		prefix = map[string]string{"attention": "🟠 ", "warning": "🟡 ", "error": "🔴 "}[n.Level]
 	}
 	text := fmt.Sprintf("%s**%s:** %s", prefix, n.Agent, n.Text)
+	text, _ = redact.Secrets(text) // a message to Telegram leaves the machine: no keys or passwords in it
 	why := ""
 	switch strings.ToLower(strings.TrimSpace(n.Topic)) { // a model writing "None" for "no topic" must not get a topic called None
 	case "none", "null", "nil", "n/a", "-":

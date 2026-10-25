@@ -218,3 +218,21 @@ func TestIDsAcceptsTheWaysAModelWritesThem(t *testing.T) {
 		t.Fatalf("a single string is a list of one: %v", v.One)
 	}
 }
+
+// A credential is never written into memory (it is replayed into prompts); the sentence about where it is kept is fine.
+func TestMemoryRefusesCredentials(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSvc(t)
+	if _, err := s.Store(ctx, StoreReq{Bank: "user", Text: "The Tavily key is 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"}); err == nil || !strings.Contains(err.Error(), "credentials are never stored") {
+		t.Fatalf("a key must be refused: %v", err)
+	}
+	if _, err := s.Store(ctx, StoreReq{Bank: "user", Text: "router password: hunter2hunter2"}); err == nil {
+		t.Fatal("a password must be refused")
+	}
+	if err := s.SetCoreBlock(ctx, "preferences", "token: abcdefghijklmnopqrstuvwxyz", "", "user"); err == nil {
+		t.Fatal("core memory must refuse a credential")
+	}
+	if _, err := s.Store(ctx, StoreReq{Bank: "user", Text: "The Jackett API key is kept in the NAS password manager"}); err != nil {
+		t.Fatalf("a sentence about where a key lives is fine: %v", err)
+	}
+}

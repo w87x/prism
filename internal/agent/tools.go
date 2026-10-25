@@ -331,6 +331,9 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	if c := strings.TrimSpace(criteria); c != "" {
 		instruction += "\n\n[Done means] " + c + "\nYour report is checked against this before it goes back; say plainly what you did for each point."
 	}
+	if err := e.delegationGuard(ctx, env, p.Name, instruction); err != nil {
+		return tasks.Task{}, false, err
+	}
 	depth := env.Depth + 1
 	if leaf && depth > MaxDepth {
 		depth = MaxDepth // a leaf request never deepens the tree beyond its limit

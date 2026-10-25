@@ -25,6 +25,8 @@ type Service struct {
 	Bookmarks func(ctx context.Context, query string, limit int) []BookmarkHit
 	// LLM judges queries that look personal before they are sent (nil: only the rule-based cleaning applies); see guard.go.
 	LLM *llm.Router
+	// TaskText returns what a task asked for (nil: unknown): a site the task itself names is never refused by the fetch guard.
+	TaskText func(ctx context.Context, taskID int64) string
 }
 
 // BookmarkHit is the sliver of a saved bookmark web_search needs to surface it — deliberately not the full
@@ -163,7 +165,18 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				guardNote, gerr := s.fetchBefore(ctx, env, a.URL)
+				if gerr != nil {
+					return "", gerr
+				}
 				page, err := s.Fetcher.Fetch(ctx, a.URL, a.Render, a.WaitSelector, time.Duration(a.WaitMS)*time.Millisecond)
+				status := 0
+				if page != nil {
+					status = page.Status
+				}
+				if n := s.fetchAfter(env.RunID, a.URL, status, err); n != "" {
+					guardNote = strings.TrimSpace(guardNote + " " + n)
+				}
 				if err != nil {
 					return "", err
 				}
@@ -193,6 +206,9 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				}
 				if page.Status/100 != 2 {
 					head += "Note: non-2xx status; content may be an error page.\n"
+				}
+				if guardNote != "" {
+					head += "Note: " + guardNote + "\n"
 				}
 				return head + "\n" + string(r) + more, nil
 			},
@@ -225,7 +241,18 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				guardNote, gerr := s.fetchBefore(ctx, env, a.URL)
+				if gerr != nil {
+					return "", gerr
+				}
 				page, err := s.Fetcher.Fetch(ctx, a.URL, a.Render, a.WaitSelector, 0)
+				status := 0
+				if page != nil {
+					status = page.Status
+				}
+				if n := s.fetchAfter(env.RunID, a.URL, status, err); n != "" {
+					guardNote = strings.TrimSpace(guardNote + " " + n)
+				}
 				if err != nil {
 					return "", err
 				}
@@ -240,6 +267,9 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					return "", err
 				}
 				b, _ := json.MarshalIndent(res, "", " ")
+				if guardNote != "" {
+					return "Note: " + guardNote + "\n" + string(b), nil
+				}
 				return string(b), nil
 			},
 		},
@@ -263,7 +293,19 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				guardNote, gerr := s.fetchBefore(ctx, env, a.URL)
+				if gerr != nil {
+					return "", gerr
+				}
 				page, capt, err := s.fetchMaybeCapture(ctx, a.URL, a.Render, a.Capture)
+				pstatus := 0
+				if page != nil {
+					pstatus = page.Status
+				}
+				if n := s.fetchAfter(env.RunID, a.URL, pstatus, err); n != "" {
+					guardNote = strings.TrimSpace(guardNote + " " + n)
+				}
+				_ = guardNote
 				if err != nil {
 					return "", err
 				}
@@ -299,7 +341,19 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if err != nil {
 					return "", err
 				}
+				guardNote, gerr := s.fetchBefore(ctx, env, a.URL)
+				if gerr != nil {
+					return "", gerr
+				}
 				page, capt, err := s.fetchMaybeCapture(ctx, a.URL, a.Render, a.Capture)
+				pstatus := 0
+				if page != nil {
+					pstatus = page.Status
+				}
+				if n := s.fetchAfter(env.RunID, a.URL, pstatus, err); n != "" {
+					guardNote = strings.TrimSpace(guardNote + " " + n)
+				}
+				_ = guardNote
 				if err != nil {
 					return "", err
 				}

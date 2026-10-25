@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"prism/internal/redact"
 	"regexp"
 	"strings"
 	"time"
@@ -93,6 +94,9 @@ func (s *Service) SetCoreBlock(ctx context.Context, label, text, description, by
 		return errors.New("a block's label is 2-24 lowercase letters, digits or underscores, starting with a letter")
 	}
 	text = strings.TrimSpace(text)
+	if found, bad := redact.Has(text); bad {
+		return fmt.Errorf("this looks like it holds %s: core memory is in every prompt, so credentials never go there", found[0])
+	}
 	limit := maxCoreBlockLen
 	if label == CharterLabel {
 		limit = maxCharterLen

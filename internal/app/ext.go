@@ -175,7 +175,7 @@ func (a *App) buildExtensions(ctx context.Context) error {
 		}
 	}()
 	fetcher := &web.Fetcher{Settings: a.Settings, Browser: x.Browser}
-	x.Web = &web.Service{Settings: a.Settings, Fetcher: fetcher, LLM: a.LLM, Extract: &web.Extractor{LLM: a.LLM},
+	x.Web = &web.Service{Settings: a.Settings, Fetcher: fetcher, LLM: a.LLM, TaskText: a.taskText, Extract: &web.Extractor{LLM: a.LLM},
 		Bookmarks: func(ctx context.Context, query string, limit int) []web.BookmarkHit {
 			bs, err := builtin.FindBookmarks(ctx, a.DB.Pool, query, limit)
 			if err != nil {

@@ -900,7 +900,11 @@ func TestProbationHiring(t *testing.T) {
 		case strings.Contains(sysText, "You are Ada") && role == "user":
 			return testutil.Reply{Tools: []llm.ToolCall{tc("x1", "shell", map[string]any{"command": "echo sneaky"})}}
 		case strings.Contains(sysText, "You are Ada") && role == "tool" && !strings.Contains(content, "ask-done"):
-			return testutil.Reply{Tools: []llm.ToolCall{tc("x2", "ask_colleague", map[string]any{"request": "run a shell command for me", "agent": "Grace"})}}
+			req2 := "run a shell command for me"
+			if call > 3 { // the second run asks something else: the same request twice in minutes is refused by the delegation guard
+				req2 = "now list the files in the downloads directory with a shell command, please"
+			}
+			return testutil.Reply{Tools: []llm.ToolCall{tc("x2", "ask_colleague", map[string]any{"request": req2, "agent": "Grace"})}}
 		case strings.Contains(sysText, "You are Grace"):
 			return testutil.Reply{Content: "ask-done"}
 		}

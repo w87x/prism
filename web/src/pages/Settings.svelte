@@ -77,7 +77,7 @@
   let ret = $state({ logs_days: 14, tasks_days: 30, task_statuses: ['done', 'failed', 'cancelled'] });
   const retStatuses = ['done', 'failed', 'cancelled', 'partial'];
   const toggleRetStatus = (s, on) => { const cur = new Set(ret.task_statuses || []); on ? cur.add(s) : cur.delete(s); ret.task_statuses = [...cur]; };
-  let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, tool_fail_warn: 3, tool_fail_block: 6, stall_off: false, stall_min: 20, autonomous_boost_pct: 50, autonomous_max_iterations: 60 });
+  let gr = $state({ code_review_off: false, tool_repeat_warn: 3, tool_repeat_abort: 5, text_repeat_abort: 2, tool_fail_warn: 3, tool_fail_block: 6, stall_off: false, stall_min: 20, autonomous_boost_pct: 50, autonomous_max_iterations: 60, task_token_warn: 700000, task_token_max: 1200000 });
   let nf = $state({ cron: { show: true, external: false }, intent: { show: true, external: true }, ask: { show: true, external: false }, error: { show: true, external: true }, proposal: { show: true, external: true }, connection: { show: true, external: false } });
   let cleaning = $state(false);
   async function cleanNow() {
@@ -209,7 +209,7 @@
   const listModelOpts = $derived(models.filter((m) => m.kind === (lst?.kind || 'chat')).map((m) => ({ value: m.name, label: m.name })));
 
   // ── web ──
-  let web = $state({ search_order: [], tavily_key: '', yandex_key: '', yandex_folder: '', yandex_region: '', anysearch_key: '', anysearch_url: '', flaresolverr_url: '', translate_key: '', user_agent: '', allow_private: false, guard_off: false, guard_strict: false });
+  let web = $state({ search_order: [], tavily_key: '', yandex_key: '', yandex_folder: '', yandex_region: '', anysearch_key: '', anysearch_url: '', flaresolverr_url: '', translate_key: '', user_agent: '', allow_private: false, guard_off: false, guard_model_off: false });
   let wprov = $state([]);
   let wq = $state('');
   let wres = $state(null);
@@ -508,8 +508,8 @@
             <Field label="FlareSolverr URL" hint="solves Cloudflare challenges for web_fetch (optional)"><Input bind:value={web.flaresolverr_url} placeholder="http://localhost:8191" /></Field>
             <Field label="User agent" hint="empty = a current Safari UA"><Input bind:value={web.user_agent} /></Field>
             <Switch bind:checked={web.allow_private} label="allow fetching localhost / LAN addresses" tone="attn" />
-            <Switch checked={!web.guard_off} onchange={(v) => (web.guard_off = !v)} label="guard web searches: cut private details out of a query, refuse repeats and runaway search runs, and let the model judge a personal-looking query (worth searching? private? rewrite it)" />
-            {#if !web.guard_off}<Switch bind:checked={web.guard_strict} label="…and have the model judge EVERY search (slower on a local model)" />{/if}
+            <Switch checked={!web.guard_off} onchange={(v) => (web.guard_off = !v)} label="guard web searches: cut private details (addresses, emails, keys) out of a query, refuse repeats and runaway search runs" />
+            {#if !web.guard_off}<Switch checked={!web.guard_model_off} onchange={(v) => (web.guard_model_off = !v)} label="…and ask the model, in one word, whether each search is worth making (SEARCH / REWRITE / PRIVATE / SKIP) — a private query is rewritten, one that only your own data can answer is held back" />{/if}
             <div class="sm mute">Blocked by default so a web page cannot steer an agent at your local network.</div>
           </Panel>
           <Panel title="Language tools">
@@ -659,6 +659,8 @@
           <div class="two"><Field label="Warn after (identical tool call)"><NumberInput bind:value={gr.tool_repeat_warn} min={2} max={9} step={1} /></Field>
             <Field label="Stop after"><NumberInput bind:value={gr.tool_repeat_abort} min={2} max={10} step={1} /></Field></div>
           <Field label="Stop after (stuck repeating text)" hint="lower than the tool threshold — regenerating a whole reply is far more expensive than retrying one call"><NumberInput bind:value={gr.text_repeat_abort} min={1} max={5} step={1} /></Field>
+          <div class="two"><Field label="Token budget: warn at" hint="tokens one background task may READ in all (every turn re-reads its context); the agent is told to wrap up. 0 = off"><NumberInput bind:value={gr.task_token_warn} min={0} max={20000000} step={50000} /></Field>
+            <Field label="…and stop at" hint="the task ends with what it has; chats with you are never limited"><NumberInput bind:value={gr.task_token_max} min={0} max={20000000} step={50000} /></Field></div>
           <div class="row"><Button variant="primary" onclick={() => saveSetting('guardrails', gr, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Guardrails · long runs" hint="What happens when a task uses its whole iteration budget: automatic analysis and one retry, and how long tasks may run." id="set.guardrails-long-runs" collapsible resizable>

@@ -74,9 +74,9 @@ type Web struct {
 	FlareSolverrURL string   `json:"flaresolverr_url"`
 	TranslateKey    string   `json:"translate_key"` // Google Cloud Translation API key
 	UserAgent       string   `json:"user_agent"`
-	AllowPrivate    bool     `json:"allow_private"` // let web tools reach localhost/LAN addresses
-	GuardOff        bool     `json:"guard_off"`     // do not clean and check search queries before they are sent
-	GuardStrict     bool     `json:"guard_strict"`  // have the model judge EVERY search, not only personal-looking ones and long search runs
+	AllowPrivate    bool     `json:"allow_private"`   // let web tools reach localhost/LAN addresses
+	GuardOff        bool     `json:"guard_off"`       // do not clean and check search queries before they are sent
+	GuardModelOff   bool     `json:"guard_model_off"` // do not ask the model about each search (the rule-based cleaning, repeat and budget checks stay)
 }
 
 type Telegram struct {
@@ -314,6 +314,11 @@ type Guardrails struct {
 	// budget each time. Nobody can guess the right budget up front; a loop is cut off by the loop guard instead.
 	// 0 turns it off.
 	MaxExtensions int `json:"max_extensions"`
+	// TaskTokenWarn / TaskTokenMax: how many tokens one background run may READ in all (every turn re-reads the whole context, so a long
+	// run adds up fast: one runaway search task read 1.5 million). At the first the agent is told to wrap up; at the second the run is
+	// stopped with what it has. Chats with the user are not limited. 0 turns a limit off.
+	TaskTokenWarn int `json:"task_token_warn"`
+	TaskTokenMax  int `json:"task_token_max"`
 	// StallOff / StallMin: notify when a running task (and everything it delegated) shows no sign of life — no model
 	// call, tool call or tokens — for StallMin minutes.
 	StallOff bool `json:"stall_off"`
@@ -326,7 +331,7 @@ type Guardrails struct {
 }
 
 func DefaultGuardrails() Guardrails {
-	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60, ToolFailWarn: 3, ToolFailBlock: 6, MaxExtensions: 2, StallMin: 20}
+	return Guardrails{ToolRepeatWarn: 3, ToolRepeatAbort: 5, TextRepeatAbort: 2, AutonomousBoostPct: 50, AutonomousMaxIterations: 60, ToolFailWarn: 3, ToolFailBlock: 6, MaxExtensions: 2, StallMin: 20, TaskTokenWarn: 700000, TaskTokenMax: 1200000}
 }
 
 func DefaultContext() Context { return Context{CompactAt: 0.8, Target: 0.2} }

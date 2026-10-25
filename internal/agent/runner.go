@@ -435,6 +435,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	}
 	guard := &loopGuard{toolWarnAt: grCfg.ToolRepeatWarn, toolAbortAt: grCfg.ToolRepeatAbort, textAbortAt: grCfg.TextRepeatAbort, failWarnAt: grCfg.ToolFailWarn, failBlockAt: grCfg.ToolFailBlock}
 	baseIter, extensions := maxIter, 0
+	tokenWarned := false
 	pseudoNudges := 0 // times the model was sent back for writing a tool call as text instead of making it
 	calib := 1.0
 	compactedThisRun := 0
@@ -454,6 +455,15 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 			}
 			_ = add(Msg{Message: llm.Message{Role: "user", Content: content}, Provenance: prov, ImageIDs: ar.takeImages()})
 			// taint stays: the untrusted content is still in the context window, whatever the user says next
+		}
+		// a background run has a ceiling on what it may read in all (see settings.Guardrails.TaskTokenMax)
+		if !spec.Interactive && grCfg.TaskTokenMax > 0 && res.TokensIn >= grCfg.TaskTokenMax {
+			res.Aborted = fmt.Sprintf("token budget exhausted (%dk tokens read in this task)", res.TokensIn/1000)
+			break
+		}
+		if !spec.Interactive && grCfg.TaskTokenWarn > 0 && res.TokensIn >= grCfg.TaskTokenWarn && !tokenWarned {
+			tokenWarned = true
+			_ = add(Msg{Message: llm.Message{Role: "user", Content: fmt.Sprintf("[system] This task has already read %dk tokens — far more than a task should need. Do not start anything new: finish what is in hand and give your best answer with what you have, saying plainly what is still unknown.", res.TokensIn/1000)}, Provenance: "system"})
 		}
 		if iter >= maxIter {
 			// Nobody can guess the right budget up front, so a run that is still making visible progress is given

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"prism/internal/redact"
 	"slices"
 	"sort"
 	"strings"
@@ -553,6 +554,9 @@ func (s *Service) Store(ctx context.Context, r StoreReq) (*StoreResult, error) {
 	r.Text = strings.TrimSpace(r.Text)
 	if r.Text == "" {
 		return nil, errors.New("empty fact")
+	}
+	if found, bad := redact.Has(r.Text); bad {
+		return nil, fmt.Errorf("this looks like it holds %s: credentials are never stored in memory (memory is replayed into prompts, some of which go to cloud models). Store what it is for — \"the Jackett API key is kept in the NAS's password manager\" — not the secret itself", found[0])
 	}
 	if r.Confidence == 0 {
 		r.Confidence = 0.7

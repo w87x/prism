@@ -154,6 +154,9 @@ func isContextErr(e *APIError) bool {
 
 // Chat performs one streaming completion against ep. onDelta may be nil.
 func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(Delta)) (*Response, error) {
+	if cloudKind(ep.Kind) { // what goes to a company's servers carries no credentials
+		r.Messages = redactMessages(r.Messages)
+	}
 	if ep.Kind == KindCodex {
 		return c.codexChat(ctx, ep, r, onDelta)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,9 +28,12 @@ For each commitment decide its status:
 - "not_done": it is claimed as done, or promised for now, but no tool call did it.
 - "needs_trigger": it depends on something in the future ("when/if X happens, I will Y") and nothing was set up to make that happen — no watch, cron, intent, tracker or sleep call that would carry it out later. An agent cannot act between its runs; only such a call can.
 Report only real commitments about actions, not observations ("the movie is not released yet" is not one). Do not flag a promise that was kept, or one that a creating/scheduling tool call (cron_create, intent_create, watch_command, tracker_*, sleep…) covers.
-Answer JSON only: {"commitments":[{"text":"the commitment in one sentence","status":"done|not_done|needs_trigger","evidence":"what the tool calls show or lack","fix":"the one concrete thing that would make it real (which tool, or which watch/cron to set up)"}]}`
+The TOOL CALLS include those of the colleagues the agent asked (their lines start with their name). A watch or monitor set up by a colleague counts.
+Give each commitment a "kind": "watch" when it is about observing or telling later ("I'll keep an eye on the download", "I'll let you know when it is done", "I'll check back tomorrow", "I'll notify you when it is out"), otherwise "action".
+Answer JSON only: {"commitments":[{"text":"the commitment in one sentence","kind":"watch|action","status":"done|not_done|needs_trigger","evidence":"what the tool calls show or lack","fix":"the one concrete thing that would make it real (which tool, or which watch/cron to set up)"}]}`
 
 type promiseItem struct {
+	Kind     string `json:"kind"`
 	Text     string `json:"text"`
 	Status   string `json:"status"`
 	Evidence string `json:"evidence"`
@@ -48,9 +52,54 @@ type PromiseReviewRow struct {
 	CreatedAt time.Time     `json:"created_at"`
 }
 
-// reviewsPromises reports whether a finished task is one whose promises are checked.
+// followUpSignal: a reply that promises to look, tell or act later. Only such replies of the user's own requests are reviewed (a model call
+// each), so an ordinary answer costs nothing.
+var followUpSignal = regexp.MustCompile(`(?i)(\bi['’]ll\b|\bi will\b|\bwill (?:let you know|notify|tell you|check|monitor|keep|remind|follow|watch|download|report|update)\b|keep an eye|check back|keep (?:watching|monitoring|tracking)|let you know|get back to you|report back|\bwe['’]ll\b|я (?:проверю|сообщу|буду|напомню|прослежу|слежу|дам знать)|сообщу|напомню|прослежу|дам знать|буду следить)`)
+
+// userAsked: a request the user made themselves, at the top of its task tree.
+func userAsked(t tasks.Task) bool {
+	return t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram")
+}
+
+// reviewsPromises reports whether a finished task is one whose promises are checked: an autonomous run (a cron, an intent), or a request
+// of the user's own whose answer promises to look, tell or act later.
 func reviewsPromises(t tasks.Task) bool {
-	return t.Status == tasks.Done && t.Depth == 0 && (t.FromKind == "cron" || t.FromKind == "intent" || t.FromName == promiseReviewName)
+	if t.Status != tasks.Done || t.Depth != 0 {
+		return false
+	}
+	if t.FromKind == "cron" || t.FromKind == "intent" || t.FromName == promiseReviewName {
+		return true
+	}
+	return userAsked(t) && followUpSignal.MatchString(t.Result)
+}
+
+// treeTrail is toolTrail for a whole request: the agent's own calls and those of every colleague it asked, each line marked with who made it.
+func (e *Engine) treeTrail(ctx context.Context, t tasks.Task) string {
+	var sb strings.Builder
+	if t.SessionID != nil {
+		sb.WriteString(e.toolTrail(ctx, *t.SessionID))
+	}
+	rows, err := e.DB.Query(ctx, `SELECT to_agent, session_id FROM tasks WHERE root_id=$1 AND id<>$2 AND session_id IS NOT NULL ORDER BY id LIMIT 40`, t.RootID, t.ID)
+	if err != nil {
+		return sb.String()
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var agent string
+		var sid int64
+		if rows.Scan(&agent, &sid) != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(e.toolTrail(ctx, sid)), "\n") {
+			if strings.TrimSpace(line) != "" {
+				sb.WriteString("- [" + agent + "] " + strings.TrimPrefix(line, "- ") + "\n")
+			}
+		}
+		if sb.Len() > 9000 {
+			break
+		}
+	}
+	return sb.String()
 }
 
 // toolTrail renders what a task's session really did: each tool call with the start of its result.
@@ -89,6 +138,9 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		return
 	}
 	trail := e.toolTrail(ctx, *t.SessionID)
+	if userAsked(t) {
+		trail = e.treeTrail(ctx, t)
+	}
 	if strings.TrimSpace(trail) == "" {
 		trail = "(the agent made no tool calls at all)\n"
 	}
@@ -125,6 +177,22 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		return
 	}
 	e.Emit("promise.update", map[string]any{"id": id})
+	// "I'll keep an eye on it": the user's own request promised to watch or tell later, and nothing will. Setting up a watch only observes and
+	// tells, so it is done at once whatever the mode (short of "off"); the colleague that holds the monitor tools makes it real.
+	if userAsked(t) {
+		var watch []promiseItem
+		for _, b := range broken {
+			if b.Kind == "watch" {
+				watch = append(watch, b)
+			}
+		}
+		if len(watch) > 0 {
+			if wt, err := e.setUpWatch(ctx, id, t, watch); err == nil {
+				e.NotifyHousekeeping(ctx, "autonomy", "A promise to follow up is being made real", Notice{Agent: t.ToAgent, Level: "info", Text: fmt.Sprintf("“%s” promised to follow up (%s) but nothing was set to. %s is setting up the watch now (task #%d); you will be told when it happens.", textutil.Brief(t.Title, 60), textutil.Brief(watch[0].Text, 90), wt.ToAgent, wt.ID)}, false)
+				return
+			}
+		}
+	}
 	// the same job over and over: the cause is usually the model behind it, not bad luck
 	var earlier int
 	_ = e.DB.QueryRow(ctx, `SELECT count(*) FROM promise_reviews WHERE agent=$1 AND title=$2 AND id<>$3 AND created_at > now()-interval '7 days'`, t.ToAgent, t.Title, id).Scan(&earlier)
@@ -143,6 +211,40 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		}
 	}
 	e.NotifyHousekeeping(ctx, "autonomy", t.ToAgent+": promises not carried out", Notice{Agent: t.ToAgent, Level: "attention", Text: fmt.Sprintf("“%s” made promises nothing carried out:\n%s\nOpen Today → Needs your attention to have it made real or dismissed.%s", textutil.Brief(t.Title, 60), strings.Join(lines, "\n"), repeat)}, false)
+}
+
+// watcherAgent is who sets up a watch: Sentinel, the staff member that holds the monitor tools.
+func (e *Engine) watcherAgent(ctx context.Context, fallback string) string {
+	if p, err := e.Profiles.Get(ctx, "Sentinel"); err == nil && p.Enabled {
+		return p.Name
+	}
+	return fallback
+}
+
+// setUpWatch has a colleague start the monitor that carries out a promise to look or tell later.
+func (e *Engine) setUpWatch(ctx context.Context, reviewID int64, orig tasks.Task, watch []promiseItem) (*tasks.Task, error) {
+	var sb strings.Builder
+	sb.WriteString("The user made a request and the answer promised to follow up — but nothing is following up, and nobody can act between runs. Make the promise real: start the monitor that watches for it and tells the user when it happens.\n\nThe request was:\n")
+	sb.WriteString(textutil.Brief(orig.Input, 1200))
+	sb.WriteString("\n\nThe answer said:\n")
+	sb.WriteString(textutil.Brief(orig.Result, 2000))
+	sb.WriteString("\n\nWhat was promised:\n")
+	for _, p := range watch {
+		fmt.Fprintf(&sb, "- %s", p.Text)
+		if p.Fix != "" {
+			sb.WriteString(" — " + p.Fix)
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nHow: find what is to be watched in the answer above (a download's task id or name, a release, a page) and a READ-ONLY tool that shows its state (tool_search finds the list or status tool of the service, for example the download list); then monitor_start with kind tool, the ids from the answer, an expect pattern for done, announce=true so the user sees progress, and a time budget that fits (a download: up to 24 hours). Watch every item that was promised, one monitor each, or one that covers a list. When several things are watched, do not start one monitor per item if one tool call shows them all. Reply with one line saying what is now being watched.")
+	to := e.watcherAgent(ctx, orig.ToAgent)
+	t, err := e.Enqueue(ctx, tasks.Task{FromKind: "system", FromName: promiseReviewName, ToAgent: to, Title: "Watch what was promised: " + textutil.Brief(orig.Title, 50), Input: sb.String()})
+	if err != nil {
+		return nil, err
+	}
+	_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status='fixing', fix_task_id=$2 WHERE id=$1`, reviewID, t.ID)
+	e.Emit("promise.update", map[string]any{"id": reviewID})
+	return &t, nil
 }
 
 // FixPromise asks the agent whose run left promises unkept to make them real: do the action now if its condition already holds,

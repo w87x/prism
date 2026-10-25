@@ -7,6 +7,7 @@ import (
 	"prism/internal/settings"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -333,5 +334,40 @@ func TestAStallLeavesALessonThatIsShownForSimilarTasks(t *testing.T) {
 	p, _ := h.e.Profiles.Get(ctx, "Grinder2")
 	if note := h.e.antibodyNote(ctx, p, "find out something by polling the clock"); !strings.Contains(note, "polling the clock") {
 		t.Fatalf("the lesson must be shown when a similar task starts: %q", note)
+	}
+}
+
+// A background run that keeps reading is told to wrap up and then stopped when it has read more than its ceiling; a chat with the user is not
+// limited, and a run stopped for it is not retried (a retry would spend the budget again).
+func TestBackgroundRunsHaveATokenCeiling(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "Reader", Soul: "You are Reader.", Tools: []string{"clock"}, Enabled: true, MaxIterations: 30}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gr := settings.DefaultGuardrails()
+	gr.TaskTokenWarn, gr.TaskTokenMax = 1500, 3000
+	if err := h.e.Settings.Set(ctx, settings.KeyGuardrails, gr); err != nil {
+		t.Fatal(err)
+	}
+	var sawWarning atomic.Bool
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		for _, m := range req["messages"].([]any) {
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "far more than a task should need") {
+				sawWarning.Store(true)
+			}
+		}
+		return testutil.Reply{Tools: []llm.ToolCall{tc(fmt.Sprint("c", call), "memory_find", map[string]any{"query": fmt.Sprintf("topic %d with some words to pad the prompt a little", call)})}}
+	}
+	sess, _ := h.e.Sessions.Create(ctx, "Reader", "task", "", 0)
+	res, _ := h.e.Run(ctx, RunSpec{Profile: p, Session: sess, Input: "read everything", Interactive: false})
+	if !strings.HasPrefix(res.Aborted, "token budget") || !sawWarning.Load() {
+		t.Fatalf("a background run must be warned and then stopped: aborted=%q warned=%v tokens=%d", res.Aborted, sawWarning.Load(), res.TokensIn)
+	}
+	sess2, _ := h.e.Sessions.Create(ctx, "Reader", "task", "", 0)
+	res2, _ := h.e.Run(ctx, RunSpec{Profile: p, Session: sess2, Input: "read everything", Interactive: true})
+	if strings.HasPrefix(res2.Aborted, "token budget") {
+		t.Fatalf("a chat with the user is not limited: %q", res2.Aborted)
 	}
 }

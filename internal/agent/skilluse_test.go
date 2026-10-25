@@ -10,6 +10,7 @@ import (
 	"prism/internal/memory"
 	"prism/internal/tasks"
 	"prism/internal/testutil"
+	"prism/internal/tools"
 )
 
 type fakeSkills struct {
@@ -288,5 +289,79 @@ func TestSkillsAreNotPutInFrontOfStaffOrTheEntryAgent(t *testing.T) {
 		if n, c := h.e.skillNote(ctx, &Profile{Name: "X", Role: r}, "find avito listings", 2); c || n != "" {
 			t.Fatalf("role %s must not get a skill: %q", r, n)
 		}
+	}
+}
+
+// An agent that asks the same colleague almost the same thing again is pointed at the earlier task instead of starting another run.
+func TestDelegationGuardRefusesNearRepeats(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	mk := func(input string, status string) tasks.Task {
+		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "Lyra", ToAgent: "Kael", Title: "help for Lyra", Input: input, Depth: 1}, status == "running")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status == "done" {
+			_ = h.e.Tasks.Finish(ctx, tk.ID, tasks.Done, "ok", "", "")
+		}
+		return tk
+	}
+	env := &tools.Env{Agent: "Lyra"}
+	running := mk("Run a Jackett search for Futurama season 11 in 1080p and report the best release with seeders", "running")
+	if err := h.e.delegationGuard(ctx, env, "Kael", "Run a Jackett search for Futurama season 11 in 1080p, report the best release with seeders"); err == nil || !strings.Contains(err.Error(), "already working") {
+		t.Fatalf("an identical request in flight: %v", err)
+	}
+	if err := h.e.delegationGuard(ctx, env, "Kael", "Check the Download Station queue and report the status of every task"); err != nil {
+		t.Fatalf("a different request must pass: %v", err)
+	}
+	if err := h.e.delegationGuard(ctx, &tools.Env{Agent: "Tally"}, "Kael", "Run a Jackett search for Futurama season 11 in 1080p and report the best release with seeders"); err != nil {
+		t.Fatalf("another requester is not a repeat: %v", err)
+	}
+	_ = h.e.Tasks.Finish(ctx, running.ID, tasks.Done, "found it", "", "")
+	if err := h.e.delegationGuard(ctx, env, "Kael", "Run a Jackett search for Futurama season 11 in 1080p and report the best release with seeders"); err == nil || !strings.Contains(err.Error(), "task_status") {
+		t.Fatalf("just answered: %v", err)
+	}
+	_, _ = h.e.DB.Exec(ctx, `UPDATE tasks SET finished_at = now() - interval '10 minutes' WHERE id=$1`, running.ID)
+	if err := h.e.delegationGuard(ctx, env, "Kael", "Run a Jackett search for Futurama season 11 in 1080p and report the best release with seeders"); err != nil {
+		t.Fatalf("after a while it may be asked again: %v", err)
+	}
+}
+
+// A request of the user's own whose answer promises to follow up is reviewed (an ordinary answer is not), and when nothing was set up to
+// follow up, Sentinel is asked to start the watch — whatever the promise-review mode.
+func TestAUserRequestThatPromisesAFollowUpGetsAWatch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	mk := func(result string) tasks.Task {
+		tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: "Atlas", Title: "get emily in paris s05", Input: "get emily in paris s05 from jackett to the NAS"}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tk.Status, tk.Result = tasks.Done, result
+		sess, _ := h.e.Sessions.Create(ctx, "Atlas", "task", "", tk.ID)
+		_ = h.e.Tasks.SetSession(ctx, tk.ID, sess.ID)
+		tk.SessionID = &sess.ID
+		return tk
+	}
+	plain := mk("Season 5 is already on the NAS in /video/series/Emily in Paris.")
+	promised := mk("The download of Emily in Paris S05 is queued (task dbid_1022). I'll keep an eye on the download and let you know when it is done.")
+	if reviewsPromises(plain) || !reviewsPromises(promised) {
+		t.Fatalf("only the answer that promises something is reviewed: plain=%v promised=%v", reviewsPromises(plain), reviewsPromises(promised))
+	}
+	h.fake.Handler = func(req map[string]any, n int) testutil.Reply {
+		return testutil.Reply{Content: `{"commitments":[{"text":"keep an eye on the download and tell the user when it finishes","kind":"watch","status":"needs_trigger","evidence":"no monitor or intent was created","fix":"monitor_start on the download list"}]}`}
+	}
+	h.e.ReviewPromises(ctx, promised)
+	var to, title, input string
+	if err := h.e.DB.QueryRow(ctx, `SELECT to_agent, title, input FROM tasks WHERE from_name=$1 ORDER BY id DESC LIMIT 1`, promiseReviewName).Scan(&to, &title, &input); err != nil {
+		t.Fatalf("no follow-up task was made: %v", err)
+	}
+	if to != "Sentinel" || !strings.Contains(title, "Watch what was promised") || !strings.Contains(input, "dbid_1022") || !strings.Contains(input, "monitor_start") {
+		t.Fatalf("Sentinel should be asked to watch, with the answer's ids: %s | %s | %.200s", to, title, input)
+	}
+	var status string
+	_ = h.e.DB.QueryRow(ctx, `SELECT status FROM promise_reviews ORDER BY id DESC LIMIT 1`).Scan(&status)
+	if status != "fixing" {
+		t.Fatalf("the review is being fixed: %s", status)
 	}
 }

@@ -952,7 +952,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		return out
 	}
 	var recov *recovery
-	if res.Aborted != "" && res.NeedsInput == "" && tctx.Err() == nil && e.autoRetryOn(tctx) {
+	if res.Aborted != "" && res.NeedsInput == "" && tctx.Err() == nil && e.autoRetryOn(tctx) && !strings.HasPrefix(res.Aborted, "token budget") { // a retry would only spend it again
 		var plan recovery
 		res, plan = e.recoverRun(tctx, t, p, sess, res, spec)
 		recov = &plan

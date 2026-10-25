@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"prism/internal/codexapp"
+	"prism/internal/redact"
 	"sort"
 	"strings"
 	"sync"
@@ -125,6 +126,7 @@ func (s *Service) Start(ctx context.Context, providerName, agent, prompt string,
 	if prompt == "" {
 		return nil, errors.New("empty prompt")
 	}
+	prompt, _ = redact.Secrets(prompt) // it leaves the machine: no keys, tokens or passwords
 	if len(prompt) > maxPrompt {
 		return nil, fmt.Errorf("prompt is %d chars; the limit is %d — attach less context", len(prompt), maxPrompt)
 	}
