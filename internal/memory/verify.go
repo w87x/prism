@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +23,14 @@ type VerifyItem struct {
 	Kind string `json:"kind"` // fact | hypothesis
 	Bank string `json:"bank"`
 }
+
+// A claim about the user's own setup — an address on their network, a path on their disk, their device — cannot be settled on the public
+// web. Sent out all the same, "the user runs a Jackett server at http://192.168.88.2:8080" cost one agent 118 searches and 1.5 million
+// tokens looking for that address on the internet.
+var personalClaim = regexp.MustCompile(`(?i)(\b(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}(\.\d{1,3})?\b|\blocalhost\b|\b127\.0\.0\.1\b|\b[\w-]+\.(local|lan|home|internal)\b|(^|\s)(~|/volume\d|/Users/|/home/|/mnt/|[A-Z]:\\)\S*)`)
+
+// WebVerifiable reports whether a claim could be checked against the public web at all.
+func WebVerifiable(text string) bool { return !personalClaim.MatchString(text) }
 
 func triedTag(t time.Time) string { return "vt:" + t.Format("2006-01-02") }
 
@@ -55,7 +64,7 @@ func (s *Service) VerifyQueue(ctx context.Context, max int) ([]VerifyItem, error
 		if err := rows.Scan(&it.ID, &it.Text, &kind, &tags, &it.Bank); err != nil {
 			return nil, err
 		}
-		if recentlyTried(tags, now) || len(out) >= max {
+		if recentlyTried(tags, now) || len(out) >= max || !WebVerifiable(it.Text) {
 			continue
 		}
 		it.Kind = "fact"
@@ -75,6 +84,9 @@ func (s *Service) VerifyItems(ctx context.Context, ids []int64) ([]VerifyItem, e
 		if err != nil || f.ValidTo != nil {
 			continue
 		}
+		if !WebVerifiable(f.Text) {
+			continue
+		}
 		it := VerifyItem{ID: f.ID, Text: f.Text, Kind: "fact", Bank: f.Bank}
 		if f.Kind == "conclusion" {
 			it.Kind = "hypothesis"
@@ -82,7 +94,7 @@ func (s *Service) VerifyItems(ctx context.Context, ids []int64) ([]VerifyItem, e
 		out = append(out, it)
 	}
 	if len(out) == 0 {
-		return nil, errors.New("nothing to verify")
+		return nil, errors.New("nothing to verify (claims about the user's own network, disk or devices cannot be checked on the web)")
 	}
 	return out, nil
 }
@@ -102,7 +114,7 @@ For each one:
    - "confirmed": two or more independent sites you read say the same.
    - "contradicted": reliable sources say it is wrong or outdated (give them).
    - "unclear": you could not settle it.
-3. Do not guess, do not use pages you did not read, and do not spend more than about 3 tool calls per claim.
+3. Do not guess, do not use pages you did not read, and do not spend more than about 3 tool calls per claim. After 6 searches without two usable pages, stop and answer "unclear". A claim about the user's own setup (an address on their network, their files, devices or habits) cannot be found on the public web: answer "unclear" for it at once, with no searches.
 Finish with one line per claim: its id, the verdict, and a few words why.
 
 CLAIMS:

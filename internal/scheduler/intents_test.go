@@ -118,3 +118,24 @@ func TestWatchOnAToolThatChangesThingsIsRefused(t *testing.T) {
 		t.Fatalf("a reading tool is fine: %q %v", out, err)
 	}
 }
+
+// A model copies what it saw ("Lyra (custom)"); the job must be given to the real agent, an unknown agent is refused, and a cron that sets
+// both the day of the month and the weekday is refused (cron runs those on EITHER).
+func TestCronAgentNamesAreNormalisedAndDayFieldsChecked(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	if n, err := s.agentName(ctx, "Atlas (custom)"); err != nil || n != "Atlas" {
+		t.Fatalf("a parenthetical is dropped: %q %v", n, err)
+	}
+	if n, err := s.agentName(ctx, "atlas"); err != nil || n != "Atlas" {
+		t.Fatalf("the case is fixed: %q %v", n, err)
+	}
+	if _, err := s.agentName(ctx, "Nobody"); err == nil {
+		t.Fatal("an unknown agent must be refused")
+	}
+	for expr, bad := range map[string]bool{"0 12 20,21,22 * 1": true, "0 10 15,20,25 * *": false, "0 9 * * 1-5": false, "0 9 1 * *": false, "0 9 1 6 5": true} {
+		if (checkDayFields(expr) != nil) != bad {
+			t.Errorf("%s: refused=%v want %v", expr, checkDayFields(expr) != nil, bad)
+		}
+	}
+}

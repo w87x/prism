@@ -427,6 +427,9 @@ func Propose(ctx context.Context, r *llm.Router, reg *tools.Registry, existing [
 	valid := map[string]bool{}
 	for _, t := range reg.All() {
 		valid[t.Name] = true
+		if !reg.State(t.Name).Enabled { // a tool the user switched off is not worth an agent (one agent was made for six disabled RSS tools)
+			continue
+		}
 		// MCP tools are registered as Deferred (their schemas load on demand), but a specialist can perfectly
 		// well be given one in its toolset — leaving them out meant the planner never proposed any.
 		if t.Deferred && strings.HasPrefix(t.Category, "mcp:") {

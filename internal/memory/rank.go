@@ -78,7 +78,7 @@ func (s *Service) rerank(ctx context.Context, query string, cands []cand, sc []s
 		return sc
 	}
 	var parsed struct {
-		Order []int64 `json:"order"`
+		Order IDs `json:"order"`
 	}
 	if json.Unmarshal([]byte(llm.ExtractJSON(out)), &parsed) != nil || len(parsed.Order) == 0 {
 		return sc

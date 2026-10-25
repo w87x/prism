@@ -156,7 +156,7 @@ func (p *Predicate) Validate() error {
 			}
 		}
 		if p.Expect == "" && !p.Changed {
-			return errors.New("tool predicate needs expect (a regex meaning 'done') or changed=true")
+			return errors.New(`a tool check needs to know when it is done: pass expect (a regex on the tool's output or on "field", meaning "done", e.g. "finished|seeding") or changed=true (report whenever the output changes) — e.g. {"kind":"tool","tool":"…","args":"{…}","field":"data.tasks.0.status","expect":"finished"}`)
 		}
 		if p.Expect != "" {
 			if _, err := regexp.Compile(p.Expect); err != nil {

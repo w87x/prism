@@ -154,7 +154,7 @@ func (s *Service) Reflect(ctx context.Context, bankID int64, force bool, minNew 
 			Action     string  `json:"action"`
 			ID         *int64  `json:"id"`
 			Text       string  `json:"text"`
-			Evidence   []int64 `json:"evidence"`
+			Evidence   IDs     `json:"evidence"`
 			Confidence float64 `json:"confidence"`
 		} `json:"changes"`
 	}

@@ -274,3 +274,19 @@ func TestDeletingAnAgentDropsWhatWasLearnedAboutIt(t *testing.T) {
 		t.Fatalf("%d leftovers of a deleted agent", n)
 	}
 }
+
+// Skills are the specialists' procedures: the staff and the entry agent get none put in front of their tasks.
+func TestSkillsAreNotPutInFrontOfStaffOrTheEntryAgent(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.Skills = &fakeSkills{list: []SkillMatch{{Name: "avito-search", Description: "avito listings", Body: "steps"}}}
+	worker := &Profile{Name: "Scout", Role: RoleWorker}
+	if n, c := h.e.skillNote(ctx, worker, "find avito listings", 1); !c || n == "" {
+		t.Fatalf("a specialist gets it: %q", n)
+	}
+	for _, r := range []string{RoleMaint, RoleEntry} {
+		if n, c := h.e.skillNote(ctx, &Profile{Name: "X", Role: r}, "find avito listings", 2); c || n != "" {
+			t.Fatalf("role %s must not get a skill: %q", r, n)
+		}
+	}
+}

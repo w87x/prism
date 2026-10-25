@@ -641,10 +641,10 @@ func RegisterTools(reg *tools.Registry, s *Service, defaults Resolver) {
 				tools.Str("description", "what the new bank is about"), tools.IntList("fact_ids", "facts to move")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
-					Bank        string  `json:"bank"`
-					Name        string  `json:"name"`
-					Description string  `json:"description"`
-					FactIDs     []int64 `json:"fact_ids"`
+					Bank        string `json:"bank"`
+					Name        string `json:"name"`
+					Description string `json:"description"`
+					FactIDs     IDs    `json:"fact_ids"`
 				}](raw)
 				if err != nil {
 					return "", err

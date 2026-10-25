@@ -261,9 +261,9 @@ func (s *Service) chainClosure(ctx context.Context, bankID int64, ids []int64) (
 
 // SplitGroup is a proposed sub-topic of a bank.
 type SplitGroup struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	FactIDs     []int64 `json:"fact_ids"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	FactIDs     IDs    `json:"fact_ids"`
 }
 
 const splitPrompt = `You organise a memory bank that has grown too broad. Below are its facts (id: text). Group them into 2-4 coherent sub-topics that would each make a sensible bank of their own, with a short name and one-line description. Facts that fit no group stay in the original bank: leave them out. Every group needs at least 3 facts, and a fact belongs to at most one group. If the bank is really one topic, return an empty list.

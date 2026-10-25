@@ -623,7 +623,7 @@ func (e *Engine) toolAskUser() *tools.Tool {
 			if len(items) == 0 {
 				o := tools.QOptions(a.Options)
 				if strings.TrimSpace(a.Question) == "" {
-					return "", errors.New("ask_user needs a question")
+					return "", errors.New(`ask_user needs a question: call it as {"question":"…","options":["…","…"]} (or "questions" for a short form)`)
 				}
 				items = []tools.QItem{{Text: strings.TrimSpace(a.Question), Kind: tools.QKind("", o, a.Multiple), Options: o}}
 			}

@@ -226,7 +226,7 @@ func (s *Service) Synthesize(ctx context.Context, level int, force bool, minNew 
 				ID         *int64  `json:"id"`
 				Type       string  `json:"type"`
 				Text       string  `json:"text"`
-				Evidence   []int64 `json:"evidence"`
+				Evidence   IDs     `json:"evidence"`
 				Confidence float64 `json:"confidence"`
 			} `json:"items"`
 		}

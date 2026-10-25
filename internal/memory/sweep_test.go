@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -175,5 +176,45 @@ func TestMemoryFindInATaskDemotesFactsAboutOtherNamedThings(t *testing.T) {
 	}
 	if i, j := strings.Index(out, "seeder counts"), strings.Index(out, "Call of Duty"); i < 0 || j < 0 || i > j {
 		t.Fatalf("the fitting fact should come first:\n%s", out)
+	}
+}
+
+// A claim about the user's own network or disk cannot be checked on the public web.
+func TestWebVerifiableSkipsClaimsAboutTheUsersOwnSetup(t *testing.T) {
+	for text, want := range map[string]bool{
+		"User runs a Jackett server at http://192.168.88.2:8080 for torrent indexing.": false,
+		"The NAS shares live under /volume1/video/series":                              false,
+		"Home Assistant runs on homeassistant.local":                                   false,
+		"Tailscale listens on 10.0.0.4":                                                false,
+		"The iPhone 17 Pro was announced in September 2025":                            true,
+		"Call of Duty: Modern Warfare 4 releases on 23 October 2026":                   true,
+		"Jackett is a torrent indexer proxy":                                           true,
+	} {
+		if WebVerifiable(text) != want {
+			t.Errorf("%q: verifiable=%v want %v", text, WebVerifiable(text), want)
+		}
+	}
+}
+
+// A model writes fact ids as numbers, strings, "#12" or "fact 12": all are ids, and none may turn an analysis answer into a failure.
+func TestIDsAcceptsTheWaysAModelWritesThem(t *testing.T) {
+	var v struct {
+		Evidence IDs `json:"evidence"`
+		One      IDs `json:"one"`
+	}
+	if err := json.Unmarshal([]byte(`{"evidence":[12,"34","#56","fact 78",null,{"x":1}],"one":"9"}`), &v); err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{12, 34, 56, 78}
+	if len(v.Evidence) != 4 {
+		t.Fatalf("evidence: %v", v.Evidence)
+	}
+	for i, w := range want {
+		if v.Evidence[i] != w {
+			t.Fatalf("evidence: %v", v.Evidence)
+		}
+	}
+	if len(v.One) != 1 || v.One[0] != 9 {
+		t.Fatalf("a single string is a list of one: %v", v.One)
 	}
 }

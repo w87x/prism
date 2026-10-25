@@ -482,3 +482,82 @@ func TestRemoveTopicDeletesForgetsAndExplainsRefusals(t *testing.T) {
 		t.Fatal("a group the bot is not set up for is refused, not guessed at")
 	}
 }
+
+// A topic deleted in Telegram behind PRISM's back: the send fails with "thread not found" every morning and the message fell back to the
+// DM. It is forgotten, made again and the message sent once more; and a model's "None" is no topic at all.
+func TestDeliverRecoversFromADeletedTopicAndIgnoresNone(t *testing.T) {
+	d := testutil.DB(t)
+	fakeLLM := testutil.NewFakeLLM(t)
+	r, st := testutil.Setup(t, d, fakeLLM)
+	_ = r
+	ctx := context.Background()
+	var mu sync.Mutex
+	var created []string
+	var sent []int64 // thread ids that got a message
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		var p map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		w.Header().Set("Content-Type", "application/json")
+		switch method {
+		case "getMe":
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"username": "prism_bot"}})
+		case "getUpdates":
+			time.Sleep(100 * time.Millisecond)
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": []any{}})
+		case "createForumTopic":
+			mu.Lock()
+			created = append(created, p["name"].(string))
+			id := 500 + len(created)
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_thread_id": id}})
+		case "sendMessage":
+			th := int64(0)
+			if v, ok := p["message_thread_id"].(float64); ok {
+				th = int64(v)
+			}
+			if th == 7 { // the stale topic
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: message thread not found"})
+				return
+			}
+			mu.Lock()
+			sent = append(sent, th)
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+		}
+	}))
+	defer srv.Close()
+	_ = st.Set(ctx, settings.KeyTelegram, settings.Telegram{Enabled: true, Token: "TOKEN", OwnerID: 5, GroupID: -100})
+	bot := &Bot{Settings: st, DB: d.Pool, APIBase: srv.URL, Engine: agent.NewEngine(agent.Deps{DB: d.Pool, LLM: r, Tools: tools.NewRegistry(d.Pool), Profiles: agent.NewProfileStore(d.Pool), Sessions: agent.NewSessionStore(d.Pool), Tasks: tasks.NewStore(d.Pool), Settings: st})}
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go bot.Run(rctx)
+	waitFor(t, "connection", func() bool { s, _ := bot.State(); return s == "ok" })
+	if _, err := d.Exec(ctx, `INSERT INTO telegram_topics(chat_id,thread_id,name,purpose,created_by) VALUES(-100,7,'Briefings','','Oneiros')`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := bot.Deliver(ctx, agent.Notice{Agent: "Oneiros", Text: "good morning", Topic: "Briefings"})
+	if err != nil || !strings.Contains(out, "Delivered to the Telegram topic") {
+		t.Fatalf("the message must reach a re-created topic, not the DM: %q %v", out, err)
+	}
+	mu.Lock()
+	got, made := append([]int64(nil), sent...), append([]string(nil), created...)
+	mu.Unlock()
+	if len(made) != 1 || made[0] != "Briefings" || len(got) != 1 || got[0] != 501 {
+		t.Fatalf("topic made again (%v) and the message sent there once (%v)", made, got)
+	}
+	var stale int
+	_ = d.QueryRow(ctx, `SELECT count(*) FROM telegram_topics WHERE thread_id=7`).Scan(&stale)
+	if stale != 0 {
+		t.Fatal("the dead topic must be forgotten")
+	}
+	_, _ = bot.Deliver(ctx, agent.Notice{Agent: "Oneiros", Text: "no topic wanted", Topic: "None"})
+	mu.Lock()
+	made = append([]string(nil), created...)
+	mu.Unlock()
+	if len(made) != 1 {
+		t.Fatalf("a topic called None must never be made: %v", made)
+	}
+}

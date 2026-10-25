@@ -23,8 +23,8 @@ Answer JSON only: {"groups":[{"name":"...","ids":[1,2,3]}]}`
 
 // MergeGroup is a proposed (or applied) group of banks that are the same topic.
 type MergeGroup struct {
-	Name string  `json:"name"`
-	IDs  []int64 `json:"ids"`
+	Name string `json:"name"`
+	IDs  IDs    `json:"ids"`
 }
 
 // SuggestBankMerges asks the fast model which active banks of one kind (project or domain) are the same

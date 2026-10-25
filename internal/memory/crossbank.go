@@ -140,7 +140,7 @@ func (s *Service) AnalyzeAcross(ctx context.Context, force bool, minNew int) (Cr
 		} `json:"pairs"`
 		Connections []struct {
 			Text       string  `json:"text"`
-			Evidence   []int64 `json:"evidence"`
+			Evidence   IDs     `json:"evidence"`
 			Confidence float64 `json:"confidence"`
 		} `json:"connections"`
 	}

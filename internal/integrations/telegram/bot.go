@@ -689,15 +689,28 @@ func (b *Bot) Deliver(ctx context.Context, n agent.Notice) (string, error) {
 	}
 	text := fmt.Sprintf("%s**%s:** %s", prefix, n.Agent, n.Text)
 	why := ""
+	switch strings.ToLower(strings.TrimSpace(n.Topic)) { // a model writing "None" for "no topic" must not get a topic called None
+	case "none", "null", "nil", "n/a", "-":
+		n.Topic = ""
+	}
 	if n.Topic != "" && c.GroupID != 0 {
 		thread, err := b.topic(ctx, c, n.Topic, n.Agent, n.Text)
 		if err == nil {
-			if _, err := b.send(ctx, c.Token, c.GroupID, thread, text, nil); err == nil {
+			_, serr := b.send(ctx, c.Token, c.GroupID, thread, text, nil)
+			if serr != nil && strings.Contains(strings.ToLower(serr.Error()), "thread not found") {
+				// the topic was deleted in Telegram behind PRISM's back: forget it, make it again, and send once more
+				_, _ = b.DB.Exec(ctx, `DELETE FROM telegram_topics WHERE chat_id=$1 AND thread_id=$2`, c.GroupID, thread)
+				if t2, terr := b.topic(ctx, c, n.Topic, n.Agent, n.Text); terr == nil {
+					thread = t2
+					_, serr = b.send(ctx, c.Token, c.GroupID, thread, text, nil)
+				}
+			}
+			if serr == nil {
 				b.Engine.NoteToChat(ctx, agent.ChatKey("telegram", strconv.FormatInt(thread, 10)), n.Agent, n.Text)
 				return fmt.Sprintf("Delivered to the Telegram topic %q.", n.Topic), nil
 			} else {
-				why = fmt.Sprintf("could not post in topic %q: %v", n.Topic, err)
-				b.logf("warn", "topic send failed: %v", err)
+				why = fmt.Sprintf("could not post in topic %q: %v", n.Topic, serr)
+				b.logf("warn", "topic send failed: %v", serr)
 			}
 		} else {
 			why = fmt.Sprintf("could not open topic %q: %v", n.Topic, err)

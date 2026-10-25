@@ -136,8 +136,8 @@ func (s *Service) RefreshModel(ctx context.Context, id int64) (*Model, error) {
 		fmt.Fprintf(&sb, "%d [%s]%s: %s\n", f.ID, f.CreatedAt.Format("2006-01-02"), kind, f.Text)
 	}
 	var parsed struct {
-		Answer  string  `json:"answer"`
-		Sources []int64 `json:"sources"`
+		Answer  string `json:"answer"`
+		Sources IDs    `json:"sources"`
 	}
 	if err := s.llm.CompleteJSON(ctx, role, modelPrompt, s.guidance(ctx)+sb.String(), &parsed); err != nil {
 		return nil, fmt.Errorf("model refresh: %w", err)

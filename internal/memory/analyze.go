@@ -53,7 +53,7 @@ type analysisParsed struct {
 		ID         *int64  `json:"id"`
 		Type       string  `json:"type"`
 		Text       string  `json:"text"`
-		Evidence   []int64 `json:"evidence"`
+		Evidence   IDs     `json:"evidence"`
 		Confidence float64 `json:"confidence"`
 		Importance int     `json:"importance"`
 	} `json:"insights"`
@@ -63,8 +63,8 @@ type analysisParsed struct {
 		Note string `json:"note"`
 	} `json:"contradictions"`
 	Duplicates []struct {
-		Keep int64   `json:"keep"`
-		Drop []int64 `json:"drop"`
+		Keep int64 `json:"keep"`
+		Drop IDs   `json:"drop"`
 	} `json:"duplicates"`
 	Card string `json:"card"`
 }

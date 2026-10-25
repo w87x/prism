@@ -162,6 +162,13 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				if a.Agent == "" {
 					a.Agent = env.Agent
 				}
+				var aerr error
+				if a.Agent, aerr = s.agentName(ctx, a.Agent); aerr != nil {
+					return "", aerr
+				}
+				if err := checkDayFields(a.Expr); err != nil {
+					return "", err
+				}
 				if cs, cerr := s.Crons(ctx); cerr == nil {
 					norm := func(x string) string { return strings.ToLower(strings.Join(strings.Fields(x), " ")) }
 					for _, c := range cs {
@@ -229,6 +236,18 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				}
 				if err := s.mayChangeCron(ctx, env, a.ID); err != nil {
 					return "", err
+				}
+				if a.Agent != nil {
+					name, aerr := s.agentName(ctx, *a.Agent)
+					if aerr != nil {
+						return "", aerr
+					}
+					a.Agent = &name
+				}
+				if a.Expr != nil {
+					if err := checkDayFields(*a.Expr); err != nil {
+						return "", err
+					}
 				}
 				c, err := s.UpdateCron(ctx, a.ID, CronPatch{Name: a.Name, Expr: a.Expr, Prompt: a.Prompt, Agent: a.Agent, Enabled: a.Enabled})
 				if err != nil {

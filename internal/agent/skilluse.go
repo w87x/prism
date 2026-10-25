@@ -18,6 +18,7 @@ import (
 const (
 	skillBodyMax      = 2200
 	skillAfterSteps   = 6 // a task needing this many model turns was worth writing down
+	skillMaxTokens    = 500000
 	skillLearnPerDay  = 4
 	skillLearnByAgent = 6 // hours between two skill requests for one agent
 )
@@ -46,7 +47,9 @@ func (e *Engine) skillAllow(ctx context.Context, p *Profile) func(string) bool {
 // skillNote returns the note appended to a task's input: the procedure of the best-fitting saved skill, plus the names of others that fit.
 // It also says whether any skill matched, so a task that already had one is not offered to Daedalus as new ground.
 func (e *Engine) skillNote(ctx context.Context, p *Profile, input string, taskID int64) (string, bool) {
-	if e.Skills == nil || p.Name == "Daedalus" {
+	// skills are the procedures of the specialists; the staff (briefings, memory, skills, evolution) and the entry agent, which delegates,
+	// have their own jobs — a skill about Avito listings was being put in front of Oneiros's dream and Atlas's bookmarking
+	if e.Skills == nil || p.Name == "Daedalus" || p.Role == RoleMaint || p.Role == RoleEntry {
 		return "", false
 	}
 	ms := e.Skills.Match(ctx, input, 3, e.skillAllow(ctx, p))
@@ -78,6 +81,10 @@ func (e *Engine) maybeLearnSkill(ctx context.Context, t tasks.Task, p *Profile, 
 		return
 	}
 	if _, declined := notCapable(res.Text); declined {
+		return
+	}
+	// a run that burned through the budget (a runaway search loop) is no model of how to do the job
+	if res.TokensIn > skillMaxTokens || res.Extensions > 0 {
 		return
 	}
 	var perDay, perAgent int

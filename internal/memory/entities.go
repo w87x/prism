@@ -104,8 +104,8 @@ func (s *Service) dedupeEntities(ctx context.Context, bankID int64) int {
 	}
 	var parsed struct {
 		Merges []struct {
-			Keep int64   `json:"keep"`
-			Drop []int64 `json:"drop"`
+			Keep int64 `json:"keep"`
+			Drop IDs   `json:"drop"`
 		} `json:"merges"`
 	}
 	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "entities", "fast"), entityDedupPrompt, sb.String(), &parsed); err != nil {
@@ -247,16 +247,16 @@ func (s *Service) ExtractEntities(ctx context.Context, bankID int64, force bool)
 	}
 	var parsed struct {
 		Entities []struct {
-			Name  string  `json:"name"`
-			Kind  string  `json:"kind"`
-			Facts []int64 `json:"facts"`
+			Name  string `json:"name"`
+			Kind  string `json:"kind"`
+			Facts IDs    `json:"facts"`
 		} `json:"entities"`
 		Relations []struct {
-			A     string  `json:"a"`
-			B     string  `json:"b"`
-			Kind  string  `json:"kind"`
-			Label string  `json:"label"`
-			Facts []int64 `json:"facts"`
+			A     string `json:"a"`
+			B     string `json:"b"`
+			Kind  string `json:"kind"`
+			Label string `json:"label"`
+			Facts IDs    `json:"facts"`
 		} `json:"relations"`
 	}
 	if err := s.llm.CompleteJSON(ctx, s.llm.ActionRef(ctx, "entities", "fast"), entityPrompt, s.guidance(ctx)+"Bank: "+b.Label()+"\n\n"+sb.String(), &parsed); err != nil {
