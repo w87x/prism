@@ -413,6 +413,7 @@ export async function loadNotifs() {
 export async function answerAsk(id, answer) {
   const r = await call('ask.answer', { id, answer });
   if (r) S.asks = S.asks.filter((a) => a.id !== id);
+  return r;
 }
 
 export function init() {

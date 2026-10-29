@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { S, call, toast, clock, stamp, setActivityMode } from '../lib/store.svelte.js';
+  import { S, call, toast, clock, stamp, setActivityMode, answerAsk } from '../lib/store.svelte.js';
   import ChatList from '../lib/ChatList.svelte';
   import ChatHeader from '../lib/ChatHeader.svelte';
   import AskCard from '../lib/AskCard.svelte';
@@ -161,6 +161,12 @@
     stick = true;
     const sent = atts, sentDocs = docs, sentPaths = paths;
     let r;
+    // an agent is waiting on one question and the answer was typed here, not in its form: that is the answer
+    const open = S.asks.filter((x) => x.kind !== 'confirm');
+    if (open.length === 1 && t && !t.startsWith('/') && !sent.length && !sentDocs.length && !sentPaths.length) {
+      if (await answerAsk(open[0].id, t)) { sending = false; ta?.focus(); return; }
+      S.asks = S.asks.filter((x) => x.id !== open[0].id); // no longer pending (answered elsewhere, or the run ended): drop the stale form and send it as a message
+    }
     if (t.startsWith('/') && !sent.length && !sentDocs.length && !sentPaths.length) {
       r = await call('chat.command', { text: t, topic });
       if (r === false) r = await call('chat.send', { text: t, topic }); // not a command: an ordinary message
