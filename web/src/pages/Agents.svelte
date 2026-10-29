@@ -246,10 +246,10 @@
     return [a, m, b];
   };
   // a link between two agents (asks, blocked-on-you): a curve, or on the board a routed trace; q carries what linkAt needs
-  function linkPath(ctx, a, b) {
+  function linkPath(ctx, a, b, planned) {
     if (!board()) return arcPath(ctx, a, b);
-    const pts = traceAlt(a, b);
-    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.lineTo(pts[2].x, pts[2].y); ctx.lineJoin = 'round';
+    const pts = planned || traceAlt(a, b);
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y); ctx.lineJoin = 'round';
     return { pts };
   }
   const linkAt = (a, q, b, u) => (q.pts ? along(q.pts, u) : bez(a, q, b, u));
@@ -281,9 +281,86 @@
   };
   const routeTo = (atlas, n) => {
     const hb = hubbed() ? hubOf(n.orbit) : null;
+    if (board() && lanes.has('m:' + n.id)) { const m = lanes.get('m:' + n.id), t = hb && lanes.get('t:' + hb.key); return t ? [...t, ...m] : m; }
     if (board()) return hb ? [atlas, ...tracePts(atlas, hb).slice(1, -1), hb, ...tracePts(hb, n).slice(1, -1), n] : [atlas, ...tracePts(atlas, n).slice(1, -1), n];
     return hb ? [atlas, hb, n] : [atlas, n];
   };
+  // Lanes on the board. Every connection is a chain of legs (Atlas → hub → agent); a message between colleagues runs the
+  // same legs as the spokes it would take through Atlas, so it lies parallel to them instead of cutting across as an arc.
+  // Routes that would lie on top of one another get their own lane: the whole route is moved sideways by a multiple of
+  // LANE (its ends land on different spots of the pad, like pins), so no two traces ever merge.
+  const LANE = 3.4;
+  const upLegs = (n, atlas) => {
+    if (n === atlas) return [];
+    const hb = hubbed() ? hubOf(n.orbit) : null;
+    return hb ? [[hb, n], [atlas, hb]] : [[atlas, n]];
+  };
+  function askLegs(a, b, atlas) {
+    const ua = upLegs(a, atlas), ub = upLegs(b, atlas);
+    while (ua.length && ub.length && ua[ua.length - 1][0] === ub[ub.length - 1][0] && ua[ua.length - 1][1] === ub[ub.length - 1][1]) { ua.pop(); ub.pop(); }
+    return [...ua.map(([p, c]) => ({ p, c, rev: true })), ...ub.reverse().map(([p, c]) => ({ p, c, rev: false }))];
+  }
+  const legsToPts = (legs) => {
+    const out = [];
+    for (const { p, c, rev } of legs) {
+      const seg = tracePts(p, c);
+      if (rev) seg.reverse();
+      for (const q of seg) { const l = out[out.length - 1]; if (!l || Math.hypot(l.x - q.x, l.y - q.y) > 0.5) out.push({ x: q.x, y: q.y }); }
+    }
+    return out;
+  };
+  const segsOf = (pts) => {
+    const out = [];
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y, l = Math.hypot(dx, dy);
+      if (l > 0.5) out.push({ x: pts[i - 1].x, y: pts[i - 1].y, ux: dx / l, uy: dy / l, l });
+    }
+    return out;
+  };
+  const clash = (sa, sb) => {
+    for (const a of sa) for (const b of sb) {
+      if (Math.abs(a.ux * b.uy - a.uy * b.ux) > 0.03) continue; // not parallel
+      const rx = b.x - a.x, ry = b.y - a.y;
+      if (Math.abs(rx * a.uy - ry * a.ux) >= LANE * 0.9) continue; // far enough apart sideways
+      const s0 = rx * a.ux + ry * a.uy, s1 = s0 + (b.ux * a.ux + b.uy * a.uy) * b.l; // b's extent along a
+      if (Math.min(a.l, Math.max(s0, s1)) - Math.max(0, Math.min(s0, s1)) > 3) return true;
+    }
+    return false;
+  };
+  const shiftPoly = (pts, d) => {
+    if (!d) return pts;
+    const sg = segsOf(pts), out = [];
+    if (!sg.length) return pts;
+    const nrm = (s) => ({ x: -s.uy, y: s.ux });
+    out.push({ x: pts[0].x + nrm(sg[0]).x * d, y: pts[0].y + nrm(sg[0]).y * d });
+    for (let i = 1; i < sg.length; i++) {
+      const n1 = nrm(sg[i - 1]), n2 = nrm(sg[i]), k = d / Math.max(0.35, 1 + n1.x * n2.x + n1.y * n2.y);
+      out.push({ x: sg[i].x + (n1.x + n2.x) * k, y: sg[i].y + (n1.y + n2.y) * k });
+    }
+    const last = sg[sg.length - 1], e = pts[pts.length - 1];
+    out.push({ x: e.x + nrm(last).x * d, y: e.y + nrm(last).y * d });
+    return out;
+  };
+  const laneSeq = (i) => (i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2);
+  let lanes = new Map(); // key → the routed points, for this frame
+  function planLanes(atlas, asks, blocked) {
+    const defs = [];
+    if (atlas) {
+      if (hubbed()) for (const hb of hubs) defs.push({ key: 't:' + hb.key, legs: [{ p: atlas, c: hb }] });
+      for (const n of nodes) if (n !== atlas) defs.push({ key: 'm:' + n.id, legs: [{ p: (hubbed() && hubOf(n.orbit)) || atlas, c: n }] });
+      blocked.forEach((n, i) => defs.push({ key: 'b:' + i, legs: askLegs(n, atlas, atlas) }));
+      asks.forEach((k, i) => defs.push({ key: 'a:' + i, legs: askLegs(k.a, k.b, atlas) }));
+    }
+    for (const d of defs) { d.pts = legsToPts(d.legs); d.segs = segsOf(d.pts); d.lane = 0; d.at = []; }
+    defs.forEach((d, i) => {
+      const used = new Set();
+      for (let j = 0; j < i; j++) if (clash(d.segs, defs[j].segs)) used.add(defs[j].lane);
+      let k = 0; while (used.has(laneSeq(k))) k++;
+      d.lane = laneSeq(k);
+    });
+    lanes = new Map(defs.map((d) => [d.key, shiftPoly(d.pts, d.lane * LANE)]));
+  }
+
   // the bare board: a dotted grid, the board edge and four mounting holes (drawn in scene coordinates, so it pans and zooms)
   function drawBoard(ctx) {
     const step = zoom.s < 0.7 ? 48 : 24, x0 = -zoom.x / zoom.s, y0 = -zoom.y / zoom.s, x1 = (w - zoom.x) / zoom.s, y1 = (h - zoom.y) / zoom.s;
@@ -291,6 +368,7 @@
     for (let x = Math.floor(x0 / step) * step; x <= x1; x += step) for (let y = Math.floor(y0 / step) * step; y <= y1; y += step) ctx.fillRect(x - 0.7, y - 0.7, 1.4, 1.4);
     ctx.globalAlpha = 1; ctx.strokeStyle = colors.dim; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.roundRect ? ctx.roundRect(5, 5, w - 10, h - 10, 10) : ctx.rect(5, 5, w - 10, h - 10); ctx.stroke();
+    ctx.font = '9px monospace'; ctx.fillStyle = colors.mute; ctx.globalAlpha = 0.7; ctx.textAlign = 'left'; ctx.fillText('PRISM  REV A  ·  ' + nodes.length + ' AGENTS', 36, h - 14); ctx.globalAlpha = 1; // silkscreen
     for (const [hx, hy] of [[20, 20], [w - 20, 20], [20, h - 20], [w - 20, h - 20]]) {
       ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2); ctx.strokeStyle = colors.dim; ctx.lineWidth = 1.2; ctx.stroke();
       ctx.beginPath(); ctx.arc(hx, hy, 3.5, 0, Math.PI * 2); ctx.fillStyle = colors.bg; ctx.fill(); ctx.stroke();
@@ -332,48 +410,51 @@
     if (board()) drawBoard(ctx);
 
     const byRun = Object.fromEntries(runs.map((r) => [r.id, r.agent]));
+    // requests between colleagues (amber, a dot travelling toward the one asked; lingering ones fade) and agents blocked on you
+    const asks = [];
+    for (const r of runs) { if (r.kind !== 'ask' || r.done || !byRun[r.parent_run]) continue; const a = nodeByName(byRun[r.parent_run]), b = nodeByName(r.agent); if (a && b) asks.push({ a, b, live: true, ok: true }); }
+    for (const tr of S.askTrail) { const a = nodeByName(tr.from), b = nodeByName(tr.to); if (a && b) asks.push({ a, b, live: false, ok: tr.ok }); }
+    const blockedNodes = S.asks.map((x) => nodeByName(x.agent)).filter((n) => n && atlas && n !== atlas);
+    if (board()) planLanes(atlas, asks, blockedNodes);
     // spokes from Atlas; live ones (delegation in progress) run bright and dashed. In the stars layout they go
     // Atlas → group hub → member instead, and the trunk to a hub lights up when any member is being delegated to.
     const isLive = (n) => runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
-    const stroke = (x1, y1, x2, y2, live, heat, tone) => {
+    const stroke = (x1, y1, x2, y2, live, heat, tone, pts) => {
       ctx.beginPath(); ctx.moveTo(x1, y1);
-      if (board()) { const [, m] = tracePts({ x: x1, y: y1 }, { x: x2, y: y2 }); ctx.lineTo(m.x, m.y); }
-      ctx.lineTo(x2, y2);
+      if (board() && pts) { for (const q of pts) ctx.lineTo(q.x, q.y); }
+      else ctx.lineTo(x2, y2);
+      if (board() && pts) { ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = (live ? 2.4 : 1.6 + heat * 0.8) + 2.4; ctx.strokeStyle = colors.bg; ctx.globalAlpha = 0.9; ctx.setLineDash([]); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x1, y1); for (const q of pts) ctx.lineTo(q.x, q.y); } // clearance halo round the copper
       ctx.lineJoin = 'round'; ctx.lineWidth = live ? 2.4 : (board() ? 1.6 : 1) + heat * 0.8; ctx.strokeStyle = live ? colors.fg : tone;
       ctx.globalAlpha = live ? 1 : 0.4 + heat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
-      ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.stroke(); ctx.shadowBlur = 0; ctx.lineCap = 'butt';
     };
     if (atlas && hubbed()) {
       for (const hb of hubs) {
         const members = nodes.filter((n) => n.orbit === hb.key);
         const live = members.some(isLive), heat = Math.min(1, members.reduce((a, n) => a + (n.a.role === 'maint' ? 0 : heatOf(n.a.name)), 0) / 2);
-        stroke(atlas.x, atlas.y, hb.x, hb.y, live, heat, hb.key === 'staff' ? colors.maint : colors.line);
-        for (const n of members) stroke(hb.x, hb.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line);
+        stroke(atlas.x, atlas.y, hb.x, hb.y, live, heat, hb.key === 'staff' ? colors.maint : colors.line, lanes.get('t:' + hb.key));
+        for (const n of members) stroke(hb.x, hb.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line, lanes.get('m:' + n.id));
       }
     } else if (atlas) for (const n of nodes) {
       if (n === atlas) continue;
       // a spoke this agent is actually delegated to a lot reads thicker and more solid even when quiet —
       // "how much does Atlas actually route here" instead of every spoke looking equally important.
-      stroke(atlas.x, atlas.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line);
+      stroke(atlas.x, atlas.y, n.x, n.y, isLive(n), n.a.role === 'maint' ? 0 : heatOf(n.a.name), n.a.role === 'maint' ? colors.maint : colors.line, lanes.get('m:' + n.id));
     }
     if (hubbed()) drawHubs(ctx, t);
     ctx.setLineDash([]); ctx.globalAlpha = 1;
 
     // agents blocked on the user: steady red arc to Atlas
-    for (const x of S.asks) { const n = nodeByName(x.agent); if (!n || !atlas || n === atlas) continue;
-      linkPath(ctx, n, atlas); ctx.strokeStyle = colors.err; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t / 220); ctx.shadowColor = colors.err; ctx.shadowBlur = 5; ctx.stroke(); ctx.shadowBlur = 0; ctx.globalAlpha = 1; }
+    blockedNodes.forEach((n, i) => {
+      linkPath(ctx, n, atlas, lanes.get('b:' + i)); ctx.strokeStyle = colors.err; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t / 220); ctx.shadowColor = colors.err; ctx.shadowBlur = 5; ctx.stroke(); ctx.shadowBlur = 0; ctx.globalAlpha = 1; });
 
-    // requests between colleagues: amber arcs, dot travelling toward the one asked; lingering ones fade
-    const asks = [];
-    for (const r of runs) { if (r.kind !== 'ask' || r.done || !byRun[r.parent_run]) continue; const a = nodeByName(byRun[r.parent_run]), b = nodeByName(r.agent); if (a && b) asks.push({ a, b, live: true, ok: true }); }
-    for (const tr of S.askTrail) { const a = nodeByName(tr.from), b = nodeByName(tr.to); if (a && b) asks.push({ a, b, live: false, ok: tr.ok }); }
-    for (const k of asks) {
-      const q = linkPath(ctx, k.a, k.b);
+    asks.forEach((k, i) => {
+      const q = linkPath(ctx, k.a, k.b, lanes.get('a:' + i));
       ctx.strokeStyle = k.live || k.ok ? colors.attn : colors.err; ctx.lineWidth = 1.6; ctx.setLineDash(k.live ? [2, 5] : []); ctx.lineDashOffset = -t / 50; ctx.globalAlpha = k.live ? 0.95 : 0.6;
       ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 4; ctx.stroke(); ctx.shadowBlur = 0; ctx.setLineDash([]); ctx.globalAlpha = 1;
       if (k.live) { const p = linkAt(k.a, q, k.b, (t / 1500) % 1); ctx.fillStyle = colors.attn; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill(); }
-    }
+    });
 
     // the freshest live run of each agent, for the thinking overlay
     const byAgent = new Map();
@@ -409,6 +490,7 @@
       if (active || blocked) n.busyAt = Date.now();
       const wantLabel = hovered || selected || active || blocked || a.role === 'entry' || Date.now() - (n.busyAt || 0) < 3500;
       n.lab = (n.lab || 0) + ((wantLabel ? 1 : 0) - (n.lab || 0)) * 0.14;
+      if (board() && !compact() && a.role !== 'entry') { ctx.font = '8px monospace'; ctx.fillStyle = colors.mute; ctx.globalAlpha = match(a) ? 0.6 : 0.15; ctx.fillText((a.role === 'maint' ? 'S' : 'U') + (nodes.indexOf(n) + 1), r + 10, -r + 2); ctx.globalAlpha = match(a) ? 1 : 0.2; } // reference designator
       if (n.lab < 0.03) { ctx.restore(); continue; }
       ctx.globalAlpha *= n.lab;
       ctx.font = '700 11px monospace'; ctx.fillStyle = !a.enabled ? colors.disabled : a.role === 'maint' ? colors.accentHi : colors.hi; ctx.fillText(a.name, 0, r + 14);
