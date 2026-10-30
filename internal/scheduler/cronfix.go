@@ -37,3 +37,33 @@ func checkDayFields(expr string) error {
 	}
 	return nil
 }
+
+// warnDayFields tells the user, once per schedule, about an existing one that sets both day fields (made before they were refused): it
+// runs on more days than its name says. It is not rewritten — which of the two was meant is theirs to say.
+func (s *Service) warnDayFields(ctx context.Context) {
+	if s.Notify == nil || s.Settings == nil {
+		return
+	}
+	cs, err := s.Crons(ctx)
+	if err != nil {
+		return
+	}
+	var told []int64
+	_, _ = s.Settings.Get(ctx, "cron_dayfields_told", &told)
+	seen := map[int64]bool{}
+	for _, id := range told {
+		seen[id] = true
+	}
+	changed := false
+	for _, c := range cs {
+		if !c.Enabled || seen[c.ID] || checkDayFields(c.Expr) == nil {
+			continue
+		}
+		s.Notify("cron", "warning", "A schedule runs on more days than intended", fmt.Sprintf("“%s” (%s) sets both the day of the month and the day of the week, so it runs on either: every matching weekday as well as the listed dates. Ask %s to change it to one of them.", c.Name, c.Expr, c.Agent))
+		told = append(told, c.ID)
+		changed = true
+	}
+	if changed {
+		_ = s.Settings.Set(ctx, "cron_dayfields_told", told)
+	}
+}

@@ -144,6 +144,7 @@ func (s *Service) loc(ctx context.Context) *time.Location {
 // Start runs the tick loop until ctx ends.
 func (s *Service) Start(ctx context.Context) {
 	go func() {
+		s.warnDayFields(ctx)
 		s.tick(ctx)
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
