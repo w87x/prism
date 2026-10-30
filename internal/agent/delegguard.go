@@ -14,10 +14,11 @@ import (
 // Oneiros" requests to the same colleague. A request that is almost the same as one made lately by the same agent to the same colleague is
 // refused with a pointer to the earlier task (its answer is one task_status away); and one task may delegate only so many times.
 const (
-	dupSimilarity      = 0.85
-	dupDoneWindow      = 5 * time.Minute // an answered request may be asked again after this (things change)
-	dupLookback        = 2 * time.Hour   // one still queued or running is a duplicate for as long as it runs
-	maxDelegationsEach = 20              // per task
+	dupSimilarity       = 0.85
+	dupDoneWindow       = 5 * time.Minute // an answered request may be asked again after this (things change)
+	dupLookback         = 2 * time.Hour   // one still queued or running is a duplicate for as long as it runs
+	maxDelegationsEach  = 20              // per task
+	maxAsksPerColleague = 3               // per task: the same colleague asked a fourth time is a sign the work should have been one batched request
 )
 
 func tokenWords(s string) map[string]bool {
@@ -51,6 +52,12 @@ func (e *Engine) delegationGuard(ctx context.Context, env *tools.Env, to, instru
 		var n int
 		if e.DB.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE parent_id=$1`, env.TaskID).Scan(&n) == nil && n >= maxDelegationsEach {
 			return fmt.Errorf("this task has already delegated %d times: that is enough. Use what the colleagues returned (task_status shows their results) and finish", n)
+		}
+	}
+	if env.TaskID != 0 {
+		var n int
+		if e.DB.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE parent_id=$1 AND lower(to_agent)=lower($2)`, env.TaskID, to).Scan(&n) == nil && n >= maxAsksPerColleague {
+			return fmt.Errorf("you have already asked %s %d times in this task. Each ask is a whole run: put everything you still need into ONE request (a list of all the items), or use what %s already returned (task_status shows the results)", to, n, to)
 		}
 	}
 	rows, err := e.DB.Query(ctx, `SELECT id, status, input, finished_at FROM tasks WHERE from_kind='agent' AND lower(from_name)=lower($1) AND lower(to_agent)=lower($2)

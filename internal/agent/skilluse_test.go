@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +329,28 @@ func TestDelegationGuardRefusesNearRepeats(t *testing.T) {
 	}
 }
 
+// The same colleague asked a fourth time within one task is told to batch the rest into one request.
+func TestDelegationGuardCapsAsksPerColleague(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	parent, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Cipher", Title: "models", Input: "check new models"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, in := range []string{"fetch the mistral org listing", "read the qwen model card", "find gguf quants for deepseek"} {
+		if _, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &parent.ID, FromKind: "agent", FromName: "Cipher", ToAgent: "Scout", Title: "help", Input: in, Depth: 1}, false); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	env := &tools.Env{Agent: "Cipher", TaskID: parent.ID}
+	if err := h.e.delegationGuard(ctx, env, "Scout", "list google gemma releases of the last week"); err == nil || !strings.Contains(err.Error(), "ONE request") {
+		t.Fatalf("a fourth ask: %v", err)
+	}
+	if err := h.e.delegationGuard(ctx, env, "Kael", "list google gemma releases of the last week"); err != nil {
+		t.Fatalf("another colleague is fine: %v", err)
+	}
+}
+
 // A request of the user's own whose answer promises to follow up is reviewed (an ordinary answer is not), and when nothing was set up to
 // follow up, Sentinel is asked to start the watch — whatever the promise-review mode.
 func TestAUserRequestThatPromisesAFollowUpGetsAWatch(t *testing.T) {
@@ -363,5 +387,38 @@ func TestAUserRequestThatPromisesAFollowUpGetsAWatch(t *testing.T) {
 	_ = h.e.DB.QueryRow(ctx, `SELECT status FROM promise_reviews ORDER BY id DESC LIMIT 1`).Scan(&status)
 	if status != "fixing" {
 		t.Fatalf("the review is being fixed: %s", status)
+	}
+}
+
+// A scheduled job that failed because no model was loaded waits and tries again (three times), instead of losing its day.
+func TestScheduledJobRetriesWhenTheModelIsGone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	tk, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "Dream", ToAgent: "Oneiros", Title: "Dream", Input: "go"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone := errors.New("HTTP 400: No models loaded. Please load a model")
+	for i := 1; i <= modelRetries; i++ {
+		cur, _ := h.e.Tasks.Get(ctx, tk.ID)
+		if !h.e.retryForModel(ctx, cur, gone) {
+			t.Fatalf("attempt %d should wait and retry", i)
+		}
+		cur, _ = h.e.Tasks.Get(ctx, tk.ID)
+		if cur.Status != tasks.Queued || cur.WakeAt == nil || !strings.Contains(cur.WakeNote, fmt.Sprintf("retry %d/%d", i, modelRetries)) {
+			t.Fatalf("after attempt %d: %s %v %q", i, cur.Status, cur.WakeAt, cur.WakeNote)
+		}
+		_, _ = h.e.DB.Exec(ctx, `UPDATE tasks SET status='running' WHERE id=$1`, tk.ID) // the dispatcher took it again
+	}
+	cur, _ := h.e.Tasks.Get(ctx, tk.ID)
+	if h.e.retryForModel(ctx, cur, gone) {
+		t.Fatal("after the last retry the failure stands")
+	}
+	if h.e.retryForModel(ctx, cur, errors.New("something else broke")) {
+		t.Fatal("only a missing model is retried")
+	}
+	user, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Title: "x", Input: "y"}, true)
+	if h.e.retryForModel(ctx, user, gone) {
+		t.Fatal("a user's task is not silently retried")
 	}
 }

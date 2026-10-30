@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -845,6 +846,10 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		if errors.Is(err, context.Canceled) {
 			st = tasks.Cancelled
 		}
+		if st == tasks.Failed && e.retryForModel(ctx, t, err) {
+			out, _ := e.Tasks.Get(ctx, t.ID)
+			return out
+		}
 		_ = e.Tasks.Finish(ctx, t.ID, st, "", err.Error(), "")
 		out, _ := e.Tasks.Get(ctx, t.ID)
 		return out
@@ -915,7 +920,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 			input += runbookNoteHead + rb.Steps
 		}
 	}
-	if t.WakeAt != nil || t.WakeNote != "" { // it went to sleep earlier: this run is its wake-up, in the same session
+	if (t.WakeAt != nil || t.WakeNote != "") && !strings.HasPrefix(t.WakeNote, modelRetryNote) { // it went to sleep earlier: this run is its wake-up, in the same session
 		input = fmt.Sprintf("[system] You went to sleep (%s) and are awake again — it is now %s. Continue the task from where you stopped: check what you were waiting for, then carry on, sleep again if it is not ready yet, or finish.", firstNonEmptyStr(t.WakeNote, "waiting"), time.Now().Format("2 Jan 15:04"))
 		e.Tasks.ClearWake(tctx, t.ID)
 	}
@@ -1145,4 +1150,34 @@ func (e *Engine) reopenPromiseIfNotDone(ctx context.Context, t tasks.Task) {
 	}
 	_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status='open' WHERE fix_task_id=$1 AND status='fixing'`, t.ID)
 	e.Emit("promise.update", nil)
+}
+
+// A scheduled or automatic job that fails because the model is not there (LM Studio has unloaded it, the server is restarting) did not
+// get a chance to run, so it waits and tries again instead of being lost until its next day. The wake-up note carries the count; after
+// the last attempt the user is told once, and the failure stands.
+const (
+	modelRetryNote = "model unavailable"
+	modelRetries   = 3
+)
+
+func modelUnavailable(err error) bool {
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "no models loaded") || strings.Contains(m, "connection refused") || strings.Contains(m, "model is unloaded") || strings.Contains(m, "failed to load model")
+}
+
+func (e *Engine) retryForModel(ctx context.Context, t tasks.Task, err error) bool {
+	if t.Depth != 0 || (t.FromKind != "cron" && t.FromKind != "intent" && t.FromKind != "system") || !modelUnavailable(err) {
+		return false
+	}
+	n := 0
+	if rest, ok := strings.CutPrefix(t.WakeNote, modelRetryNote+" (retry "); ok {
+		n, _ = strconv.Atoi(strings.SplitN(rest, "/", 2)[0])
+	}
+	if n >= modelRetries {
+		e.NotifyHousekeeping(ctx, "error", t.ToAgent+": the model was not available", Notice{Agent: t.ToAgent, Level: "attention",
+			Text: fmt.Sprintf("“%s” could not run: the model is not loaded (tried %d times over about an hour). Load it in LM Studio; it runs again at its next time, or start it by hand.", textutil.Brief(t.Title, 60), n+1)}, false)
+		return false
+	}
+	note := fmt.Sprintf("%s (retry %d/%d)", modelRetryNote, n+1, modelRetries)
+	return e.Tasks.Sleep(ctx, t.ID, time.Now().Add(time.Duration(n+1)*10*time.Minute), note) == nil
 }
