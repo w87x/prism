@@ -186,3 +186,30 @@ func TestMatchNeedsTheTaskToBeAboutTheSkill(t *testing.T) {
 		t.Fatalf("a task that merely shares words (listing, pages, loop) must not match: %+v", ms)
 	}
 }
+
+// A new skill that reads almost like an existing one is refused with a pointer to it (extend that one), unless the writer says how it differs.
+func TestSkillWriteRefusesNearTwin(t *testing.T) {
+	d := testutil.DB(t)
+	s := NewStore(d.Pool, t.TempDir())
+	reg := tools.NewRegistry(d.Pool)
+	RegisterTools(reg, s)
+	write := func(name, desc string, extra map[string]any) (string, error) {
+		args := map[string]any{"body": "---\nname: " + name + "\ndescription: " + desc + "\n---\n1. do it"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return runTool(t, reg, "skill_write", "Daedalus", args)
+	}
+	if _, err := write("synology-queue-torrent", "queue a torrent on the Synology Download Station", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := write("synology-torrent-queue", "add a torrent to the Synology Download Station queue", nil); err == nil || !strings.Contains(err.Error(), "synology-queue-torrent") {
+		t.Fatalf("a twin must be refused with the original's name: %v", err)
+	}
+	if _, err := write("synology-torrent-queue", "add a torrent to the Synology Download Station queue", map[string]any{"distinct": "pauses and resumes, not adds"}); err != nil {
+		t.Fatalf("with a reason it goes through: %v", err)
+	}
+	if _, err := write("avito-listing-search", "find listings on Avito and compare prices", nil); err != nil {
+		t.Fatalf("an unrelated skill is fine: %v", err)
+	}
+}

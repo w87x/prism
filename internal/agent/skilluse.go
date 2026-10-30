@@ -114,14 +114,14 @@ func (e *Engine) skillIndex(ctx context.Context, p *Profile) []SkillSummary {
 	return out
 }
 
-// tidySkills merges skills that teach the same procedure, at most once a week and only when new skills have appeared since.
+// tidySkills merges skills that teach the same procedure, at most once a day and only when new skills have appeared since.
 func (e *Engine) tidySkills(ctx context.Context) {
 	if e.Skills == nil || e.LLMDown() {
 		return
 	}
 	var last struct{ At time.Time }
 	_, _ = e.Settings.Get(ctx, "skill_tidy", &last)
-	if time.Since(last.At) < 7*24*time.Hour {
+	if time.Since(last.At) < 24*time.Hour {
 		return
 	}
 	var fresh int

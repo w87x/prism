@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -402,11 +403,13 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 			Name: "skill_write", Category: "skills", Risk: tools.RiskWrite, Only: []string{"Daedalus"},
 			Description: "Save a local skill from a complete SKILL.md body (YAML frontmatter with name + description, then the procedure). Writing a name that already exists overwrites that skill — use this to correct or extend one, not to fork a near-duplicate. Load it back with skill_load.",
 			Params: tools.Obj("body", tools.Str("body", "the complete SKILL.md content: --- frontmatter (name, description) --- then the body"),
-				tools.StrList("agents", "the agents that should use this skill (pinned to them: it is offered only to them, so name every agent it fits and no more); leave out for a skill that suits everyone")),
+				tools.StrList("agents", "the agents that should use this skill (pinned to them: it is offered only to them, so name every agent it fits and no more); leave out for a skill that suits everyone"),
+				tools.Str("distinct", "only when a new skill was refused as a near-duplicate and it really is a different procedure: one sentence saying how it differs")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct {
-					Body   string
-					Agents []string
+					Body     string
+					Agents   []string
+					Distinct string
 				}](raw)
 				if err != nil {
 					return "", err
@@ -415,11 +418,16 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 				if strings.TrimSpace(fm["name"]) == "" {
 					return "", errors.New("the SKILL.md frontmatter needs a name: line")
 				}
+				name := SafeName(fm["name"])
+				if strings.TrimSpace(a.Distinct) == "" {
+					if twin := s.nearTwin(ctx, name, fm["description"]); twin != "" {
+						return "", fmt.Errorf("a skill that does almost the same already exists: %q. Extend it instead (skill_load it, then skill_write the complete improved body under that same name). If this really is a different procedure, call skill_write again with `distinct` saying how it differs", twin)
+					}
+				}
 				id, err := s.Save(ctx, Skill{Name: fm["name"], Description: fm["description"], Body: a.Body, Source: "local", Enabled: true})
 				if err != nil {
 					return "", err
 				}
-				name := SafeName(fm["name"])
 				pinned := ""
 				if len(a.Agents) > 0 && s.Assign != nil {
 					if got := s.Assign(ctx, name, a.Agents); len(got) > 0 {
@@ -430,4 +438,47 @@ func RegisterTools(reg *tools.Registry, s *Store) {
 			},
 		},
 	)
+}
+
+// twinSimilarity is how alike two skills must read (shared words of name and description) for a new one to be refused as a duplicate.
+const twinSimilarity = 0.42
+
+func skillWords(name, desc string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(name+" "+desc), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if len([]rune(w)) >= 3 {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+// nearTwin names an enabled local skill, other than one of this very name (that is an edit), that says almost the same as the new one.
+func (s *Store) nearTwin(ctx context.Context, name, desc string) string {
+	all, err := s.List(ctx)
+	if err != nil {
+		return ""
+	}
+	want, best, bestSim := skillWords(name, desc), "", 0.0
+	for _, k := range all {
+		if !k.Enabled || k.Source != "local" || k.Name == name {
+			continue
+		}
+		have := skillWords(k.Name, k.Description)
+		inter := 0
+		for w := range want {
+			if have[w] {
+				inter++
+			}
+		}
+		if u := len(want) + len(have) - inter; u > 0 {
+			if sim := float64(inter) / float64(u); sim > bestSim {
+				best, bestSim = k.Name, sim
+			}
+		}
+	}
+	if bestSim >= twinSimilarity {
+		return best
+	}
+	return ""
 }
