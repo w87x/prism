@@ -422,3 +422,26 @@ func TestScheduledJobRetriesWhenTheModelIsGone(t *testing.T) {
 		t.Fatal("a user's task is not silently retried")
 	}
 }
+
+// A promise to act once something happens is kept when a schedule for that very job exists; other broken promises stay.
+func TestPromisesACronAlreadyCarriesAreDropped(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.e.DB.Exec(ctx, `INSERT INTO crons(name,agent,expr,prompt,enabled) VALUES('Neuromancer S01E01 premiere download','Lyra','0 12 * * *','Check Neuromancer S01E01 and download it once it is seeded',true)`); err != nil {
+		t.Fatal(err)
+	}
+	task := tasks.Task{Title: "Neuromancer S01E01 premiere download"}
+	items := []promiseItem{
+		{Kind: "watch", Status: "needs_trigger", Text: "Download will trigger once the episode is seeded"},
+		{Kind: "action", Status: "not_done", Text: "Reserve NAS storage headroom"},
+		{Kind: "watch", Status: "needs_trigger", Text: "Tell me when the washing machine finishes"},
+	}
+	got := h.e.dropCovered(ctx, task, items)
+	if len(got) != 1 || got[0].Kind != "action" {
+		t.Fatalf("a schedule named like the job carries its follow-ups: %+v", got)
+	}
+	got = h.e.dropCovered(ctx, tasks.Task{Title: "Laundry"}, items)
+	if len(got) != 3 {
+		t.Fatalf("an unrelated job keeps what nothing carries: %+v", got)
+	}
+}

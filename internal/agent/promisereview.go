@@ -132,6 +132,12 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 	if !reviewsPromises(t) || t.SessionID == nil || len(strings.TrimSpace(t.Result)) < 20 || e.DB == nil {
 		return
 	}
+	if t.FromKind == "cron" { // the built-in maintenance reports (dream, consolidation) summarise; their small mismatches are noise
+		var system bool
+		if e.DB.QueryRow(ctx, `SELECT system FROM crons WHERE name=$1 LIMIT 1`, t.FromName).Scan(&system) == nil && system {
+			return
+		}
+	}
 	cfg := settings.Load(ctx, e.Settings, settings.KeyAutonomy, settings.DefaultAutonomy())
 	mode := cfg.PromiseReviewMode()
 	if mode == "off" || e.LLM == nil || e.LLM.RoleRef(ctx, "fast") == "" {
@@ -168,6 +174,7 @@ func (e *Engine) ReviewPromises(ctx context.Context, t tasks.Task) {
 		_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status=$2 WHERE fix_task_id=$1 AND status='fixing'`, t.ID, to)
 		e.Emit("promise.update", nil)
 	}
+	broken = e.dropCovered(ctx, t, broken)
 	if len(broken) == 0 {
 		return
 	}
@@ -326,4 +333,54 @@ func ordinal(n int) string {
 		return fmt.Sprintf("%drd", n)
 	}
 	return fmt.Sprintf("%dth", n)
+}
+
+// dropCovered removes the promises to "tell you when it happens" that a schedule or a watch already carries out: a job that promised to
+// download an episode once it is out, with a schedule of that very name checking for it, kept its promise by making the schedule.
+func (e *Engine) dropCovered(ctx context.Context, t tasks.Task, items []promiseItem) []promiseItem {
+	type carrier struct{ name, body map[string]bool }
+	var carriers []carrier
+	if rows, err := e.DB.Query(ctx, `SELECT name, prompt FROM crons WHERE enabled UNION ALL SELECT description, predicate::text FROM intents WHERE status='active'`); err == nil {
+		for rows.Next() {
+			var n, b string
+			if rows.Scan(&n, &b) == nil {
+				carriers = append(carriers, carrier{tokenWords(n), tokenWords(n + " " + b)})
+			}
+		}
+		rows.Close()
+	}
+	title := tokenWords(t.Title)
+	var out []promiseItem
+	for _, it := range items {
+		if it.Kind != "watch" && it.Status != "needs_trigger" {
+			out = append(out, it)
+			continue
+		}
+		covered := false
+		for _, c := range carriers {
+			// the schedule is for this very job (its name is the task's title), or its text speaks of the promised thing
+			if similarity(title, c.name) >= 0.6 || coverage(tokenWords(it.Text), c.body) >= 0.5 {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// coverage is the share of a's words that b also has.
+func coverage(a, b map[string]bool) float64 {
+	if len(a) == 0 {
+		return 0
+	}
+	n := 0
+	for w := range a {
+		if b[w] {
+			n++
+		}
+	}
+	return float64(n) / float64(len(a))
 }

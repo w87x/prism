@@ -166,6 +166,7 @@ func (e *Engine) sweepNature(ctx context.Context) {
 	_, _ = e.DB.Exec(ctx, `DELETE FROM antibodies WHERE COALESCE(last_hit, created_at) < now() - make_interval(secs => $1)`, antibodyTTL.Seconds())
 	e.FoldPitfalls(ctx)
 	e.tidySkills(ctx)
+	_, _ = e.DB.Exec(ctx, `UPDATE promise_reviews SET status='expired' WHERE status='open' AND created_at < now() - interval '5 days'`) // nobody acted on it: it is no longer news
 	e.learnRecurringSkills(ctx)
 	e.sweepRepairs(ctx)
 	e.checkEvolutionWatches(ctx)
