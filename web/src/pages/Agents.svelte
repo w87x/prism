@@ -259,7 +259,7 @@
   function drawHubs(ctx, t) {
     for (const hb of hubs) {
       const busy = nodes.some((n) => n.orbit === hb.key && activeNames.has(n.a.name));
-      const r = 6 + (busy ? 1.5 * Math.sin(t / 260) : 0);
+      const r = 6 + (board() ? Math.max(0, ((busWidth.get(hb.key) || 1) - 1) * LANE / 2 - 1) : 0) + (busy ? 1.5 * Math.sin(t / 260) : 0);
       ctx.beginPath();
       if (board()) ctx.arc(hb.x, hb.y, r, 0, Math.PI * 2); // a via: a ring pad with a hole
       else { ctx.moveTo(hb.x, hb.y - r); ctx.lineTo(hb.x + r, hb.y); ctx.lineTo(hb.x, hb.y + r); ctx.lineTo(hb.x - r, hb.y); ctx.closePath(); }
@@ -287,9 +287,10 @@
   };
   // Lanes on the board. Every connection is a chain of legs (Atlas → hub → agent); a message between colleagues runs the
   // same legs as the spokes it would take through Atlas, so it lies parallel to them instead of cutting across as an arc.
-  // Routes that would lie on top of one another get their own lane: the whole route is moved sideways by a multiple of
-  // LANE (its ends land on different spots of the pad, like pins), so no two traces ever merge.
-  const LANE = 3.4;
+  // Each leg is one bus: the routes that use it run side by side at an even pitch, the same centre line moved sideways
+  // (so every lane bends at the same place, like the traces fanning out of a chip). A hub is a connector that grows to
+  // fit its widest bus; a route hops from the lane it has on one leg to its lane on the next inside the connector.
+  const LANE = 4.4;
   const upLegs = (n, atlas) => {
     if (n === atlas) return [];
     const hb = hubbed() ? hubOf(n.orbit) : null;
@@ -300,15 +301,6 @@
     while (ua.length && ub.length && ua[ua.length - 1][0] === ub[ub.length - 1][0] && ua[ua.length - 1][1] === ub[ub.length - 1][1]) { ua.pop(); ub.pop(); }
     return [...ua.map(([p, c]) => ({ p, c, rev: true })), ...ub.reverse().map(([p, c]) => ({ p, c, rev: false }))];
   }
-  const legsToPts = (legs) => {
-    const out = [];
-    for (const { p, c, rev } of legs) {
-      const seg = tracePts(p, c);
-      if (rev) seg.reverse();
-      for (const q of seg) { const l = out[out.length - 1]; if (!l || Math.hypot(l.x - q.x, l.y - q.y) > 0.5) out.push({ x: q.x, y: q.y }); }
-    }
-    return out;
-  };
   const segsOf = (pts) => {
     const out = [];
     for (let i = 1; i < pts.length; i++) {
@@ -316,16 +308,6 @@
       if (l > 0.5) out.push({ x: pts[i - 1].x, y: pts[i - 1].y, ux: dx / l, uy: dy / l, l });
     }
     return out;
-  };
-  const clash = (sa, sb) => {
-    for (const a of sa) for (const b of sb) {
-      if (Math.abs(a.ux * b.uy - a.uy * b.ux) > 0.03) continue; // not parallel
-      const rx = b.x - a.x, ry = b.y - a.y;
-      if (Math.abs(rx * a.uy - ry * a.ux) >= LANE * 0.9) continue; // far enough apart sideways
-      const s0 = rx * a.ux + ry * a.uy, s1 = s0 + (b.ux * a.ux + b.uy * a.uy) * b.l; // b's extent along a
-      if (Math.min(a.l, Math.max(s0, s1)) - Math.max(0, Math.min(s0, s1)) > 3) return true;
-    }
-    return false;
   };
   const shiftPoly = (pts, d) => {
     if (!d) return pts;
@@ -341,8 +323,9 @@
     out.push({ x: e.x + nrm(last).x * d, y: e.y + nrm(last).y * d });
     return out;
   };
-  const laneSeq = (i) => (i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2);
-  let lanes = new Map(); // key → the routed points, for this frame
+  const idOf = (o) => (o.a ? 'n' + o.id : 'h' + o.key);
+  let lanes = new Map(); // route key → the routed points, for this frame
+  let busWidth = new Map(); // hub key → how many lanes its widest bus has
   function planLanes(atlas, asks, blocked) {
     const defs = [];
     if (atlas) {
@@ -351,14 +334,26 @@
       blocked.forEach((n, i) => defs.push({ key: 'b:' + i, legs: askLegs(n, atlas, atlas) }));
       asks.forEach((k, i) => defs.push({ key: 'a:' + i, legs: askLegs(k.a, k.b, atlas) }));
     }
-    for (const d of defs) { d.pts = legsToPts(d.legs); d.segs = segsOf(d.pts); d.lane = 0; d.at = []; }
-    defs.forEach((d, i) => {
-      const used = new Set();
-      for (let j = 0; j < i; j++) if (clash(d.segs, defs[j].segs)) used.add(defs[j].lane);
-      let k = 0; while (used.has(laneSeq(k))) k++;
-      d.lane = laneSeq(k);
-    });
-    lanes = new Map(defs.map((d) => [d.key, shiftPoly(d.pts, d.lane * LANE)]));
+    const buses = new Map(); // leg → the routes on it, in order
+    for (const d of defs) for (const l of d.legs) { const id = idOf(l.p) + '>' + idOf(l.c); if (!buses.has(id)) buses.set(id, { p: l.p, c: l.c, routes: [] }); buses.get(id).routes.push(d.key); }
+    const lane = new Map(); // leg|route → the shifted centre line
+    busWidth = new Map();
+    for (const [id, b] of buses) {
+      const m = b.routes.length, centre = tracePts(b.p, b.c);
+      // the lanes of one leg must fit the chip at its end, or the bus is squeezed to fit
+      const span = Math.min(...[b.p, b.c].filter((o) => o.a).map((o) => R(o) * 1.7), 1e9), pitch = m > 1 ? Math.min(LANE, span / (m - 1)) : LANE;
+      b.routes.forEach((key, i) => lane.set(id + '|' + key, shiftPoly(centre, (i - (m - 1) / 2) * pitch)));
+      for (const o of [b.p, b.c]) if (!o.a) busWidth.set(o.key, Math.max(busWidth.get(o.key) || 1, m));
+    }
+    lanes = new Map(defs.map((d) => {
+      const out = [];
+      for (const l of d.legs) {
+        const seg = [...lane.get(idOf(l.p) + '>' + idOf(l.c) + '|' + d.key)];
+        if (l.rev) seg.reverse();
+        out.push(...seg);
+      }
+      return [d.key, out];
+    }));
   }
 
   // the bare board: a dotted grid, the board edge and four mounting holes (drawn in scene coordinates, so it pans and zooms)
@@ -420,10 +415,11 @@
     // Atlas → group hub → member instead, and the trunk to a hub lights up when any member is being delegated to.
     const isLive = (n) => runs.some((r) => r.agent === n.a.name && ((r.parent_run && byRun[r.parent_run] === 'Atlas') || (r.depth === 1 && !r.parent_run)));
     const stroke = (x1, y1, x2, y2, live, heat, tone, pts) => {
-      ctx.beginPath(); ctx.moveTo(x1, y1);
+      const from = board() && pts ? pts[0] : { x: x1, y: y1 }; // a lane starts on its own spot of the pad, not the centre
+      ctx.beginPath(); ctx.moveTo(from.x, from.y);
       if (board() && pts) { for (const q of pts) ctx.lineTo(q.x, q.y); }
       else ctx.lineTo(x2, y2);
-      if (board() && pts) { ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = (live ? 2.4 : 1.6 + heat * 0.8) + 2.4; ctx.strokeStyle = colors.bg; ctx.globalAlpha = 0.9; ctx.setLineDash([]); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x1, y1); for (const q of pts) ctx.lineTo(q.x, q.y); } // clearance halo round the copper
+      if (board() && pts) { ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = (live ? 2.4 : 1.6 + heat * 0.8) + 1.4; ctx.strokeStyle = colors.bg; ctx.globalAlpha = 0.9; ctx.setLineDash([]); ctx.stroke(); ctx.beginPath(); ctx.moveTo(from.x, from.y); for (const q of pts) ctx.lineTo(q.x, q.y); } // clearance halo round the copper
       ctx.lineJoin = 'round'; ctx.lineWidth = live ? 2.4 : (board() ? 1.6 : 1) + heat * 0.8; ctx.strokeStyle = live ? colors.fg : tone;
       ctx.globalAlpha = live ? 1 : 0.4 + heat * 0.4; ctx.setLineDash(live ? [6, 4] : []); ctx.lineDashOffset = live ? -t / 40 : 0;
       if (live) { ctx.shadowColor = colors.fg; ctx.shadowBlur = 6; }
@@ -451,7 +447,7 @@
 
     asks.forEach((k, i) => {
       const q = linkPath(ctx, k.a, k.b, lanes.get('a:' + i));
-      ctx.strokeStyle = k.live || k.ok ? colors.attn : colors.err; ctx.lineWidth = 1.6; ctx.setLineDash(k.live ? [2, 5] : []); ctx.lineDashOffset = -t / 50; ctx.globalAlpha = k.live ? 0.95 : 0.6;
+      ctx.strokeStyle = k.live || k.ok ? colors.attn : colors.err; ctx.lineWidth = board() ? 1.3 : 1.6; ctx.setLineDash(k.live ? [2, 5] : []); ctx.lineDashOffset = -t / 50; ctx.globalAlpha = k.live ? 0.95 : 0.6;
       ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 4; ctx.stroke(); ctx.shadowBlur = 0; ctx.setLineDash([]); ctx.globalAlpha = 1;
       if (k.live) { const p = linkAt(k.a, q, k.b, (t / 1500) % 1); ctx.fillStyle = colors.attn; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill(); }
     });
