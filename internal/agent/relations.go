@@ -170,6 +170,7 @@ func (e *Engine) sweepNature(ctx context.Context) {
 	e.learnRecurringSkills(ctx)
 	e.sweepRepairs(ctx)
 	e.checkEvolutionWatches(ctx)
+	e.housekeepChats(ctx)
 }
 
 // ── handover ──

@@ -111,6 +111,11 @@ func (a *App) GetToday(ctx context.Context) Today {
 			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "promise", Title: "Promised, not done: " + textutil.Cut(r.Title, 70), Sub: sub, Ref: fmt.Sprintf("promise:%d", r.ID), Agent: r.Agent, At: r.CreatedAt})
 		}
 	}
+	if cs, err := a.Engine.ChatSuggestions(ctx); err == nil {
+		for _, c := range cs {
+			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "chat_" + c.Kind, Title: c.Text, Ref: fmt.Sprintf("chatsug:%d", c.ID), At: c.CreatedAt})
+		}
+	}
 	if a.Ext.Ingest != nil {
 		for _, w := range a.Ext.Ingest.Waiting() {
 			t.NeedsAttention = append(t.NeedsAttention, TodayItem{Kind: "ingest", Title: "Which one are you in “" + w.Name + "”?", Sub: fmt.Sprintf("a %s with %d participants — say who you are and PRISM learns from it", w.Kind, w.Participants), Ref: "ingest:" + w.Name, At: time.Now()})

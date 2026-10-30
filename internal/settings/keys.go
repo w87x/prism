@@ -35,6 +35,8 @@ type General struct {
 	// RoutingOff keeps messages in the chat they were typed in instead of taking them to the chat of the project they are about.
 	PlannerOff bool `json:"planner_off"`
 	RoutingOff bool `json:"routing_off"`
+	// ChatHousekeepingOff stops the daily pass that suggests merging, splitting, archiving and re-titling chats (empty chats are still removed).
+	ChatHousekeepingOff bool `json:"chat_housekeeping_off"`
 }
 
 // Heartbeat is the user's standing checklist, looked through quietly every so often (see internal/scheduler/heartbeat.go).

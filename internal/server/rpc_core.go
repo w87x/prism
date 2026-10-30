@@ -190,6 +190,17 @@ func (s *Server) registerCore() {
 	}) (bool, error) {
 		return true, a.Engine.UnmergeChat(ctx, r.ID)
 	})
+	rpc(s, "chats.suggestions", func(ctx context.Context, _ none) ([]agent.ChatSuggestion, error) { return a.Engine.ChatSuggestions(ctx) })
+	rpc(s, "chats.suggestion.accept", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.AcceptChatSuggestion(ctx, r.ID)
+	})
+	rpc(s, "chats.suggestion.dismiss", func(ctx context.Context, r struct {
+		ID int64 `json:"id"`
+	}) (bool, error) {
+		return true, a.Engine.DismissChatSuggestion(ctx, r.ID)
+	})
 	rpc(s, "chats.delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (bool, error) {

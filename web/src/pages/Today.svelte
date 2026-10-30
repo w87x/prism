@@ -2,7 +2,7 @@
   // a clickable row is also reachable and operable from the keyboard (not when the key was meant for a button inside it)
   const rowKey = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } };
   import { masonry } from '../lib/masonry.js';
-  import { S, call, listen, go, ago, until, openProposal, openRef, toast, kindIcon } from '../lib/store.svelte.js';
+  import { S, call, listen, go, ago, until, openProposal, openRef, toast, kindIcon, loadChats } from '../lib/store.svelte.js';
   import Panel from '../lib/ui/Panel.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Icon from '../lib/ui/Icon.svelte';
@@ -24,7 +24,7 @@
   $effect(() => {
     load();
     // any of these changing likely means this page is stale — cheap to just refetch rather than patch in place
-    return listen('task.update', load), listen('briefing.new', load), listen('agents.update', load), listen('promise.update', load);
+    return listen('task.update', load), listen('briefing.new', load), listen('agents.update', load), listen('promise.update', load), listen('chats.suggestions', load);
   });
   $effect(() => {
     const i = setInterval(load, 20000);
@@ -34,7 +34,7 @@
   // whole-page layout: the panels ("cards") or one list with a header per section — remembered per browser
   let layout = $state((() => { try { return localStorage.getItem('prism.todayLayout') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } })());
   $effect(() => { try { localStorage.setItem('prism.todayLayout', layout); } catch {} });
-  const kindLabel = { waiting_input: 'Waiting for your answer', promise: 'Promised, not done', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', jobprop: 'Scheduled jobs to improve', plugin: 'New tools to review', ingest: 'Documents to learn' };
+  const kindLabel = { waiting_input: 'Waiting for your answer', promise: 'Promised, not done', partial: 'Stopped early', failed: 'Failed', briefing: 'Briefings', hire: 'Hiring to confirm', proposal: 'Proposed changes', jobprop: 'Scheduled jobs to improve', plugin: 'New tools to review', ingest: 'Documents to learn', chat_merge: 'Chats to tidy', chat_split: 'Chats to tidy', chat_archive: 'Chats to tidy', chat_retitle: 'Chats to tidy' };
   const attnGroups = $derived.by(() => {
     const m = new Map();
     for (const it of d?.needs_attention || []) { if (!m.has(it.kind)) m.set(it.kind, []); m.get(it.kind).push(it); }
@@ -82,6 +82,10 @@
         {#if it.kind === 'promise'}
           <Button size="sm" variant="accent" title="Ask the agent to do it now, or to set up what will do it later" onclick={async (e) => { e.stopPropagation(); const id = Number(it.ref.slice(8)); if (await call('promises.fix', { id })) { toast(`${it.agent} was asked to make it happen`); load(); } }}>Make it happen</Button>
           <Button size="sm" variant="ghost" title="Not needed — drop it from this list" onclick={async (e) => { e.stopPropagation(); if (await call('promises.dismiss', { id: Number(it.ref.slice(8)) })) load(); }}>Dismiss</Button>
+        {/if}
+        {#if it.kind.startsWith('chat_')}
+          <Button size="sm" variant="accent" onclick={async (e) => { e.stopPropagation(); if (await call('chats.suggestion.accept', { id: Number(it.ref.slice(8)) })) { toast('Done'); loadChats(); load(); } }}>{ { chat_merge: 'Merge', chat_split: 'Move them', chat_archive: 'Archive', chat_retitle: 'Rename' }[it.kind] }</Button>
+          <Button size="sm" variant="ghost" title="Not needed — it will not be suggested again" onclick={async (e) => { e.stopPropagation(); if (await call('chats.suggestion.dismiss', { id: Number(it.ref.slice(8)) })) load(); }}>Dismiss</Button>
         {/if}
         {#if it.kind === 'jobprop'}
           <Button size="sm" variant="accent" title="Apply the change; the old version is kept so you can undo it" onclick={async (e) => { e.stopPropagation(); if (await call('jobs.apply', { id: Number(it.ref.slice(8)) })) { toast('Job changed — undo it in Autonomy → Team → Jobs'); load(); } }}>Apply</Button>

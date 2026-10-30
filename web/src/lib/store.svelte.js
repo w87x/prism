@@ -473,7 +473,7 @@ export function until(ts) {
 }
 export const clock = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 // the icon of each kind of Today / side-rail item
-export const kindIcon = { partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', jobprop: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
+export const kindIcon = { chat_merge: 'chat', chat_split: 'chat', chat_archive: 'chat', chat_retitle: 'chat', partial: 'warn', failed: 'warn', promise: 'warn', waiting_input: 'warn', briefing: 'bell', hire: 'agents', proposal: 'edit', jobprop: 'edit', plugin: 'tools', task: 'check', ingest: 'doc' };
 export const stamp = (ts) => (ts ? new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
 /** Font Awesome glyph (a character of the "FA" font) for an agent; `robot` until one is assigned. */
@@ -510,6 +510,7 @@ export function openRef(ref) {
     if (typeof innerWidth === 'number' && innerWidth <= 1180) { S.reader.id = Number(ref.slice(9)); S.reader.open = true; }
     else { S.autonomyTab = 'brief'; S.openBriefing = Number(ref.slice(9)); go('autonomy'); }
   }
+  else if (ref.startsWith('chatsug:')) go('chat');
   else if (ref.startsWith('ingest:')) { S.learnFile = ref.slice(7); go('memory'); }
   else if (ref.startsWith('hire:')) { go('agents'); S.selectedAgent = Number(ref.slice(5)); }
   else if (ref.startsWith('proposal:')) { go('agents'); openProposal(Number(ref.slice(9))); }

@@ -40,7 +40,7 @@
   let actionCatalog = $state([]);
   const actionGroups = $derived([...new Set(actionCatalog.map((a) => a.group))].map((g) => ({ g, items: actionCatalog.filter((a) => a.group === g) })));
   function setAction(id, v) { if (v) modelActions.choice[id] = v; else delete modelActions.choice[id]; saveSetting('model_actions', modelActions, 'Saved'); }
-  let gen = $state({ user_name: '', timezone: '', language: '', locale: '', planner_off: false, routing_off: false });
+  let gen = $state({ user_name: '', timezone: '', language: '', locale: '', planner_off: false, routing_off: false, chat_housekeeping_off: false });
   let ctx = $state({ compact_at: 0.8, target: 0.2 });
   let mem = $state({ process_every_s: 300, raw_batch: 40, reflect_off: false, reflect_after: 8, auto_merge_off: false, hints: '', process_min: 6, entities_off: false, entities_after: 8, analyze_off: false, analyze_after: 12, synth_off: false, synth_after: 6, bookmarks_off: false, digest_off: false, digest_days: 7, verify_off: false, auto_ingest_off: false });
   let rt = $state({ llm_concurrency: 4 });
@@ -365,6 +365,7 @@
           <Field label="Timezone" hint="cron schedules, reminders and agents' clock"><Select bind:value={gen.timezone} options={zoneOpts} searchable /></Field>
           <Checkbox checked={!gen.planner_off} onchange={(v) => (gen.planner_off = !v)} label="plan messages first — a quick pass classifies each message, splits real work into steps, looks up the memory they need and asks what only you can decide, before Atlas starts" />
           <Checkbox checked={!gen.routing_off} onchange={(v) => (gen.routing_off = !v)} label="take messages to their project's chat — a message about a project goes to that project's chat (asking when unsure)" />
+          <Checkbox checked={!gen.chat_housekeeping_off} onchange={(v) => (gen.chat_housekeeping_off = !v)} label="tidy chats — once a day suggest merging two chats about one subject, moving off-topic messages to a chat of their own, archiving a stale chat or renaming one that drifted (nothing happens until you agree)" />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('general', gen, 'Saved')}>Save</Button></div>
         </Panel>
         <Panel title="Theme">
