@@ -35,15 +35,17 @@ type PlanAsk struct {
 type Plan struct {
 	Class      string     `json:"class"`      // chat | question | task
 	Project    string     `json:"project"`    // an existing project the message is about, "" when none
+	Chat       string     `json:"chat"`       // another chat the message belongs in (its title), "new: <title>" for a chat of its own, "" to stay
 	Confidence string     `json:"confidence"` // high | low — how sure the project is
 	Tasks      []PlanTask `json:"tasks"`
 	Asks       []PlanAsk  `json:"asks"`
 }
 
 const planPrompt = `You are the front door of a personal assistant. You get a NEW message from the user together with their projects, the chat it arrived in and the last few messages of that chat. Classify and prepare it.
-Answer JSON only: {"class":"chat|question|task","project":"","confidence":"high|low","tasks":[{"title":"","mem":[""],"subtasks":[]}],"asks":[{"question":"","options":[""]}]}
+Answer JSON only: {"class":"chat|question|task","project":"","chat":"","confidence":"high|low","tasks":[{"title":"","mem":[""],"subtasks":[]}],"asks":[{"question":"","options":[""]}]}
 - class: "chat" = small talk, thanks, an acknowledgement; "question" = can be answered directly or from what is known; "task" = needs work (tools, research, downloads, changes, scheduling).
 - project: the exact name of ONE project from the list that this message is about, or "" when it is not about a project. A message that merely continues the recent conversation belongs where that conversation is (the chat's own project, or ""). confidence "low" when it could belong to the project but could equally be general or about another one.
+- chat: the message arrived in a chat with a subject of its own (see THE CHAT and OTHER CHATS). Answer "" (stay) for anything that continues or fits THE CHAT, for short replies ("yes", "do it", "thanks"), and whenever unsure. Only when the message is plainly about a DIFFERENT subject (the user wrote it in the wrong chat — a question about films in a chat about price tracking): the exact title of the OTHER CHAT it belongs in, or "new: 2-4 word title" when it fits none of them. confidence says how sure you are.
 - tasks: only for class "task": 1-6 concrete steps, each one action starting with a verb, nested as subtasks where that is natural. For a step that depends on known facts (a server, a path, a preference, a person) put 1-5 search keywords in "mem"; leave it empty otherwise.
 - asks: ONLY what you truly cannot decide or look up and a wrong guess would waste work (which of several options the user must choose, a missing detail no memory can supply). Each with 2-4 likely options. At most 3. None when a sensible default exists.`
 
@@ -101,6 +103,25 @@ func (e *Engine) MakePlan(ctx context.Context, text, topic string, projects []pl
 	cur := "none (the main chat)"
 	if c, err := e.GetChat(ctx, topic); err == nil && c.ProjectBankID != nil && c.Project != "" {
 		cur = c.Project
+	}
+	if cs, err := e.Chats(ctx, false); err == nil {
+		sb.WriteString("\nOTHER CHATS (title — last words):\n")
+		n := 0
+		for _, c := range cs {
+			if c.Topic == topic || strings.TrimSpace(c.Title) == "" || n >= 12 {
+				continue
+			}
+			fmt.Fprintf(&sb, "- %s — %s\n", c.Title, textutil.Brief(c.LastText, 70))
+			n++
+		}
+		if n == 0 {
+			sb.WriteString("(none)\n")
+		}
+		if c, err := e.GetChat(ctx, topic); err == nil && c.Title != "" {
+			fmt.Fprintf(&sb, "THE CHAT: %s\n", c.Title)
+		} else if topic == "" {
+			sb.WriteString("THE CHAT: Main (a general chat: anything may be said here — answer \"\" for chat)\n")
+		}
 	}
 	fmt.Fprintf(&sb, "\nTHE CHAT'S OWN PROJECT: %s\nRECENT MESSAGES (oldest first):\n", cur)
 	if hist, err := e.ChatHistory(ctx, "web", topic, 6); err == nil {
@@ -265,6 +286,14 @@ func (e *Engine) frontDoor(ctx context.Context, m UserMsg, msgID int64, ar *acti
 			}
 		}
 	}
+	if res.Topic == m.Topic && e.routingOn(ctx) && strings.TrimSpace(plan.Chat) != "" {
+		if dest, ok := e.strayTarget(ctx, plan, m, ar); ok && dest.Topic != m.Topic && !e.ChatBusy(ChatKey("web", dest.Topic)) {
+			if e.moveToChat(ctx, msgID, m.Topic, dest.Topic, ar) {
+				res.Topic = dest.Topic
+				e.Emit("chat.routed", map[string]any{"from": m.Topic, "to": dest.Topic, "id": msgID, "project": firstNonEmptyStr(dest.Title, "Main")})
+			}
+		}
+	}
 	if label == "" {
 		if c, err := e.GetChat(ctx, res.Topic); err == nil {
 			label = c.Project
@@ -317,4 +346,57 @@ func (e *Engine) moveToChat(ctx context.Context, msgID int64, from, to string, a
 	e.mu.Unlock()
 	e.touchChat(ctx, "web", to)
 	return true
+}
+
+// strayTarget decides where a message goes that the planner thinks was written in the wrong chat: another open chat, or a new one. A
+// chat that has hardly any history is not judged (its first messages are what define it), and the main chat is never split into
+// new chats. Unless the planner is sure, the user is asked, with "stay here" as the other answer.
+func (e *Engine) strayTarget(ctx context.Context, plan *Plan, m UserMsg, ar *activeRun) (Chat, bool) {
+	want := strings.TrimSpace(plan.Chat)
+	var earlier int
+	_ = e.DB.QueryRow(ctx, `SELECT count(*) FROM chat_messages WHERE channel='web' AND topic=$1 AND role='user'`, m.Topic).Scan(&earlier)
+	if earlier < 3 { // this message is among them
+		return Chat{}, false
+	}
+	var dest Chat
+	label := ""
+	if rest, ok := strings.CutPrefix(strings.ToLower(want), "new:"); ok {
+		title := strings.TrimSpace(want[len(want)-len(rest):])
+		if m.Topic == "" || title == "" {
+			return Chat{}, false
+		}
+		label = "a new chat “" + title + "”"
+		dest = Chat{Title: title}
+	} else {
+		cs, err := e.Chats(ctx, false)
+		if err != nil {
+			return Chat{}, false
+		}
+		found := false
+		for _, c := range cs {
+			if c.Topic != m.Topic && strings.EqualFold(strings.TrimSpace(c.Title), want) {
+				dest, found = c, true
+			}
+		}
+		if !found {
+			return Chat{}, false
+		}
+		label = "the chat “" + dest.Title + "”"
+	}
+	if plan.Confidence != "high" {
+		q := tools.Question{Kind: "clarify", Text: "This looks like it belongs elsewhere: " + label + ".", Items: []tools.QItem{{
+			Header: "Chat", Text: "This does not look like what this chat is about. Where should it go?", Kind: "single",
+			Options: []string{"Take it to " + label, "Stay in this chat"}}}}
+		if ans, err := e.ask(ctx, ar.Info, q); err != nil || !strings.HasPrefix(strings.ToLower(ans), "take") {
+			return Chat{}, false
+		}
+	}
+	if dest.Topic == "" && dest.Title != "" && dest.ID == 0 { // a new chat is made only now that it is wanted
+		c, err := e.CreateChat(ctx, dest.Title, 0)
+		if err != nil {
+			return Chat{}, false
+		}
+		dest = c
+	}
+	return dest, true
 }
