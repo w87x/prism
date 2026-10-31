@@ -10,6 +10,7 @@
   let idx = $state(0);
   let inputEl;
   let timer;
+  let searchVersion = 0;
 
   function onKey(e) {
     const mod = e.metaKey || e.ctrlKey;
@@ -32,14 +33,16 @@
   $effect(() => { if (S.searchOpen) queueMicrotask(() => inputEl?.focus()); });
 
   function show() { S.searchOpen = true; q = ''; results = []; idx = 0; queueMicrotask(() => inputEl?.focus()); }
-  function close() { S.searchOpen = false; }
+  function close() { S.searchOpen = false; clearTimeout(timer); searchVersion++; }
 
   function search() {
     clearTimeout(timer);
+    const version = ++searchVersion;
     const query = q.trim();
     if (!query) { results = []; return; }
     timer = setTimeout(async () => {
       const r = await call('search.all', { q: query }, { quiet: true });
+      if (version !== searchVersion) return;
       results = r || [];
       idx = 0;
     }, 150);

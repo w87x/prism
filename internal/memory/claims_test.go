@@ -131,6 +131,8 @@ func TestEvidenceLedgerCountsIndependentGroups(t *testing.T) {
 	_ = s.AddEvidence(ctx, Evidence{FactID: id, SourceRef: "https://forum.example/thread", Group: "forum.example", Supports: false, Note: "owner reports 64GB"})
 	if f, _ := s.GetFact(ctx, id); f.Confirmation != ConfirmNone {
 		t.Fatalf("refuting evidence must withdraw multi-source confirmation, got %q", f.Confirmation)
+	} else if strings.Contains(FactFlags(f), "confirmed") || strings.Contains(trustNote(f), "confirmed") {
+		t.Fatalf("withdrawn confirmation must not appear in recall or coverage: %+v", f)
 	}
 	ev, _ = s.Evidence(ctx, id)
 	if len(ev) != 4 {
@@ -204,6 +206,7 @@ func TestFactFlagsSayHowMuchToTrustAFact(t *testing.T) {
 		"unverified":      {Fact{Confidence: 0.4, Status: StatusActive}, []string{"unverified"}, nil},
 		"user vouches":    {Fact{Confidence: 0.95, Confirmation: ConfirmUser}, []string{"confirmed by the user"}, []string{"unverified"}},
 		"independent":     {Fact{Confidence: 0.7, Confirmation: ConfirmMulti}, []string{"independent sources"}, nil},
+		"withdrawn":       {Fact{Confidence: 0.7, Confirmation: ConfirmNone, Origins: []string{"a.example", "b.example"}}, nil, []string{"confirmed"}},
 		"volatile":        {Fact{Confidence: 0.7, ExpiresAt: &exp}, []string{"may go stale after 2026-11-01"}, nil},
 		"replaced":        {Fact{Confidence: 0.7, Status: StatusSuperseded, ValidTo: &gone}, []string{"replaced since 2026-09-01"}, nil},
 		"expired":         {Fact{Confidence: 0.7, Status: StatusExpired, ValidTo: &gone}, []string{"expired since 2026-09-01"}, []string{"may go stale"}},
@@ -221,6 +224,13 @@ func TestFactFlagsSayHowMuchToTrustAFact(t *testing.T) {
 				t.Errorf("%s: %q must not contain %q", name, got, w)
 			}
 		}
+	}
+}
+
+func TestCoverageTrustNoteDoesNotRestoreWithdrawnConfirmation(t *testing.T) {
+	f := Fact{Confidence: 0.7, Confirmation: ConfirmNone, Origins: []string{"a.example", "b.example"}}
+	if got := trustNote(f); strings.Contains(got, "confirmed") {
+		t.Fatalf("withdrawn confirmation must not be inferred from origins: %q", got)
 	}
 }
 

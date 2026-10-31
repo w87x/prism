@@ -192,7 +192,7 @@
         <Button size="sm" variant={detail.meta?.rating === 1 ? 'accent' : 'ghost'} title="Good" onclick={() => rate(t, detail.meta?.rating === 1 ? 0 : 1)}>👍</Button>
         <Button size="sm" variant={detail.meta?.rating === -1 ? 'accent' : 'ghost'} title="Not good" onclick={() => (detail.meta?.rating === -1 ? rate(t, 0) : (askNote = true))}>👎</Button>
         {#if detail.meta?.rating === -1 && detail.meta?.rating_note}<span class="dim">“{detail.meta.rating_note}”</span>{/if}
-        {#if detail.meta?.criteria}<Badge tone={detail.meta.criteria_met === false ? 'err' : detail.meta.criteria_met ? 'ok' : 'mute'} title={'Done meant: ' + detail.meta.criteria + (detail.meta.criteria_gap ? '\nMissing: ' + detail.meta.criteria_gap : '')}>{detail.meta.criteria_met === false ? 'criteria not met' : detail.meta.criteria_met ? 'criteria met' : 'criteria set'}</Badge>{/if}
+        {#if detail.meta?.criteria}<Badge tone={detail.meta.criteria_met === false ? 'err' : detail.meta.criteria_met ? 'ok' : 'mute'} title={'Done meant: ' + detail.meta.criteria + (detail.meta.criteria_gap ? '\n' + detail.meta.criteria_gap : '')}>{detail.meta.criteria_met === false ? 'criteria not met' : detail.meta.criteria_met ? 'criteria met' : detail.meta.criteria_gap ? 'check unavailable' : 'criteria set'}</Badge>{/if}
         {#if detail.meta?.audit}<Badge tone={detail.meta.audit === 'ok' ? 'ok' : 'err'} title={detail.meta.audit_note || 'The main model re-checked this routine run'}>{detail.meta.audit === 'ok' ? 'audited: ok' : 'audit: problem'}</Badge>{/if}
       </div>
       {#if askNote}

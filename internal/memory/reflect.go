@@ -27,7 +27,7 @@ const (
 
 const reflectPrompt = `You are the reflective part of an assistant's memory. You are given FACTS (numbered) from one memory bank and the CONCLUSIONS drawn from them so far.
 
-A conclusion is a durable generalisation that at least two DIFFERENT facts support: a stable preference, a recurring pattern, a lesson, a relationship between things. It is not a restatement of one fact, not small talk, not a guess. Write it as one self-contained sentence in the third person.
+A conclusion is a durable generalisation that at least two DIFFERENT facts support: a stable preference, a recurring pattern, a lesson, a relationship between things. It is not a restatement of one fact, not small talk, not a guess. Repeated reports or facts from different agents or banks are not automatically independent corroboration. Do not infer a preference, cause or cross-verification unless the evidence actually supports it. Write it as one self-contained sentence in the third person.
 
 For every change give the ids of the facts it rests on (evidence). Actions:
 - "new": a conclusion not yet drawn (needs 2+ evidence ids).

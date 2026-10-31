@@ -44,10 +44,28 @@ To reach PRISM from another device, set `"listen": "0.0.0.0:7777"` (a token is g
 the UI with `?token=…`). Any IP address works; for a hostname (`mac.local`, a Tailscale name) add it to
 `"allowed_hosts"` in `config.json`.
 
+PRISM serves HTTP, not HTTPS: the access token and traffic are visible to anyone who can observe the connection.
+For remote access, use an encrypted private network such as Tailscale, or put PRISM behind a properly configured
+HTTPS reverse proxy. Avoid exposing its HTTP port directly to an untrusted network or the public internet.
+
 Only one browser tab edits at a time (PRISM is a single-user app): a second tab is read-only until you click *Use this tab*.
 
 Development: `make dev` (backend on :7777 and the UI on :5173, proxying `/ws`).
 Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (creates and drops throw-away databases).
+
+For a small, synthetic check of a local model's front-door planning, run:
+
+```bash
+go run ./cmd/prism-eval -base-url http://127.0.0.1:1234/v1 -model YOUR_MODEL
+```
+
+If the endpoint requires a key, set `PRISM_EVAL_API_KEY` in the environment. The tool sends six fictional
+messages directly to the model using PRISM's planner prompt; it does not connect to PRISM's database or run
+tools. Its JSON output includes pass/fail, latency and token counts when supplied by the server. It checks
+classification, basic task output and unnecessary clarification only; it is not an end-to-end agent benchmark.
+Use `-cases research,monitor` to select cases, `-repeat 3` to sample variability, and `-max-output N` to
+compare an output limit. `-concurrency 2` or `-concurrency 4` tests parallel model requests (the default is
+one). Compare several runs before changing a model's production settings.
 
 ## What agents can reach
 

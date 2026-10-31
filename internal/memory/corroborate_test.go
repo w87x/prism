@@ -98,7 +98,7 @@ func TestMemoryStoreToolChecksTheSourceURL(t *testing.T) {
 	find, _ := reg.Get("memory_find")
 	b, _ := json.Marshal(map[string]any{"query": "milk ShopA", "banks": []string{"domain:Market"}})
 	got, _ := find.Run(ctx, &tools.Env{Agent: "Scout"}, b)
-	if !strings.Contains(got, "confirmed by 2 sites") || strings.Contains(got, "unverified") {
+	if !strings.Contains(got, "confirmed by independent sources") || strings.Contains(got, "unverified") {
 		t.Fatalf("find: %q", got)
 	}
 }

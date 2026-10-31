@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -1146,6 +1147,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		}
 		return toolResult{text: fmt.Sprintf("Error: %s is not in your toolset and tools cannot be loaded at run time — %s.", tc.Name, hint)}
 	}
+	if strings.TrimSpace(tc.Arguments) == "" {
+		tc.Arguments = "{}"
+	}
 	if env.Restricted && tool.Risk == tools.RiskExec { // defence in depth: however the tool got activated
 		emit("denied", false)
 		return toolResult{text: fmt.Sprintf("Error: %s is not available to you yet: you are on probation (hired by another agent) and the user has not confirmed the hire. Ask a colleague to help instead, or tell the requester.", tc.Name)}
@@ -1171,6 +1175,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		return toolResult{text: msg}
 	}
 	warn := guard.note(sig(tc))
+	if !validToolArguments(tc.Arguments) {
+		emit("end", false, "invalid JSON arguments")
+		return toolResult{text: fmt.Sprintf("Error: %s arguments must be a valid JSON object. Retry with the tool's parameter names, for example {} if it takes no arguments. %s", tc.Name, warn)}
+	}
 	if tool.Risk != tools.RiskRead {
 		needConfirm := !st.Armed || (tainted && !tool.Auto)
 		// "allow for this task" was given before untrusted content showed up: it does not carry over once tainted
@@ -1362,6 +1370,11 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		}
 	}
 	return res
+}
+
+func validToolArguments(raw string) bool {
+	var obj map[string]json.RawMessage
+	return json.Unmarshal([]byte(raw), &obj) == nil && obj != nil
 }
 
 func isYes(a string) bool {

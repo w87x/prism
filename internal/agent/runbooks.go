@@ -179,10 +179,11 @@ func (e *Engine) runbookLoss(ctx context.Context, key, note string) {
 
 const runbookPrompt = `You are the senior model writing a runbook for a small, cheap model that will repeat a routine job on its own. You get the job's instruction, what a successful run actually did (its tool calls and their results) and its final reply.
 Write the runbook as short numbered steps the small model can follow without understanding the bigger picture:
+- first state the prerequisites and what must be checked afresh; do not treat a past result or value as current
 - the exact tools to call, in order, with the arguments that worked (URLs, queries, selectors, parameters), using placeholders only where something genuinely changes between runs
-- how to decide whether the condition the user cares about is met, with the concrete test
+- after each important tool call say what observable result means success, and how to decide whether the condition the user cares about is met with a concrete test; if the result is missing or ambiguous, do not claim success
 - what to reply when it IS met (the shape of the message) and when it is NOT (exactly NO_REPLY)
-- what is known to go wrong on this job and what to do about it
+- what is known to go wrong on this job and what to do about it; never invent failures or unsupported details
 - when to call escalate (anything the steps do not cover)
 Under 250 words. No preamble. If an earlier runbook and the reason it failed are given, fix that cause.`
 

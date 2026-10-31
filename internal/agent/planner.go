@@ -20,9 +20,11 @@ import (
 
 // PlanTask is one step of the decomposition; Mem are keywords to look up in memory for it.
 type PlanTask struct {
-	Title string     `json:"title"`
-	Mem   []string   `json:"mem,omitempty"`
-	Sub   []PlanTask `json:"subtasks,omitempty"`
+	Title    string     `json:"title"`
+	Mem      []string   `json:"mem,omitempty"`
+	DoneWhen string     `json:"done_when,omitempty"`
+	Depends  []string   `json:"depends_on,omitempty"`
+	Sub      []PlanTask `json:"subtasks,omitempty"`
 }
 
 // PlanAsk is something only the user can decide.
@@ -42,12 +44,15 @@ type Plan struct {
 }
 
 const planPrompt = `You are the front door of a personal assistant. You get a NEW message from the user together with their projects, the chat it arrived in and the last few messages of that chat. Classify and prepare it.
-Answer JSON only: {"class":"chat|question|task","project":"","chat":"","confidence":"high|low","tasks":[{"title":"","mem":[""],"subtasks":[]}],"asks":[{"question":"","options":[""]}]}
+Answer JSON only: {"class":"chat|question|task","project":"","chat":"","confidence":"high|low","tasks":[{"title":"","mem":[""],"done_when":"","depends_on":[],"subtasks":[]}],"asks":[{"question":"","options":[""]}]}
 - class: "chat" = small talk, thanks, an acknowledgement; "question" = can be answered directly or from what is known; "task" = needs work (tools, research, downloads, changes, scheduling).
 - project: the exact name of ONE project from the list that this message is about, or "" when it is not about a project. A message that merely continues the recent conversation belongs where that conversation is (the chat's own project, or ""). confidence "low" when it could belong to the project but could equally be general or about another one.
 - chat: the message arrived in a chat with a subject of its own (see THE CHAT and OTHER CHATS). Answer "" (stay) for anything that continues or fits THE CHAT, for short replies ("yes", "do it", "thanks"), and whenever unsure. Only when the message is plainly about a DIFFERENT subject (the user wrote it in the wrong chat — a question about films in a chat about price tracking): the exact title of the OTHER CHAT it belongs in, or "new: 2-4 word title" when it fits none of them. confidence says how sure you are.
-- tasks: only for class "task": 1-6 concrete steps, each one action starting with a verb, nested as subtasks where that is natural. For a step that depends on known facts (a server, a path, a preference, a person) put 1-5 search keywords in "mem"; leave it empty otherwise.
+- tasks: only for class "task": 1-6 concrete steps, each one action starting with a verb, nested as subtasks where that is natural. For a step that depends on known facts (a server, a path, a preference, a person) put 1-5 search keywords in "mem"; leave it empty otherwise. In done_when briefly state the observable result; in depends_on list prerequisite step titles, or [] when independent. Do not guess an agent or a result.
 - asks: ONLY what you truly cannot decide or look up and a wrong guess would waste work (which of several options the user must choose, a missing detail no memory can supply). Each with 2-4 likely options. At most 3. None when a sensible default exists.`
+
+// PlannerPrompt exposes the production prompt to the offline synthetic evaluation tool.
+func PlannerPrompt() string { return planPrompt }
 
 type planProject struct {
 	ID          int64
@@ -159,8 +164,65 @@ func (p Plan) taskLines(sb *strings.Builder, ts []PlanTask, prefix string) {
 	for i, t := range ts {
 		n := fmt.Sprintf("%s%d", prefix, i+1)
 		fmt.Fprintf(sb, "%s. %s\n", n, t.Title)
+		if t.DoneWhen != "" {
+			fmt.Fprintf(sb, "   Done when: %s\n", textutil.Brief(t.DoneWhen, 240))
+		}
+		if len(t.Depends) > 0 {
+			fmt.Fprintf(sb, "   Depends on: %s\n", textutil.Brief(strings.Join(t.Depends, ", "), 240))
+		}
 		p.taskLines(sb, t.Sub, n+".")
 	}
+}
+
+// planDependencyWarning treats model-produced dependencies as a draft, not an execution graph.
+// Reject ambiguous, missing, self-referential and circular references before Atlas relies on them.
+func planDependencyWarning(tasks []PlanTask) string {
+	byName := map[string]PlanTask{}
+	var collect func([]PlanTask) bool
+	collect = func(ts []PlanTask) bool {
+		for _, t := range ts {
+			name := strings.TrimSpace(t.Title)
+			if name == "" {
+				return false
+			}
+			if _, exists := byName[name]; exists {
+				return false
+			}
+			byName[name] = t
+			if !collect(t.Sub) {
+				return false
+			}
+		}
+		return true
+	}
+	if !collect(tasks) {
+		return "Step titles are blank or duplicated; re-plan the dependencies."
+	}
+	state := map[string]int{}
+	var visit func(string) bool
+	visit = func(name string) bool {
+		if state[name] == 1 {
+			return false
+		}
+		if state[name] == 2 {
+			return true
+		}
+		state[name] = 1
+		for _, dep := range byName[name].Depends {
+			dep = strings.TrimSpace(dep)
+			if _, exists := byName[dep]; !exists || !visit(dep) {
+				return false
+			}
+		}
+		state[name] = 2
+		return true
+	}
+	for name := range byName {
+		if !visit(name) {
+			return "A dependency is missing or circular; re-plan before delegating those steps."
+		}
+	}
+	return ""
 }
 
 func memKeywords(ts []PlanTask) [][]string {
@@ -193,11 +255,15 @@ func (e *Engine) planFacts(ctx context.Context, p *Plan, projectLabel string) []
 		for _, f := range fs {
 			if !seen[f.ID] && len(out) < 12 {
 				seen[f.ID] = true
-				out = append(out, fmt.Sprintf("%s (%s)", f.Text, f.Bank))
+				out = append(out, formatPlanFact(f))
 			}
 		}
 	}
 	return out
+}
+
+func formatPlanFact(f memory.Fact) string {
+	return fmt.Sprintf("#%d (%s) %s%s", f.ID, f.Bank, f.Text, memory.FactFlags(f))
 }
 
 // planNote is what Atlas is handed: the plan, the facts already looked up and the user's answers to the planner's questions.
@@ -206,13 +272,16 @@ func planNote(p *Plan, facts []string, answers string) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("\n\n[Plan prepared for you before you started — use it; do not plan again from scratch]\nClass: " + p.Class + "\n")
+	sb.WriteString("\n\n[Plan prepared for you before you started — use as a draft; revise it if the request, dependencies or evidence call for it]\nClass: " + p.Class + "\n")
 	if len(p.Tasks) > 0 {
+		if warning := planDependencyWarning(p.Tasks); warning != "" {
+			sb.WriteString("Plan warning: " + warning + "\n")
+		}
 		sb.WriteString("Steps:\n")
 		p.taskLines(&sb, p.Tasks, "")
 	}
 	if len(facts) > 0 {
-		sb.WriteString("Facts from memory that apply:\n")
+		sb.WriteString("Potentially relevant memory (check the standing and whether each fact actually answers the need):\n")
 		for _, f := range facts {
 			sb.WriteString("- " + f + "\n")
 		}

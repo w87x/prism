@@ -30,8 +30,6 @@ func FactFlags(f Fact) string {
 	switch {
 	case f.Confirmation == ConfirmUser:
 		fl = append(fl, "confirmed by the user")
-	case len(f.Origins) >= 2:
-		fl = append(fl, fmt.Sprintf("confirmed by %d sites", len(f.Origins)))
 	case f.Confirmation == ConfirmMulti:
 		fl = append(fl, "confirmed by independent sources")
 	case f.Confidence < 0.5:

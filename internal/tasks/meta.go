@@ -20,12 +20,20 @@ type Meta struct {
 
 func (s *Store) SetCriteria(ctx context.Context, id int64, criteria string) {
 	if c := strings.TrimSpace(criteria); c != "" {
-		_, _ = s.db.Exec(ctx, `INSERT INTO task_meta (task_id, criteria) VALUES ($1,$2) ON CONFLICT (task_id) DO UPDATE SET criteria=$2`, id, c)
+		_, _ = s.db.Exec(ctx, `INSERT INTO task_meta (task_id, criteria) VALUES ($1,$2) ON CONFLICT (task_id) DO UPDATE SET
+			criteria_met=CASE WHEN task_meta.criteria IS DISTINCT FROM $2 THEN NULL ELSE task_meta.criteria_met END,
+			criteria_gap=CASE WHEN task_meta.criteria IS DISTINCT FROM $2 THEN '' ELSE task_meta.criteria_gap END,
+			criteria=$2`, id, c)
 	}
 }
 
 func (s *Store) SetCriteriaResult(ctx context.Context, id int64, met bool, gap string) {
 	_, _ = s.db.Exec(ctx, `INSERT INTO task_meta (task_id, criteria_met, criteria_gap) VALUES ($1,$2,$3) ON CONFLICT (task_id) DO UPDATE SET criteria_met=$2, criteria_gap=$3`, id, met, gap)
+}
+
+// SetCriteriaUnknown records that a check could not produce a verdict, clearing any older verdict.
+func (s *Store) SetCriteriaUnknown(ctx context.Context, id int64, reason string) {
+	_, _ = s.db.Exec(ctx, `INSERT INTO task_meta (task_id, criteria_met, criteria_gap) VALUES ($1,NULL,$2) ON CONFLICT (task_id) DO UPDATE SET criteria_met=NULL, criteria_gap=$2`, id, reason)
 }
 
 func (s *Store) SetAudit(ctx context.Context, id int64, verdict, note string) {

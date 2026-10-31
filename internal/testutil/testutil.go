@@ -40,6 +40,9 @@ func DB(t testing.TB) *db.DB {
 	ctx := context.Background()
 	admin, err := pgx.Connect(ctx, base)
 	if err != nil {
+		if os.Getenv("PRISM_TEST_DSN") != "" {
+			t.Fatalf("configured test postgres unavailable: %v", err)
+		}
 		t.Skipf("test postgres unavailable: %v", err)
 	}
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {

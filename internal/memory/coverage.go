@@ -99,7 +99,7 @@ func judgeCoverage(n Need, facts []Fact, now time.Time) Coverage {
 	switch {
 	case len(good) > 0 && len(disputed) == 0:
 		c.Status = CoverSupported
-		c.Note = fmt.Sprintf("#%d%s", good[0].ID, trustNote(good[0]))
+		c.Note = fmt.Sprintf("candidate #%d%s; relevance alone does not establish that it answers the need", good[0].ID, trustNote(good[0]))
 	case len(good) > 0:
 		c.Status = CoverDisputed
 		c.Note = fmt.Sprintf("a supporting fact (#%d) exists, but a contradicting one (#%d) is live — resolve before relying on it", good[0].ID, disputed[0].ID)
@@ -126,7 +126,7 @@ func trustNote(f Fact) string {
 	switch {
 	case f.Confirmation == ConfirmUser:
 		return ", confirmed by the user"
-	case f.Confirmation == ConfirmMulti || len(f.Origins) >= 2:
+	case f.Confirmation == ConfirmMulti:
 		return ", confirmed by independent sources"
 	}
 	return fmt.Sprintf(", confidence %.0f%%", f.Confidence*100)
@@ -147,7 +147,7 @@ func (r *CoverageReport) Render() string {
 		}
 	}
 	if r.Gaps == 0 {
-		sb.WriteString("No gaps: every need is supported by memory.\n")
+		sb.WriteString("Every need has a relevant memory candidate; check that the facts actually answer the needs before relying on them.\n")
 	} else {
 		fmt.Fprintf(&sb, "Gaps: %d of %d needs are not plainly supported — fetch, verify or ask for those; do not assume them.\n", r.Gaps, len(r.Needs))
 	}

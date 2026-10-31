@@ -62,6 +62,8 @@ func (e *Engine) checkAcceptance(ctx context.Context, spec RunSpec, res *RunResu
 	}
 	met, gap, ran := e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.SessionID)
 	if !ran {
+		e.Tasks.SetCriteriaUnknown(ctx, t.ID, "Acceptance check could not run or returned no verdict.")
+		res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance check unavailable; completion has not been independently checked.]"
 		return res
 	}
 	if !met {
@@ -72,6 +74,8 @@ func (e *Engine) checkAcceptance(ctx context.Context, spec RunSpec, res *RunResu
 			res = again
 			met, gap, ran = e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.SessionID)
 			if !ran {
+				e.Tasks.SetCriteriaUnknown(ctx, t.ID, "Acceptance re-check could not run or returned no verdict.")
+				res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance re-check unavailable; completion has not been independently checked.]"
 				return res
 			}
 		}

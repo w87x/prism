@@ -33,7 +33,7 @@
     // like it's crawling and a short one like it's sprinting, purely by luck of the draw.
     return { image: `repeating-linear-gradient(90deg, ${stops.join(', ')})`, len: x.toFixed(1), dur: (x / 46).toFixed(2) };
   }
-  const tape = equalize ? morse() : null;
+  const tape = morse();
 </script>
 
 <div class="bar {t}" class:equalize style="height:{height}px;{color ? `--c:${color}` : ''}{equalize ? `--ms:${liveMs}ms;--delay:${jitter}s;--tape:${tape.image};--tlen:${tape.len}px;--dur:${tape.dur}s` : ''}" title={label}>
