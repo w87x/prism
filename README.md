@@ -53,6 +53,10 @@ Only one browser tab edits at a time (PRISM is a single-user app): a second tab 
 Development: `make dev` (backend on :7777 and the UI on :5173, proxying `/ws`).
 Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (creates and drops throw-away databases).
 
+New user schedules and action-oriented intents default to Atlas, who coordinates the specialists when they run.
+You can explicitly choose another agent. Simple watches notify directly, and built-in maintenance jobs keep their
+designated agents. Existing schedules and intents are not reassigned automatically.
+
 For a small, synthetic check of a local model's front-door planning, run:
 
 ```bash

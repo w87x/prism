@@ -458,7 +458,7 @@
       <div class="grow"><Field label="Preset"><Select value="" options={presets} placeholder="pick a preset…" onchange={(v) => v && (nc.expr = v)} /></Field></div>
     </div>
     <Field label="Cron expression" hint="min hour day month weekday · also @daily, @hourly, @every 2h"><Input bind:value={nc.expr} mono /></Field>
-    <Field label="Standing prompt" hint="Tell the agent to reply NO_REPLY when there is nothing worth telling you."><Textarea bind:value={nc.prompt} rows={6} mono={false} /></Field>
+    <Field label="Standing prompt" hint="Say what to do and when you want updates; Atlas coordinates by default."><Textarea bind:value={nc.prompt} rows={6} mono={false} /></Field>
     <Switch bind:checked={nc.enabled} label="enabled" />
   {/if}
   {#snippet footer()}<Button variant="ghost" onclick={() => (cOpen = false)}>Cancel</Button><Button variant="primary" disabled={!nc?.name?.trim() || !nc?.prompt?.trim()} onclick={saveCron}>Save</Button>{/snippet}

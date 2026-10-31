@@ -113,6 +113,8 @@ func (e *Engine) runbookGate(ctx context.Context, t tasks.Task) (state string, r
 
 const runbookNoteHead = "\n\n[Runbook for this job — written by the senior model from earlier successful runs. Follow it; if a step does not work as written or the situation is not covered, call escalate instead of improvising.]\n"
 
+const coordinatorRunbookNoteHead = "\n\n[Coordination runbook from earlier runs — use it as a guide to delegate the specialist work, not as permission to use tools you do not have. Check that specialists and evidence still fit; route again when they do not. Follow the user's notification preferences and existing tool confirmations.]\n"
+
 // afterRoutine is called once a routine task has finished: it keeps the runbook's books and samples runs for audit.
 func (e *Engine) afterRoutine(ctx context.Context, t tasks.Task, state string, rb Runbook, onMain bool) {
 	if state == "" {
@@ -182,7 +184,7 @@ Write the runbook as short numbered steps the small model can follow without und
 - first state the prerequisites and what must be checked afresh; do not treat a past result or value as current
 - the exact tools to call, in order, with the arguments that worked (URLs, queries, selectors, parameters), using placeholders only where something genuinely changes between runs
 - after each important tool call say what observable result means success, and how to decide whether the condition the user cares about is met with a concrete test; if the result is missing or ambiguous, do not claim success
-- what to reply when it IS met (the shape of the message) and when it is NOT (exactly NO_REPLY)
+- what to reply when it IS met and when it is NOT; use NO_REPLY for no change only if the user did not request periodic updates
 - what is known to go wrong on this job and what to do about it; never invent failures or unsupported details
 - when to call escalate (anything the steps do not cover)
 Under 250 words. No preamble. If an earlier runbook and the reason it failed are given, fix that cause.`
@@ -195,6 +197,9 @@ func (e *Engine) writeRunbook(ctx context.Context, t tasks.Task, old Runbook) {
 	in := fmt.Sprintf("THE JOB:\n%s\n\nWHAT A SUCCESSFUL RUN DID:\n%s\n\nITS FINAL REPLY:\n%s", textutil.Brief(t.Input, 1500), orNone(e.toolTrail(ctx, *t.SessionID)), textutil.Brief(t.Result, 800))
 	if old.Status == "stale" && old.Steps != "" {
 		in += fmt.Sprintf("\n\nEARLIER RUNBOOK (it stopped working: %s):\n%s", orNone(old.Note), old.Steps)
+	}
+	if p, err := e.Profiles.Get(ctx, t.ToAgent); err == nil && e.scheduledCoordinator(ctx, t, p) {
+		in += "\n\nThis job is run by the coordinating entry agent. Its runbook must describe how to delegate specialist work and review results; it must not tell the coordinator to call a specialist's tools directly. Treat agent names as suggestions to re-check against the current roster. Preserve the user's requested notification frequency."
 	}
 	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
@@ -213,7 +218,7 @@ func (e *Engine) writeRunbook(ctx context.Context, t tasks.Task, old Runbook) {
 // ── sampled audit ──
 
 const auditPrompt = `You are the senior model quietly re-checking one run of a routine job done by a small model. You get the job, the runbook it followed, what it actually did (tool calls and results) and its final reply.
-Say whether the reply is right: the steps were really carried out (no claim the trail does not support), the condition was judged correctly, and the reply has the right shape (news only, or NO_REPLY).
+Say whether the reply is right: the steps were really carried out (no claim the trail does not support), the condition was judged correctly, and the reply follows the user's reporting instructions, including periodic updates when requested and NO_REPLY for unchanged change-only watches.
 Answer JSON only: {"ok":true|false,"problem":"what is wrong, one sentence (empty when ok)"}`
 
 // maybeAudit re-checks a small-model run now and then: always the first two after a runbook goes live, then one in N.

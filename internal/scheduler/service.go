@@ -283,6 +283,9 @@ func (s *Service) SaveCron(ctx context.Context, c Cron) (int64, error) {
 
 // SaveCronWhy is SaveCron that records, when it changes an existing job, what the job was before and why it changed.
 func (s *Service) SaveCronWhy(ctx context.Context, c Cron, why string) (int64, error) {
+	if c.ID == 0 && !c.System && strings.TrimSpace(c.Agent) == "" {
+		c.Agent = "Atlas"
+	}
 	sched, err := cron.Parse(c.Expr)
 	if err != nil {
 		return 0, err
@@ -368,7 +371,7 @@ func (s *Service) fireCron(ctx context.Context, c Cron) error {
 	}
 	input := c.Prompt
 	if !c.System {
-		input += jobLifecycle(c.ID)
+		input += jobLifecycle(c.ID, strings.EqualFold(c.Agent, "Atlas"))
 	}
 	if c.System && c.Agent == "Oneiros" {
 		input += s.dismissedNote(ctx)
@@ -480,8 +483,11 @@ func (s *Service) CreateIntent(ctx context.Context, i Intent, p Predicate) (int6
 	if err := p.Validate(); err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(i.Description) == "" || strings.TrimSpace(i.Owner) == "" {
-		return 0, errors.New("description and owner are required")
+	if strings.TrimSpace(i.Owner) == "" {
+		i.Owner = "Atlas"
+	}
+	if strings.TrimSpace(i.Description) == "" {
+		return 0, errors.New("description is required")
 	}
 	if i.Type == "" {
 		i.Type = "intent"

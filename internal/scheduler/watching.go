@@ -254,6 +254,9 @@ func (s *Service) stopWatch(ctx context.Context, ref, note string) error {
 }
 
 // jobLifecycle is added to the input of every scheduled job: a job that waits for something should end itself when it has happened.
-func jobLifecycle(id int64) string {
+func jobLifecycle(id int64, coordinator bool) string {
+	if coordinator {
+		return fmt.Sprintf("\n\n[Job #%d] If this job's purpose is now complete — what it waits for has happened and been dealt with — call watch_stop(refs=[\"cron:%d\"], note=<reason>) before your final reply so it stops running. Do not stop it just because nothing changed today.", id, id)
+	}
 	return fmt.Sprintf("\n\n[Job #%d] If this job's purpose is now complete — what it waits for has happened and been dealt with (the release is out and downloaded, the deadline passed, the list is empty) — call cron_finish(id=%d, note) after your reply so it stops running. Do not finish it just because nothing changed today.", id, id)
 }

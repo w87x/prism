@@ -44,12 +44,13 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 	reg.Register(
 		&tools.Tool{
 			Name: "intent_create", Category: "autonomy", Risk: tools.RiskWrite, Auto: true,
-			Description: "Register a standing intent (prospective memory): 'tell me when X happens'. It is checked on a cadence; when the predicate holds you are woken with the evidence and decide what the user should hear. Set repeat for recurring triggers. Use type=watch for pure progress tracking (the user is notified directly, no model call).",
+			Description: "Register a standing intent (prospective memory): 'tell me when X happens'. It is checked on a cadence; when the predicate holds Atlas receives the evidence and coordinates any action or report. Set repeat for recurring triggers. Use type=watch for pure progress tracking (the user is notified directly, no model call).",
 			Params: tools.Obj("description,kind", append([]tools.Prop{
 				tools.Str("description", "what this intent is for, in words the user would use"),
 				tools.Enum("type", "intent (wake me to decide) | watch (just notify)", "intent", "watch"),
 				tools.Int("cadence_s", "seconds between checks (default 300, min 30)"),
 				tools.Bool("repeat", "keep watching after it fires"),
+				tools.Str("agent", "intent recipient; omit for Atlas. Set only when a particular agent was explicitly requested. Watches notify directly"),
 			}, predicateProps...)...),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				var a struct {
@@ -57,6 +58,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					Type        string `json:"type"`
 					CadenceS    int    `json:"cadence_s"`
 					Repeat      bool   `json:"repeat"`
+					Agent       string `json:"agent"`
 					Predicate
 				}
 				if err := json.Unmarshal(raw, &a); err != nil {
@@ -72,18 +74,35 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 						return "", fmt.Errorf("%s changes things (risk %s) and a watch calls its tool on every check unattended: poll a read-only tool (a list, search or status call) instead", a.Tool, t.Risk)
 					}
 				}
+				owner := strings.TrimSpace(a.Agent)
+				if owner == "" {
+					owner = "Atlas"
+					if a.Type == "watch" {
+						owner = env.Agent
+					}
+				}
+				var aerr error
+				if owner, aerr = s.agentName(ctx, owner); aerr != nil {
+					return "", aerr
+				}
 				if a.Type == "watch" {
-					if ex, err := s.watchGuard(ctx, env.Agent, a.Predicate); err != nil {
+					if ex, err := s.watchGuard(ctx, owner, a.Predicate); err != nil {
 						return "", err
 					} else if ex != 0 {
 						return fmt.Sprintf("Already watching this: watch #%d.", ex), nil
 					}
 				}
-				id, err := s.CreateIntent(ctx, Intent{Owner: env.Agent, Description: a.Description, Type: a.Type, CadenceS: a.CadenceS, Repeat: a.Repeat, Notify: true}, a.Predicate)
+				id, err := s.CreateIntent(ctx, Intent{Owner: owner, Description: a.Description, Type: a.Type, CadenceS: a.CadenceS, Repeat: a.Repeat, Notify: true}, a.Predicate)
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("Intent #%d registered (%s check every %ds).", id, a.Kind, max(a.CadenceS, 30)), nil
+				if err != nil {
+					return "", err
+				}
+				if a.Type == "watch" {
+					return fmt.Sprintf("Watch #%d registered (%s check every %ds); the user is notified directly.", id, a.Kind, max(a.CadenceS, 30)), nil
+				}
+				return fmt.Sprintf("Intent #%d registered (%s check every %ds); it wakes %s when triggered.", id, a.Kind, max(a.CadenceS, 30), owner), nil
 			},
 		},
 		&tools.Tool{
@@ -150,17 +169,17 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 		},
 		&tools.Tool{
 			Name: "cron_create", Category: "autonomy", Risk: tools.RiskWrite,
-			Description: "Before creating, look at cron_list: if a similar job exists, change it with cron_update (or fold the new item into it) instead of adding another. For a list of things to watch (prices, listings, releases) prefer ONE job — or a tracker with one row per item — over one job per item. Schedule a recurring job: at each firing a fresh session of the agent runs the standing prompt. Cron syntax 'min hour day month weekday' (e.g. '0 8 * * 1-5'), or @daily, @hourly, '@every 2h'. Times are in the user's timezone.",
+			Description: "Before creating, look at cron_list: if a similar job exists, change it with cron_update (or fold the new item into it) instead of adding another. For a list of things to watch (prices, listings, releases) prefer ONE job — or a tracker with one row per item — over one job per item. A new recurring job runs through Atlas by default; omit agent unless the user explicitly requests another agent. Each firing starts a fresh session with the standing prompt. Cron syntax 'min hour day month weekday' (e.g. '0 8 * * 1-5'), or @daily, @hourly, '@every 2h'. Times are in the user's timezone.",
 			Params: tools.Obj("name,expr,prompt", tools.Str("name", "short label"), tools.Str("expr", "cron expression"),
-				tools.Str("prompt", "standing prompt, self-contained; tell the agent to reply NO_REPLY when there is nothing to report"),
-				tools.Str("agent", "agent to run it (default: you)")),
+				tools.Str("prompt", "self-contained standing request, including what to do and when the user wants a notification"),
+				tools.Str("agent", "agent to run it (default: Atlas); set only when the user explicitly requests a particular agent")),
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 				a, err := tools.Decode[struct{ Name, Expr, Prompt, Agent string }](raw)
 				if err != nil {
 					return "", err
 				}
 				if a.Agent == "" {
-					a.Agent = env.Agent
+					a.Agent = "Atlas"
 				}
 				var aerr error
 				if a.Agent, aerr = s.agentName(ctx, a.Agent); aerr != nil {
@@ -185,7 +204,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					return "", err
 				}
 				sched, _ := cron.Parse(a.Expr)
-				return fmt.Sprintf("Cron #%d created; next run %s.", id, sched.Next(time.Now().In(s.loc(ctx))).Format("Mon 2006-01-02 15:04 MST")), nil
+				return fmt.Sprintf("Cron #%d created; runs as %s; next run %s.", id, a.Agent, sched.Next(time.Now().In(s.loc(ctx))).Format("Mon 2006-01-02 15:04 MST")), nil
 			},
 		},
 		&tools.Tool{
