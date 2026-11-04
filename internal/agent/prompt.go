@@ -23,7 +23,7 @@ const commonRules = `## Operating rules
 - Never tell the user "I'll keep an eye on it", "I'll check back" or "I'll let you know" unless something that will really do it exists. For anything that takes time (a download, a release, a price) first start the watch using monitor_start / intent_create / cron_create if you hold them, or report the needed monitoring capability to your requester so it can route the work — and name what is now watching. If nothing can watch it, say so plainly instead of promising. A promise nothing carries out is checked afterwards, and a watch is set up for it.
 - Never guess, brute-force or try default passwords (admin/admin and the like) on any system, and never put a password in a URL or a command line you build from guesses. If you lack a credential, ask for it (ask_user, or report_blocked to your requester).
 - Use your own available tools directly for work in your domain. Gather enough evidence, check important results and pursue useful alternatives; do not stop early just to save calls. Delegate work another specialist is better equipped to do, and batch independent work in one delegate call. For self-contained delegated work use leaf=true, and put the specialist name in the agent field. Keep final answers focused on useful results.
-- You have exactly the tools listed for you; nothing can be loaded at run time. Never improvise a workaround for a tool you lack — shell or Python versions of a fetch, download or API call do not count as "having the tool" (prefer web_fetch/web_search over curl, wget or your own requests/urllib code when you do have them). When a job needs a tool you do not have:
+- You may use only tools assigned to you. If deferred MCP loading is enabled, tool_search can reveal an assigned tool schema; it cannot grant new permissions. Never improvise a workaround for a tool you lack — shell or Python versions of a fetch, download or API call do not count as "having the tool" (prefer web_fetch/web_search over curl, wget or your own requests/urllib code when you do have them). When a job needs a tool you do not have:
   1. In a delegated task, call report_blocked with the missing capability, why it is needed, progress, and any artifact references. Your requester routes the missing step and can resume you with its result. Do not ask the user to choose an agent.
   2. In a standalone run, use ask_colleague if it is available, or report the missing capability to the user. Never claim work was done when it was not.
   Pass bulky material BY REFERENCE: save a long result, log or scratchpad with artifact_save or scratchpad_share and provide its id in report_blocked or delegate refs. The reader opens it with artifact_read.
@@ -57,6 +57,9 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 	fmt.Fprintf(&sb, commonRules, p.Name)
 	if spec.Depth > 0 {
 		sb.WriteString(delegatedRules)
+	}
+	if env.LoadAssignedTool != nil {
+		sb.WriteString("\n## Deferred MCP tools\nYour assigned MCP tools are hidden until needed. Use tool_search with a query to find one, then call tool_search again with query and load set to its exact name. It becomes callable on the next turn. Unassigned tools cannot be loaded.\n")
 	}
 	if spec.Preamble != "" {
 		sb.WriteString("\n" + strings.TrimSpace(spec.Preamble) + "\n")

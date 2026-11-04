@@ -33,8 +33,9 @@ type General struct {
 	Locale   string `json:"locale"`
 	// PlannerOff turns off the structured front door (classify, decompose, memory lookups, questions) for chat messages;
 	// RoutingOff keeps messages in the chat they were typed in instead of taking them to the chat of the project they are about.
-	PlannerOff bool `json:"planner_off"`
-	RoutingOff bool `json:"routing_off"`
+	PlannerOff  bool `json:"planner_off"`
+	RoutingOff  bool `json:"routing_off"`
+	DeferredMCP bool `json:"deferred_mcp"` // reveal assigned MCP schemas on request
 	// ChatHousekeepingOff stops the daily pass that suggests merging, splitting, archiving and re-titling chats (empty chats are still removed).
 	ChatHousekeepingOff bool `json:"chat_housekeeping_off"`
 }

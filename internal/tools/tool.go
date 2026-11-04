@@ -110,6 +110,8 @@ type Env struct {
 	CanSuspend bool
 	// Restricted runs (an agent on probation, and everyone it asks for help) get no exec tools.
 	Restricted bool
+	// LoadAssignedTool reveals an already-authorized deferred tool for this run, when enabled.
+	LoadAssignedTool func(name string) error
 	// Sources are the web sites seen in this run's untrusted output (see memory_store's source_url).
 	Sources *Sources
 }

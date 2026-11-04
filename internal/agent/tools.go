@@ -953,18 +953,29 @@ func (e *Engine) toolNotify() *tools.Tool {
 }
 
 func (e *Engine) toolToolSearch() *tools.Tool {
+	serial := false
 	return &tools.Tool{
-		Name: "tool_search", Category: "agents", Base: true, Risk: tools.RiskRead,
-		Description: "Look up which tool does something and WHO HAS IT (e.g. 'download file', 'obsidian note', 'telegram'). This only looks things up: you cannot load or enable tools — you have exactly the tools you were given. " +
+		Name: "tool_search", Category: "agents", Base: true, Risk: tools.RiskRead, Concurrent: &serial,
+		Description: "Look up which tool does something and WHO HAS IT (e.g. 'download file', 'obsidian note', 'telegram'). In optional deferred mode, load can reveal the schema of a tool already assigned to you; it cannot grant new permissions. " +
 			"If delegated work needs a tool you do not have, report_blocked so the requester can arrange the missing step. For a standalone run, ask a colleague if that tool is available.",
-		Params: tools.Obj("query", tools.Str("query", "capability keywords"), tools.Int("limit", "max tools to show (default 5)")),
+		Params: tools.Obj("query", tools.Str("query", "capability keywords"), tools.Int("limit", "max tools to show (default 5)"), tools.Str("load", "optional exact name of an assigned deferred MCP tool to reveal for this run")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Query string
+				Load  string
 				Limit int
 			}](raw)
 			if err != nil {
 				return "", err
+			}
+			if strings.TrimSpace(a.Load) != "" {
+				if env.LoadAssignedTool == nil {
+					return "", errors.New("deferred tool loading is not enabled for this run")
+				}
+				if err := env.LoadAssignedTool(strings.TrimSpace(a.Load)); err != nil {
+					return "", err
+				}
+				return "Loaded the assigned tool schema; call it by its exact name on the next turn.", nil
 			}
 			if a.Limit <= 0 || a.Limit > 10 {
 				a.Limit = 5
@@ -987,6 +998,9 @@ func (e *Engine) toolToolSearch() *tools.Tool {
 					sb.WriteString("\n  held by: everyone")
 				case slices.Contains(who, env.Agent):
 					sb.WriteString("\n  held by: you")
+					if env.LoadAssignedTool != nil && t.Deferred && strings.HasPrefix(t.Source, "mcp:") {
+						sb.WriteString(" — if not yet visible, load it with tool_search using its exact name")
+					}
 				case len(who) > 0:
 					hint := " — you do not have it: report_blocked so your requester can route the missing step"
 					if env.Depth == 0 {

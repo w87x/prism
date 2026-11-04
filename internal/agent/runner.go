@@ -421,12 +421,31 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	// An agent has exactly the tools its profile lists (plus the base set): nothing is loaded at run time, by the
 	// agent or by the system. Missing a tool means asking a colleague who has it, or reporting to the requester.
 	active := e.initialTools(ctx, p, spec)
+	deferred := map[string]bool{}
+	if settings.Load(ctx, e.Settings, settings.KeyGeneral, settings.General{}).DeferredMCP && active["tool_search"] {
+		for name := range active {
+			if t, ok := e.Tools.Get(name); ok && t.Deferred && strings.HasPrefix(t.Source, "mcp:") {
+				deferred[name] = true
+				delete(active, name)
+			}
+		}
+	}
 	ar.tools = active
 
 	env := &tools.Env{
 		Agent: p.Name, Profile: p, Restricted: spec.Restricted, SessionID: sess.ID, Depth: spec.Depth, Channel: spec.Channel, Topic: spec.Topic,
 		Emit:    func(kind string, data any) { e.Emit(kind, data) },
 		Sources: &tools.Sources{},
+	}
+	if len(deferred) > 0 {
+		env.LoadAssignedTool = func(name string) error {
+			t, ok := e.Tools.Get(name)
+			if !deferred[name] || !ok || !e.Tools.State(name).Enabled || !t.AllowedFor(p.Name) || (spec.Restricted && t.Risk == tools.RiskExec) || (spec.ReadOnly && t.Risk != tools.RiskRead) {
+				return fmt.Errorf("tool %q is not an available deferred tool assigned to you", name)
+			}
+			active[name] = true
+			return nil
+		}
 	}
 	res.Sources = env.Sources
 	if spec.Task != nil {
@@ -1205,6 +1224,9 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		return toolResult{text: fmt.Sprintf("Error: %s is reserved for %s. Delegate the request to %s (delegate) instead of doing it yourself.", tc.Name, strings.Join(tool.Only, "/"), strings.Join(tool.Only, "/"))}
 	}
 	if ar.tools != nil && !ar.tools[tc.Name] { // a registered tool that is not in this agent's toolset: never run it
+		if deferred := env.LoadAssignedTool; deferred != nil && inTeam(spec.Profile.Tools, tc.Name) && tool.Deferred && strings.HasPrefix(tool.Source, "mcp:") {
+			return toolResult{text: fmt.Sprintf("Error: %s is assigned to you but its schema is not loaded. Call tool_search with query and load set to its exact name first.", tc.Name)}
+		}
 		emit("denied", false)
 		who := e.toolHolders(ctx)[tc.Name]
 		hint := "nobody holds it: use report_blocked"
