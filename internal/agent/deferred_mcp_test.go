@@ -42,3 +42,36 @@ func TestDeferredMCPOnlyLoadsAssignedTools(t *testing.T) {
 		t.Fatalf("first=%v second=%v", first, second)
 	}
 }
+
+func TestDeferredMCPDoesNotBypassRestrictions(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := h.e.Settings.Set(ctx, settings.KeyGeneral, settings.General{DeferredMCP: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.e.Tools.Register(&tools.Tool{Name: "mcp__test__read", Source: "mcp:1", Deferred: true, Risk: tools.RiskRead}, &tools.Tool{Name: "mcp__test__write", Source: "mcp:1", Deferred: true, Risk: tools.RiskExec})
+	p, err := h.e.Profiles.Save(ctx, Profile{Name: "RestrictedWorker", Role: RoleWorker, Enabled: true, Tools: []string{"mcp__test__read", "mcp__test__write"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.fake.Handler = func(req map[string]any, _ int) testutil.Reply {
+		role, content, _ := msgAt(req, -1)
+		if role == "user" {
+			return testutil.Reply{Tools: []llm.ToolCall{tc("load", "tool_search", map[string]any{"query": "write", "load": "mcp__test__write"})}}
+		}
+		return testutil.Reply{Content: content}
+	}
+	for _, spec := range []RunSpec{{Restricted: true}, {ReadOnly: true}} {
+		sess, err := h.e.Sessions.Create(ctx, p.Name, "task", "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Profile = p
+		spec.Session = sess
+		spec.Input = "attempt"
+		out, err := h.e.Run(ctx, spec)
+		if err != nil || !strings.Contains(out.Text, "not an available deferred") {
+			t.Fatalf("restriction result=%+v err=%v", out, err)
+		}
+	}
+}
