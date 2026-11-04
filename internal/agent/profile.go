@@ -295,7 +295,7 @@ func (s *ProfileStore) Search(ctx context.Context, query string, limit int) ([]P
 			continue
 		}
 		cand = append(cand, p)
-		docs = append(docs, p.Name+" "+p.Group+" "+p.Description+" "+strings.Join(p.Traits, " ")+" "+strings.Join(p.Tools, " "))
+		docs = append(docs, p.Name+" "+p.Group+" "+p.Description+" "+strings.Join(p.Traits, " ")+" "+strings.Join(p.Tools, " ")+" "+strings.Join(p.Skills, " "))
 	}
 	hits := textmatch.Rank(query, docs, limit)
 	out := make([]Profile, 0, len(hits))

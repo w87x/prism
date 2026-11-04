@@ -65,7 +65,7 @@ func TestAgentsCannotUseToolsOutsideTheirToolset(t *testing.T) {
 	waitFor(t, 20*time.Second, func() bool { return h.events.count("chat.message") >= 2 && !h.e.ChatBusy("web") })
 
 	joined := strings.Join(seen, "\n---\n")
-	if !strings.Contains(joined, "denied:Error: shell is not in your toolset") || !strings.Contains(joined, "ask_colleague Cipher") {
+	if !strings.Contains(joined, "denied:Error: shell is not in your toolset") || !strings.Contains(joined, "holders: Cipher") {
 		t.Fatalf("a tool outside the toolset must be refused, pointing at the agent that holds it:\n%s", joined)
 	}
 	if !strings.Contains(joined, "search:") || strings.Contains(joined, "Loaded:") || !strings.Contains(joined, "held by: Cipher") {

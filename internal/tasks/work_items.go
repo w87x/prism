@@ -2,7 +2,10 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // WorkItem is a draft plan item. A linked task supplies its status; an unlinked item is not assumed complete.
@@ -50,7 +53,8 @@ func (s *Store) WorkItems(ctx context.Context, taskID int64) ([]WorkItem, error)
 	return out, rows.Err()
 }
 
-// LinkWorkItems only links items of the caller's own root to its direct child. Do not overwrite an existing assignment.
+// LinkWorkItems links only the caller's own plan to a direct child. An abandoned waiting task may be replaced;
+// a running or successfully completed task cannot be silently displaced.
 func (s *Store) LinkWorkItems(ctx context.Context, rootID, childID int64, items []int) error {
 	if len(items) == 0 {
 		return nil
@@ -60,14 +64,43 @@ func (s *Store) LinkWorkItems(ctx context.Context, rootID, childID int64, items 
 		return err
 	}
 	defer tx.Rollback(ctx)
+	var replaced []int64
 	for _, item := range items {
-		tag, err := tx.Exec(ctx, `UPDATE work_items SET delegate_id=$3 WHERE task_id=$1 AND item_no=$2 AND (delegate_id IS NULL OR EXISTS (SELECT 1 FROM tasks old WHERE old.id=delegate_id AND old.status IN ('partial','failed','cancelled'))) AND EXISTS (SELECT 1 FROM tasks WHERE id=$3 AND parent_id=$1)`, rootID, item, childID)
+		var previous *int64
+		if err := tx.QueryRow(ctx, `SELECT delegate_id FROM work_items WHERE task_id=$1 AND item_no=$2 FOR UPDATE`, rootID, item).Scan(&previous); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("plan item %d does not exist", item)
+			}
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE work_items SET delegate_id=$3 WHERE task_id=$1 AND item_no=$2 AND (delegate_id IS NULL OR EXISTS (SELECT 1 FROM tasks old WHERE old.id=delegate_id AND old.status IN ('partial','failed','cancelled','waiting_input'))) AND EXISTS (SELECT 1 FROM tasks WHERE id=$3 AND parent_id=$1)`, rootID, item, childID)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() != 1 {
 			return fmt.Errorf("plan item %d does not exist or is already assigned", item)
 		}
+		if previous != nil {
+			replaced = append(replaced, *previous)
+		}
 	}
-	return tx.Commit(ctx)
+	var cancelled []int64
+	for _, id := range replaced {
+		tag, err := tx.Exec(ctx, `UPDATE tasks SET status='cancelled',error='Reassigned to another task',question='',finished_at=now() WHERE id=$1 AND status='waiting_input' AND NOT EXISTS (SELECT 1 FROM work_items WHERE delegate_id=$1)`, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			cancelled = append(cancelled, id)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	for _, id := range cancelled {
+		if t, err := s.Get(ctx, id); err == nil {
+			s.notify(t)
+		}
+	}
+	return nil
 }

@@ -93,3 +93,38 @@ func TestStdioServerRegistersDeferredTools(t *testing.T) {
 		t.Fatal("tools should be unregistered when the server is disabled")
 	}
 }
+
+func TestMCPNameCollisionDoesNotReplaceConnectedTool(t *testing.T) {
+	d := testutil.DB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := tools.NewRegistry(d.Pool)
+	m := NewManager(d.Pool, reg)
+	defer m.Stop()
+	exe, _ := os.Executable()
+	mk := func(name string) int64 {
+		id, err := m.Save(ctx, Server{Name: name, Transport: "stdio", Command: exe, Env: map[string]string{"PRISM_FAKE_MCP": "1"}, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first, second := mk("same-name"), mk("same name")
+	if err := m.Reload(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(ctx, second); err == nil || !strings.Contains(err.Error(), "collision") {
+		t.Fatalf("expected collision, got %v", err)
+	}
+	tool, ok := reg.Get("mcp__same_name__echo")
+	if !ok || tool.Source != fmt.Sprintf("mcp:%d", first) {
+		t.Fatalf("original tool overwritten: %+v", tool)
+	}
+	out, err := tool.Run(ctx, &tools.Env{}, json.RawMessage(`{"text":"still works"}`))
+	if err != nil || !strings.Contains(out, "still works") {
+		t.Fatalf("original failed: %s %v", out, err)
+	}
+	if s := m.Statuses()[second]; s.State != "error" {
+		t.Fatalf("collision status: %+v", s)
+	}
+}

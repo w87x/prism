@@ -227,6 +227,7 @@ func (m *Manager) Connect(ctx context.Context, s Server) error {
 	}
 	source := fmt.Sprintf("mcp:%d", s.ID)
 	var names []string
+	var pending []*tools.Tool
 	for _, t := range ts {
 		t := t
 		full := toolName(s.Name, t.Name)
@@ -242,7 +243,7 @@ func (m *Manager) Connect(ctx context.Context, s Server) error {
 		if len(desc) > 600 {
 			desc = desc[:600] + "…"
 		}
-		m.reg.Register(&tools.Tool{
+		pending = append(pending, &tools.Tool{
 			Name: full, Description: fmt.Sprintf("[MCP %s] %s", s.Name, desc), Params: params, Category: "mcp:" + s.Name,
 			Risk: risk, Deferred: true, Untrusted: true, Auto: s.Armed, Source: source,
 			Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
@@ -258,6 +259,12 @@ func (m *Manager) Connect(ctx context.Context, s Server) error {
 			},
 		})
 		names = append(names, full)
+	}
+	if err := m.reg.RegisterUnique(pending...); err != nil {
+		c.Close()
+		err = fmt.Errorf("cannot connect MCP server %q: %w; rename the server or tool to avoid the normalized name collision", s.Name, err)
+		m.setAuthOrError(s.ID, err)
+		return err
 	}
 	m.mu.Lock()
 	m.clients[s.ID] = c

@@ -40,3 +40,21 @@ func TestCatalogIsCompactAndBestSpecialistRoutes(t *testing.T) {
 		t.Fatalf("must skip the caller and maintenance agents, got %q", got)
 	}
 }
+
+func TestAgentSearchFindsPinnedDomainSkills(t *testing.T) {
+	d := testutil.DB(t)
+	ctx := context.Background()
+	ps := NewProfileStore(d.Pool)
+	for _, p := range []Profile{
+		{Name: "Scout", Role: RoleWorker, Enabled: true, Group: "Web", Description: "online research", Skills: []string{"avito-listings"}},
+		{Name: "Disabled", Role: RoleWorker, Enabled: false, Group: "Web", Skills: []string{"avito-listings"}},
+	} {
+		if _, err := ps.Save(ctx, p, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ps.Search(ctx, "avito listings", 5)
+	if err != nil || len(got) != 1 || got[0].Name != "Scout" {
+		t.Fatalf("skill search got=%+v err=%v", got, err)
+	}
+}

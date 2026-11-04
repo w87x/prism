@@ -73,6 +73,29 @@ func (r *Registry) Register(ts ...*Tool) {
 	}
 }
 
+// RegisterUnique atomically installs a set of tools without replacing another tool.
+func (r *Registry) RegisterUnique(ts ...*Tool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[string]bool, len(ts))
+	for _, t := range ts {
+		if seen[t.Name] {
+			return fmt.Errorf("duplicate tool name %q in the same source", t.Name)
+		}
+		seen[t.Name] = true
+		if old, ok := r.tools[t.Name]; ok {
+			return fmt.Errorf("tool name %q already belongs to %s", t.Name, old.Source)
+		}
+	}
+	for _, t := range ts {
+		if t.Source == "" {
+			t.Source = "builtin"
+		}
+		r.tools[t.Name] = t
+	}
+	return nil
+}
+
 // UnregisterSource drops every tool registered from source (e.g. "mcp:github").
 func (r *Registry) UnregisterSource(source string) {
 	r.mu.Lock()

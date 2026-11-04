@@ -50,11 +50,13 @@ func (e *Engine) toolDelegate() *tools.Tool {
 	return &tools.Tool{
 		Name: "delegate", Category: "agents", Risk: tools.RiskRead,
 		Description: "Delegate work to specialist agents. Each item runs as its own task in an isolated context, in parallel; results come back together. " +
-			"Give every instruction full context — the agent does not see this conversation. To answer an agent's question or continue its task, pass its task_id and your reply as the instruction.",
+			"Use your own tools directly for simple operations. Batch independent work in one call; set leaf=true when no further handoffs are needed. Give every instruction full context — the agent does not see this conversation. To answer an agent's question or continue its task, pass its task_id and your reply as the instruction.",
 		Params: tools.Obj("tasks", tools.ObjList("tasks", "work items", "instruction",
 			tools.Str("agent", "agent name (see the specialists list or agent_find); leave out and the best-matching specialist is chosen"),
+			tools.StrList("required_tools", "optional exact tool names needed for this work; choose an agent that holds all of them"),
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
+			tools.Bool("leaf", "for self-contained work: prevent this agent from delegating or asking others"),
 			tools.Bool("scout", "a cheap read-only recon is taken first and handed to the agent as a brief — for jobs that are risky, expensive or ambiguous (unknown files, an unfamiliar site, a large change); leave out for simple jobs"),
 			tools.Str("done_when", "what 'done' means for this item — concrete, checkable acceptance criteria (e.g. 'a file saved, its path reported, at least 5 entries'). The result is checked against it before it comes back to you; leave out for trivial work"),
 			tools.IntList("plan_items", "Atlas only: top-level numbered draft plan items this task covers; omit if there is no saved plan, when unrelated or unsure"),
@@ -63,14 +65,16 @@ func (e *Engine) toolDelegate() *tools.Tool {
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
 				Tasks []struct {
-					Agent       string  `json:"agent"`
-					Instruction string  `json:"instruction"`
-					Title       string  `json:"title"`
-					DoneWhen    string  `json:"done_when"`
-					Scout       bool    `json:"scout"`
-					TaskID      int64   `json:"task_id"`
-					Refs        []int64 `json:"refs"`
-					PlanItems   []int   `json:"plan_items"`
+					Agent         string   `json:"agent"`
+					Instruction   string   `json:"instruction"`
+					Title         string   `json:"title"`
+					DoneWhen      string   `json:"done_when"`
+					Scout         bool     `json:"scout"`
+					Leaf          bool     `json:"leaf"`
+					TaskID        int64    `json:"task_id"`
+					Refs          []int64  `json:"refs"`
+					PlanItems     []int    `json:"plan_items"`
+					RequiredTools []string `json:"required_tools"`
 				} `json:"tasks"`
 			}](raw)
 			if err != nil {
@@ -100,6 +104,10 @@ func (e *Engine) toolDelegate() *tools.Tool {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
+					if err := e.validateRequestedTools(it.RequiredTools, env.Restricted); err != nil {
+						out[i] = "## delegation — error\n" + err.Error()
+						return
+					}
 					refs, rerr := e.artifactRefs(ctx, it.Refs)
 					if rerr != nil {
 						out[i] = "## delegation — error\n" + rerr.Error()
@@ -108,9 +116,27 @@ func (e *Engine) toolDelegate() *tools.Tool {
 					it.Instruction += refs
 					agentName := strings.TrimSpace(it.Agent)
 					if agentName == "" && it.TaskID == 0 {
+						agentName = e.namedSpecialist(ctx, it.Instruction, env.Agent)
+					}
+					if agentName == "" && it.TaskID == 0 {
 						var perr error
-						if agentName, perr = e.bestSpecialist(ctx, it.Instruction, env.Agent); perr != nil {
+						required := it.RequiredTools
+						if len(required) == 0 {
+							if inferred := inferredToolIntent(it.Instruction); inferred != "" {
+								agentName, _ = e.bestSpecialistForTools(ctx, it.Instruction, env.Agent, []string{inferred})
+							}
+						}
+						if agentName == "" {
+							agentName, perr = e.bestSpecialistForTools(ctx, it.Instruction, env.Agent, required)
+						}
+						if perr != nil {
 							out[i] = "## delegation — error\n" + perr.Error()
+							return
+						}
+					}
+					if it.TaskID == 0 {
+						if err := e.validateRequiredTools(ctx, agentName, it.RequiredTools); err != nil {
+							out[i] = "## delegation — error\n" + err.Error()
 							return
 						}
 					}
@@ -125,7 +151,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 							}
 						}
 					}
-					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, criteria, it.Scout, it.PlanItems)
+					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, it.Leaf, false, criteria, it.Scout, it.PlanItems)
 					tainted[i] = tn
 					if err != nil {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
@@ -157,6 +183,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			"The maintenance staff can be asked too, each in their own field (Mnemosyne: memory — moving, merging or retiring facts, by id; Forge: designing agents; Metis: improving an agent; Oneiros: reflection and briefings; Daedalus: turning a finished task into a skill; Sentinel: monitors on a page, download, process or file). They review the request and may refuse it.",
 		Params: tools.Obj("request", tools.Str("request", "exactly what you need, with all context (URLs, queries, what to return)"),
 			tools.Str("agent", "the specialist to ask (optional)"),
+			tools.StrList("required_tools", "optional exact tool names the specialist must hold"),
 			tools.Str("done_when", "optional: what 'done' means — checkable acceptance criteria the answer is checked against before it comes back to you"),
 			tools.IntList("refs", "artifact ids with the material the request is about (artifact_save / scratchpad_share first) — pass bulky material by reference, not pasted")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
@@ -164,12 +191,16 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 				Request, Agent string
 				DoneWhen       string `json:"done_when"`
 				Refs           []int64
+				RequiredTools  []string `json:"required_tools"`
 			}](raw)
 			if err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(a.Request) == "" {
 				return "", errors.New("say what you need")
+			}
+			if err := e.validateRequestedTools(a.RequiredTools, env.Restricted); err != nil {
+				return "", err
 			}
 			refs, err := e.artifactRefs(ctx, a.Refs)
 			if err != nil {
@@ -178,8 +209,19 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			a.Request += refs
 			name := strings.TrimSpace(a.Agent)
 			if name == "" {
+				name = e.namedSpecialist(ctx, a.Request, env.Agent)
+			}
+			if name == "" {
 				var err error
-				if name, err = e.bestSpecialist(ctx, a.Request, env.Agent); err != nil {
+				if len(a.RequiredTools) == 0 {
+					if inferred := inferredToolIntent(a.Request); inferred != "" {
+						name, _ = e.bestSpecialistForTools(ctx, a.Request, env.Agent, []string{inferred})
+					}
+				}
+				if name == "" {
+					name, err = e.bestSpecialistForTools(ctx, a.Request, env.Agent, a.RequiredTools)
+				}
+				if err != nil {
 					return "", err
 				}
 			}
@@ -187,12 +229,15 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			// a description of who is wanted, and the best-matching specialist is asked instead
 			prefix := ""
 			if _, perr := e.Profiles.Get(ctx, name); perr != nil && strings.TrimSpace(a.Agent) != "" {
-				if best, berr := e.bestSpecialist(ctx, a.Agent+" "+a.Request, env.Agent); berr == nil {
+				if best, berr := e.bestSpecialistForTools(ctx, a.Agent+" "+a.Request, env.Agent, a.RequiredTools); berr == nil {
 					prefix = fmt.Sprintf("(There is no agent called %q; %s was asked instead.)\n", a.Agent, best)
 					name = best
 				}
 			}
-			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen, false, nil)
+			if err := e.validateRequiredTools(ctx, name, a.RequiredTools); err != nil {
+				return "", err
+			}
+			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, true, a.DoneWhen, false, nil)
 			if err != nil {
 				return "", err
 			}
@@ -285,6 +330,9 @@ func formatTaskResult(t tasks.Task) string {
 	case tasks.Done:
 		return fmt.Sprintf("## Task #%d → %s [done]\n%s", t.ID, t.ToAgent, strings.TrimSpace(t.Result))
 	case tasks.WaitingInput:
+		if strings.HasPrefix(strings.TrimSpace(t.Question), "MISSING CAPABILITY:") {
+			return fmt.Sprintf("## Task #%d → %s [needs input]\n%s\n(Route the missing step to a capable specialist, then resume this task with delegate(task_id=%d, instruction=<actual result>). Do not ask the user to supply an internal tool.)", t.ID, t.ToAgent, t.Question, t.ID)
+		}
 		return fmt.Sprintf("## Task #%d → %s [needs input]\nQuestion: %s\n(Answer it yourself if you can, else use ask_user; then continue with delegate(task_id=%d, instruction=<answer>).)", t.ID, t.ToAgent, t.Question, t.ID)
 	case tasks.Partial:
 		return fmt.Sprintf("## Task #%d → %s [partial — %s]\n%s\n(This ran out of budget before finishing; continue with delegate(task_id=%d, instruction=<what to do next>) if it should keep going.)", t.ID, t.ToAgent, t.Error, strings.TrimSpace(t.Result), t.ID)
@@ -297,11 +345,11 @@ func formatTaskResult(t tasks.Task) string {
 	}
 }
 
-func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string, scout bool, planItems []int) (tasks.Task, bool, error) {
+func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf, colleague bool, criteria string, scout bool, planItems []int) (tasks.Task, bool, error) {
 	if strings.TrimSpace(instruction) == "" {
 		return tasks.Task{}, false, errors.New("empty instruction")
 	}
-	opts := TaskOpts{Tainted: env.Tainted, ParentRun: env.RunID, Leaf: leaf, Restricted: env.Restricted}
+	opts := TaskOpts{Tainted: env.Tainted, ParentRun: env.RunID, Leaf: leaf, OneOff: colleague, Restricted: env.Restricted}
 	if taskID != 0 { // multi-turn continuation
 		if len(planItems) > 0 {
 			return tasks.Task{}, false, errors.New("plan_items are only for new tasks; a continued task keeps its existing links")
@@ -339,17 +387,17 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	if strings.EqualFold(p.Name, env.Agent) {
 		return tasks.Task{}, false, errors.New("cannot delegate to yourself")
 	}
-	if !leaf {
+	if !colleague {
 		if me, merr := e.Profiles.Get(ctx, env.Agent); merr == nil && len(me.Team) > 0 && !inTeam(me.Team, p.Name) {
 			return tasks.Task{}, false, fmt.Errorf("%s is not on your team — you lead: %s. Delegate only to them (use ask_colleague for a one-off request outside the team)", p.Name, strings.Join(me.Team, ", "))
 		}
 	}
 	// Any agent may ask the maintenance staff (Forge, Metis, Mnemosyne, Oneiros, Daedalus, Sentinel) for help in their own
 	// field; staff review the request and may refuse it. An agent on probation may not.
-	if leaf && p.Role == RoleMaint && env.Restricted {
+	if colleague && p.Role == RoleMaint && env.Restricted {
 		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff: an agent on probation cannot ask them, report to your requester instead", p.Name)
 	}
-	if leaf && p.Role != RoleWorker && p.Role != RoleMaint {
+	if colleague && p.Role != RoleWorker && p.Role != RoleMaint {
 		return tasks.Task{}, false, fmt.Errorf("%s is part of PRISM's staff, not a specialist: ask a specialist instead", p.Name)
 	}
 	if c := strings.TrimSpace(criteria); c != "" {
@@ -438,7 +486,7 @@ func (e *Engine) artifactNote(ctx context.Context, session int64) string {
 func (e *Engine) toolAgentFind() *tools.Tool {
 	return &tools.Tool{
 		Name: "agent_find", Category: "agents", Risk: tools.RiskRead,
-		Description: "Search the agent catalog by purpose/traits (e.g. 'price comparison web scraping'). Returns matching agents with their groups and traits.",
+		Description: "Search the agent catalog by purpose, traits, tool or pinned skill (e.g. 'price comparison web scraping'). Returns matching agents and their capabilities.",
 		Params:      tools.Obj("query", tools.Str("query", "what the agent should be good at"), tools.Int("limit", "max results (default 5)")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
@@ -460,7 +508,27 @@ func (e *Engine) toolAgentFind() *tools.Tool {
 			}
 			var sb strings.Builder
 			for _, p := range ps {
-				fmt.Fprintf(&sb, "- %s [%s] traits: %s — %s\n", p.Name, p.Group, strings.Join(p.Traits, ", "), p.Description)
+				fmt.Fprintf(&sb, "- %s [%s] traits: %s — %s", p.Name, p.Group, strings.Join(p.Traits, ", "), p.Description)
+				if len(p.Skills) > 0 {
+					fmt.Fprintf(&sb, " (skills: %s)", strings.Join(p.Skills, ", "))
+				}
+				var available []string
+				for _, name := range p.Tools {
+					if e.profileHasTools(p, []string{name}) {
+						available = append(available, name)
+					}
+				}
+				if len(available) > 0 {
+					n := len(available)
+					if n > 12 {
+						n = 12
+					}
+					fmt.Fprintf(&sb, "\n  tools: %s", strings.Join(available[:n], ", "))
+					if len(available) > n {
+						fmt.Fprintf(&sb, " (+%d more; agent_read for the full profile)", len(available)-n)
+					}
+				}
+				sb.WriteString("\n")
 			}
 			return sb.String(), nil
 		},
@@ -888,7 +956,7 @@ func (e *Engine) toolToolSearch() *tools.Tool {
 	return &tools.Tool{
 		Name: "tool_search", Category: "agents", Base: true, Risk: tools.RiskRead,
 		Description: "Look up which tool does something and WHO HAS IT (e.g. 'download file', 'obsidian note', 'telegram'). This only looks things up: you cannot load or enable tools — you have exactly the tools you were given. " +
-			"If the tool you need belongs to a colleague, ask_colleague them (by exact name); if nobody holds it, report to whoever asked you.",
+			"If delegated work needs a tool you do not have, report_blocked so the requester can arrange the missing step. For a standalone run, ask a colleague if that tool is available.",
 		Params: tools.Obj("query", tools.Str("query", "capability keywords"), tools.Int("limit", "max tools to show (default 5)")),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
 			a, err := tools.Decode[struct {
@@ -920,7 +988,11 @@ func (e *Engine) toolToolSearch() *tools.Tool {
 				case slices.Contains(who, env.Agent):
 					sb.WriteString("\n  held by: you")
 				case len(who) > 0:
-					sb.WriteString("\n  held by: " + strings.Join(who, ", ") + " — you do not have it: ask_colleague one of them, or report to your requester")
+					hint := " — you do not have it: report_blocked so your requester can route the missing step"
+					if env.Depth == 0 {
+						hint = " — you do not have it: ask_colleague one of them, or report to your requester"
+					}
+					sb.WriteString("\n  held by: " + strings.Join(who, ", ") + hint)
 				default:
 					sb.WriteString("\n  held by: nobody — it is not assigned to any agent; report that it is missing")
 				}
@@ -963,8 +1035,8 @@ func (e *Engine) toolHolders(ctx context.Context) map[string][]string {
 			continue
 		}
 		for _, n := range p.Tools {
-			if t, ok := e.Tools.Get(n); ok && !t.AllowedFor(p.Name) {
-				continue // listed on the profile but reserved for other agents: it is not really theirs
+			if t, ok := e.Tools.Get(n); !ok || !t.AllowedFor(p.Name) || !e.Tools.State(n).Enabled || (p.Probation && t.Risk == tools.RiskExec) {
+				continue // unavailable, reserved, or restricted by probation
 			}
 			out[n] = append(out[n], p.Name)
 		}
@@ -1200,6 +1272,9 @@ func (e *Engine) ownedRunningTask(ctx context.Context, env *tools.Env, id int64)
 	}
 	if !owned {
 		return t, errors.New("that task is not one you delegated")
+	}
+	if t.Status == tasks.WaitingInput {
+		return t, fmt.Errorf("task #%d needs an answer: continue it with delegate using task_id %d and your answer as instruction, or assign its plan item to a new specialist", t.ID, t.ID)
 	}
 	if t.Status != tasks.Running && t.Status != tasks.Queued {
 		return t, fmt.Errorf("task #%d is already %s", t.ID, t.Status)

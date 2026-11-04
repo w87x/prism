@@ -252,9 +252,9 @@ type RunSpec struct {
 	Input   string
 	// Restricted removes exec tools (an agent on probation, or a run started on its behalf).
 	Restricted bool
-	// Leaf marks a run started by ask_colleague: it can use its tools but cannot delegate or ask colleagues in
-	// turn, so requests for help never chain.
+	// Leaf prevents further delegation in this run.
 	Leaf        bool
+	OneOff      bool    // legacy ask_colleague request, used for run attribution
 	InputImages []int64 // pictures that came with Input (artifact ids)
 	Provenance  string  // origin of Input: user | agent | system
 	Tainted     bool
@@ -271,7 +271,7 @@ type RunSpec struct {
 	Run      *activeRun // pre-registered by the caller (chat steering); nil → created here
 	// Kind tags what kind of run this is for the UI (e.g. "quick" for QuickAsk) — inherited by every run it
 	// delegates to (see register()), so the whole resulting tree can be told apart from an unrelated chat
-	// conversation's own run tree even after several hops of delegation. Leaf sets "ask" the same way.
+	// conversation's own run tree even after several hops of delegation. OneOff sets "ask" the same way.
 	Kind string
 	// NoRecall skips the automatic memory-recall pack for this turn (see (*Engine).recall) — for a small,
 	// self-contained request that doesn't need the user's history pulled in, the recall lookup itself is
@@ -317,7 +317,7 @@ func (e *Engine) register(spec RunSpec) *activeRun {
 	ar := &activeRun{steer: spec.Steer, started: time.Now()}
 	ar.touch()
 	kind := spec.Kind
-	if kind == "" && spec.Leaf {
+	if kind == "" && spec.OneOff {
 		kind = "ask"
 	}
 	e.mu.Lock()
@@ -859,7 +859,7 @@ func (e *Engine) initialTools(ctx context.Context, p *Profile, spec RunSpec) map
 	if spec.Depth >= MaxDepth || spec.Leaf {
 		delete(active, "delegate")
 	}
-	if spec.Leaf {
+	if spec.Leaf || (spec.Depth > 0 && spec.Task != nil) {
 		delete(active, "ask_colleague")
 	}
 	// Daedalus reads a finished task's transcript and writes a skill; asking colleagues to redo the task's work (one run chased the same
@@ -1180,7 +1180,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		who := e.toolHolders(ctx)[tc.Name]
 		hint := "nobody holds it: use report_blocked"
 		if len(who) > 0 {
-			hint = "ask_colleague " + strings.Join(who, " or ") + " with a complete request, or report_blocked"
+			hint = "report_blocked with the missing tool and your progress so your requester can route it (holders: " + strings.Join(who, ", ") + ")"
+			if spec.Depth == 0 {
+				hint = "ask_colleague " + strings.Join(who, " or ") + " with a complete request, or report_blocked"
+			}
 		}
 		return toolResult{text: fmt.Sprintf("Error: %s is not in your toolset and tools cannot be loaded at run time — %s.", tc.Name, hint)}
 	}

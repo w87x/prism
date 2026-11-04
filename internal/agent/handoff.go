@@ -58,7 +58,7 @@ func (e *Engine) artifactRefs(ctx context.Context, ids []int64) (string, error) 
 func (e *Engine) toolReportBlocked() *tools.Tool {
 	return &tools.Tool{
 		Name: "report_blocked", Category: "agents", Base: true, Risk: tools.RiskRead,
-		Description: "You cannot finish because a tool or capability you need is not in your toolset, and no colleague you can ask (ask_colleague) holds it. " +
+		Description: "You cannot finish because a tool or capability you need is not in your toolset. " +
 			"Ends your run and tells whoever asked you exactly what is missing, what you already did, and where your partial results are (artifact references), so they can route the rest. Use it instead of a workaround or a vague apology.",
 		Params: tools.Obj("missing", tools.Str("missing", "the tool or capability you lack (a tool name if you know it)"),
 			tools.Str("why", "what it was needed for"),

@@ -930,7 +930,8 @@ type TaskOpts struct {
 	Input      string // overrides t.Input for this turn (multi-turn continuation)
 	Tainted    bool
 	ParentRun  int64
-	Leaf       bool // a colleague's one-off help: no further delegation
+	Leaf       bool // no further delegation
+	OneOff     bool // legacy one-off colleague requests cannot wait for a response
 	Restricted bool // inherited from a probationary requester
 	Scout      bool // a read-only recon before the real run (see nature.go)
 }
@@ -1049,7 +1050,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 	if t.FromKind == "cron" || t.FromKind == "intent" || t.FromKind == "system" {
 		prov = "system"
 	}
-	spec := RunSpec{Profile: p, Session: sess, Task: &t, Input: input, Provenance: prov, Tainted: o.Tainted, Leaf: o.Leaf, Restricted: o.Restricted,
+	spec := RunSpec{Profile: p, Session: sess, Task: &t, Input: input, Provenance: prov, Tainted: o.Tainted, Leaf: o.Leaf, OneOff: o.OneOff, Restricted: o.Restricted,
 		Channel: "task", Interactive: t.Depth == 0 && (t.FromKind == "user" || t.FromKind == "telegram"), Depth: t.Depth, ParentRun: o.ParentRun, ReadOnly: o.Scout}
 	if t.Depth > 0 { // a delegated task can be redirected by whoever delegated it (task_steer)
 		steerCh := make(chan string, 8)
@@ -1091,7 +1092,7 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: p.Name, To: t.FromName, Text: res.Text, TaskID: t.ID, Agent: p.Name, Tainted: res.Tainted})
 	}
 	switch {
-	case res.NeedsInput != "" && o.Leaf:
+	case res.NeedsInput != "" && o.OneOff:
 		// A colleague's one-off help cannot be paused for an answer — nobody can give one: the user does not see it and the
 		// asker has already moved on. The question goes back as the answer, and the asker decides (ask again with the missing
 		// information, or pick another agent). It never becomes a "waiting for your answer" task.
