@@ -26,6 +26,9 @@ var cases = []evalCase{
 	{"research", "Find the current US price of the Apple MacBook Air 13-inch M4 with 16GB RAM and 256GB storage, in USD, and summarize two sources.", "task", true},
 	{"dependent_work", "Check the build, then summarize any errors you find.", "task", true},
 	{"memory_lookup", "What folder did I tell you I use for movies?", "question", true},
+	{"avito_watch", "Search Avito for FEVM FAEX2 PCs under 500000 rubles and check daily at 4 AM in my configured timezone.", "task", true},
+	{"pricing_comparison", "Compare current Gemini and OpenAI plans and their token limits using official sources.", "task", true},
+	{"model_tracker", "Every Friday check for new base language models that fit on my Mac with 96 GB RAM in Q4; use my existing notification settings.", "task", true},
 	{"monitor", "Check the announced release date of Neuromancer season 2 every week and notify me when it changes; use my existing notification settings.", "task", true},
 }
 

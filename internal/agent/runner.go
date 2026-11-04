@@ -911,6 +911,7 @@ type toolResult struct {
 type loopGuard struct {
 	mu          sync.Mutex // concurrent-safe tool calls note themselves in parallel
 	recent      []string
+	results     []string // recent read results; equal output can reveal unproductive query variations
 	abort       bool
 	textRepeats int // how many times noteText has caught the model stuck repeating its own output
 	toolWarnAt  int // identical tool call: warn once it's been made this many times (default 3)
@@ -939,6 +940,12 @@ func (g *loopGuard) progressing() bool {
 			return false
 		}
 	}
+	if len(g.results) >= 3 {
+		last := g.results[len(g.results)-3:]
+		if last[0] == last[1] && last[1] == last[2] {
+			return false
+		}
+	}
 	last := g.recent[max(0, len(g.recent)-8):]
 	seen := map[string]bool{}
 	for _, s := range last {
@@ -948,6 +955,28 @@ func (g *loopGuard) progressing() bool {
 		seen[s] = true
 	}
 	return true
+}
+
+// noteReadResult warns about identical evidence from different queries. It never
+// aborts a run: repeated results can be legitimate, and the agent decides what to do.
+func (g *loopGuard) noteReadResult(tool, output string) string {
+	output = strings.TrimSpace(output)
+	if len([]rune(output)) < 40 {
+		return ""
+	}
+	h := sha1.Sum([]byte(tool + "\x00" + output))
+	key := hex.EncodeToString(h[:])
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.results = append(g.results, key)
+	if len(g.results) > 6 {
+		g.results = g.results[len(g.results)-6:]
+	}
+	n := len(g.results)
+	if n >= 3 && g.results[n-1] == g.results[n-2] && g.results[n-2] == g.results[n-3] {
+		return "[progress] The last three read results were identical. Consider a different source or finish with the evidence available."
+	}
+	return ""
 }
 
 // blocked says why a tool may not be called any more in this run ("" = fine).
@@ -1409,6 +1438,11 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		guard.succeeded(tc.Name)
 	}
 	out = textutil.Clean(out)
+	if err == nil && tool.Risk == tools.RiskRead && tc.Name != "delegate" && tc.Name != "ask_colleague" {
+		if w := guard.noteReadResult(tc.Name, out); w != "" {
+			warn = strings.TrimSpace(warn + "\n" + w)
+		}
+	}
 	if cp := toolResultCap(ar.ctxTokens.Load(), ar.window.Load()); len([]rune(out)) > cp {
 		r := []rune(out)
 		out = string(r[:cp]) + fmt.Sprintf("\n…[truncated %d chars — narrow the request or page through it]", len(r)-cp)

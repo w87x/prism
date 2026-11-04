@@ -16,14 +16,16 @@
   let tables = $state(lsGet('prism.usageTables', false));
   let d = $state(null);
   let deleg = $state(null);
+  let workflows = $state([]);
   let busy = $state(false);
 
   async function load() {
     busy = true;
-    const [r, dg] = await Promise.all([call('ops.dashboard', { days }, { quiet: true }), call('ops.delegation', { days }, { quiet: true })]);
+    const [r, dg, wf] = await Promise.all([call('ops.dashboard', { days }, { quiet: true }), call('ops.delegation', { days }, { quiet: true }), call('ops.workflows', { days }, { quiet: true })]);
     busy = false;
     if (r) d = r;
     if (dg) deleg = dg;
+    if (wf) workflows = wf;
   }
   // effects must not read what they write: load untracked, refresh on a timer
   $effect(() => {
@@ -93,6 +95,13 @@
         </Panel>
       </div>
 
+      {#if workflows.length}
+        <Panel title="Recent request traces" flush>
+          <table class="t"><thead><tr><th>Task</th><th>Status</th><th class="r">Model calls</th><th class="r">Tool calls</th><th class="r">Delegations</th><th class="r">Repeated</th><th class="r">Questions</th><th class="r">Failures</th></tr></thead>
+            <tbody>{#each workflows as w}<tr><td>#{w.task_id}</td><td>{w.status}</td><td class="r">{n(w.model_calls)}</td><td class="r">{n(w.tool_calls)}</td><td class="r">{n(w.delegations)}</td><td class="r">{n(w.repeated_assignments)}</td><td class="r">{n(w.questions)}</td><td class="r">{n(w.failed_tools)}</td></tr>{/each}</tbody></table>
+          <div class="sm mute">Recorded task-linked calls only; background work and some delegated questions may be absent.</div>
+        </Panel>
+      {/if}
       <div class="tables">
         <Panel title="By model" flush>
           <table class="t">
