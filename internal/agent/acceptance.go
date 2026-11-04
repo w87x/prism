@@ -85,6 +85,13 @@ func (e *Engine) checkAcceptance(ctx context.Context, spec RunSpec, res *RunResu
 	if crit == "" {
 		return res
 	}
+	if t.SessionID != nil {
+		if missing, err := e.missingSavedArtifact(ctx, *t.SessionID, res.Text); err == nil && missing != "" {
+			e.Tasks.SetCriteriaResult(ctx, t.ID, false, missing)
+			res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance check: NOT met — " + missing + ".]"
+			return res
+		}
+	}
 	met, gap, ran := e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.ID, t.SessionID)
 	if !ran {
 		e.Tasks.SetCriteriaUnknown(ctx, t.ID, "Acceptance check could not run or returned no verdict.")
