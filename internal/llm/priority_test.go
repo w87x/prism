@@ -71,3 +71,37 @@ func TestPriorityIsPerEndpointAndBackgroundEventuallyRuns(t *testing.T) {
 		t.Fatal("bounded background wait failed")
 	}
 }
+
+func TestBackgroundCallsOnSameEndpointAreSerialized(t *testing.T) {
+	p := inferencePriority{maxWait: 10 * time.Millisecond}
+	release, err := p.acquire(context.Background(), "local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan func(), 1)
+	go func() {
+		done, err := p.acquire(context.Background(), "local", true)
+		if err == nil {
+			ready <- done
+		}
+	}()
+	select {
+	case <-ready:
+		t.Fatal("background calls overlapped")
+	case <-time.After(30 * time.Millisecond):
+	}
+	release()
+	select {
+	case done := <-ready:
+		done()
+	case <-time.After(time.Second):
+		t.Fatal("queued background call stalled")
+	}
+}
+
+func TestBackgroundContextIsInherited(t *testing.T) {
+	ctx := WithBackground(context.Background())
+	if !backgroundContext(context.WithoutCancel(ctx)) || backgroundContext(context.Background()) {
+		t.Fatal("background task priority was not inherited")
+	}
+}

@@ -75,19 +75,17 @@ func foldFailures(ms []Msg, out []llm.Message) {
 	}
 }
 
-// Tool results are capped so one fat output cannot flood the context. The cap is generous while the run
-// still has plenty of room (a first big read is worth having whole) and tight once the context has filled
-// up, where every extra token is resent on every remaining turn.
-const (
-	toolResultCapTight = 6000
-	toolResultCapRoomy = maxToolResultChars
-)
+// Cap one result as a fraction of the remaining model window, leaving space for
+// later turns. Rune counts are used conservatively as an upper token estimate.
+const toolResultCapTight = 6000
+const toolResultCapMax = 100000
 
 func toolResultCap(ctxTokens, window int64) int {
-	if window > 0 && float64(ctxTokens) < 0.15*float64(window) {
-		return toolResultCapRoomy
+	if window <= 0 {
+		return toolResultCapTight
 	}
-	return toolResultCapTight
+	remaining := max(int64(0), window-ctxTokens)
+	return int(min(int64(toolResultCapMax), max(int64(toolResultCapTight), remaining/4)))
 }
 
 // dedupeToolOutputs replaces a repeat of an earlier identical tool output (same tool, same text, over

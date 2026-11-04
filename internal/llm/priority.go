@@ -6,12 +6,14 @@ import (
 	"time"
 )
 
-// inferencePriority delays background calls on the same endpoint while foreground
-// inference runs. It does not interrupt active calls. The bounded wait protects both
-// background progress and the caller's own deadline.
+// inferencePriority gives foreground calls precedence on each endpoint, and
+// allows at most one background inference per endpoint. A waiting background
+// call becomes eligible alongside foreground work after a bounded wait.
+// In-flight calls are never interrupted. Caller deadlines include queue time.
 type inferencePriority struct {
 	mu         sync.Mutex
 	foreground map[string]int
+	background map[string]bool
 	changed    chan struct{}
 	maxWait    time.Duration
 }
@@ -24,6 +26,12 @@ func (p *inferencePriority) acquire(ctx context.Context, endpoint string, backgr
 	if p.changed == nil {
 		p.changed = make(chan struct{})
 		p.foreground = map[string]int{}
+		p.background = map[string]bool{}
+	}
+	if !background {
+		p.foreground[endpoint]++
+		p.mu.Unlock()
+		return p.release(endpoint, false), nil
 	}
 	wait := p.maxWait
 	if wait <= 0 {
@@ -40,36 +48,62 @@ func (p *inferencePriority) acquire(ctx context.Context, endpoint string, backgr
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
-	for background && p.foreground[endpoint] > 0 {
+	fair := false
+	for p.background[endpoint] || (p.foreground[endpoint] > 0 && !fair) {
 		ch := p.changed
 		p.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timer.C:
-			return func() {}, nil
-		case <-ch:
+		if fair {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-ch:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+				fair = true
+			case <-ch:
+			}
 		}
 		p.mu.Lock()
 	}
-	if !background {
-		p.foreground[endpoint]++
-	}
+	p.background[endpoint] = true
 	p.mu.Unlock()
-	return func() {
-		if background {
-			return
-		}
-		p.mu.Lock()
-		p.foreground[endpoint]--
-		if p.foreground[endpoint] == 0 {
-			delete(p.foreground, endpoint)
-		}
-		close(p.changed)
-		p.changed = make(chan struct{})
-		p.mu.Unlock()
-	}, nil
+	return p.release(endpoint, true), nil
 }
+func (p *inferencePriority) release(endpoint string, background bool) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			if background {
+				delete(p.background, endpoint)
+			} else {
+				p.foreground[endpoint]--
+				if p.foreground[endpoint] == 0 {
+					delete(p.foreground, endpoint)
+				}
+			}
+			close(p.changed)
+			p.changed = make(chan struct{})
+		})
+	}
+}
+
+type backgroundContextKey struct{}
+
+// WithBackground marks a non-interactive task and its descendants as background work.
+func WithBackground(ctx context.Context) context.Context {
+	return context.WithValue(ctx, backgroundContextKey{}, true)
+}
+func backgroundContext(ctx context.Context) bool {
+	b, _ := ctx.Value(backgroundContextKey{}).(bool)
+	return b
+}
+
 func backgroundAction(action string) bool {
 	switch action {
 	case "icons", "memory_extract", "memory_dedupe", "memory_banks", "memory_sweep", "memory_analyze", "memory_reflect", "entities", "task_summary", "handover", "skill_tidy", "person_model", "standup", "jobs_review", "runbook":

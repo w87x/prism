@@ -75,7 +75,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 				}
 				if s.Bookmarks != nil {
 					if bm := s.Bookmarks(ctx, a.Query, 3); len(bm) > 0 {
-						sb.WriteString("From your bookmarks (already known — check these before using a fresh result):\n")
+						sb.WriteString("From your bookmarks (saved links and descriptions; pages have not been checked in this call):\n")
 						for i, b := range bm {
 							fmt.Fprintf(&sb, "%d. %s — %s\n   %s\n", i+1, b.Title, b.URL, b.Description)
 						}
@@ -89,9 +89,9 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					}
 					return "", err
 				}
-				fmt.Fprintf(&sb, "Results (via %s):\n", used)
+				fmt.Fprintf(&sb, "Results (via %s): search snippets only; linked pages have not been opened.\n", used)
 				for i, r := range res {
-					fmt.Fprintf(&sb, "%d. %s\n   %s\n   %s\n", i+1, r.Title, r.URL, r.Snippet)
+					fmt.Fprintf(&sb, "%d. %s\n   %s\n   Snippet: %s\n", i+1, r.Title, r.URL, r.Snippet)
 				}
 				return sb.String(), nil
 			},

@@ -77,14 +77,3 @@ func splitActionRef(ref string) (string, string) {
 
 // ModelRef returns the underlying model reference without its action label.
 func ModelRef(ref string) string { _, model := splitActionRef(ref); return model }
-
-// Background operations need room for small-model reasoning, but should not generate indefinitely.
-// Complex analysis is intentionally left to the model's own configured limit.
-func actionOutputLimit(action string) int {
-	switch action {
-	case "plan", "memory_extract", "memory_reflect", "person_model", "chat_naming", "background_summary", "acceptance", "task_summary":
-		return 8192
-	default:
-		return 0
-	}
-}

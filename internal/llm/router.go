@@ -345,9 +345,6 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 	action, modelRef := splitActionRef(ref)
 	ref = modelRef
 	priorityWait := 0
-	if req.MaxTokens <= 0 {
-		req.MaxTokens = actionOutputLimit(action)
-	}
 	model := ref
 	if r.busy != nil {
 		r.busy(int(r.active.Add(1)), model)
@@ -382,7 +379,7 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 	}()
 	err := r.each(ctx, ref, "chat", func(ep Endpoint, t target) error {
 		queuedAt := time.Now()
-		release, err := r.priority.acquire(ctx, ep.BaseURL, backgroundAction(action))
+		release, err := r.priority.acquire(ctx, ep.BaseURL, backgroundAction(action) || backgroundContext(ctx))
 		priorityWait += int(time.Since(queuedAt).Milliseconds())
 		if err != nil {
 			return err

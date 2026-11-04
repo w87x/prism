@@ -25,7 +25,7 @@ func TestNamedActionReachesRouterAndRetainsModelSelection(t *testing.T) {
 	if recorded.Action != "memory_extract" || recorded.Model == "" || !recorded.OK {
 		t.Fatalf("recorded=%+v", recorded)
 	}
-	if budget != 8192 {
+	if budget != 0 {
 		t.Fatalf("background output budget = %v", budget)
 	}
 	if h.e.LLM.Window(ctx, ref) != h.e.LLM.Window(ctx, llm.ModelRef(ref)) {

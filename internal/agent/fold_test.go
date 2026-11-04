@@ -65,15 +65,18 @@ func TestFoldFailuresLeavesSuccessesAndShortHistoryAlone(t *testing.T) {
 	}
 }
 
-func TestToolResultCapIsRoomyEarlyAndTightWhenFull(t *testing.T) {
-	if got := toolResultCap(10_000, 262_144); got != maxToolResultChars {
-		t.Errorf("roomy: got %d", got)
-	}
-	if got := toolResultCap(120_000, 262_144); got != toolResultCapTight {
-		t.Errorf("tight: got %d", got)
+func TestToolResultCapScalesWithRemainingWindow(t *testing.T) {
+	early := toolResultCap(10_000, 262_144)
+	mid := toolResultCap(120_000, 262_144)
+	full := toolResultCap(260_000, 262_144)
+	if early <= mid || mid <= toolResultCapTight || full != toolResultCapTight {
+		t.Fatalf("caps early=%d mid=%d full=%d", early, mid, full)
 	}
 	if got := toolResultCap(0, 0); got != toolResultCapTight {
-		t.Errorf("unknown window must be conservative, got %d", got)
+		t.Fatalf("unknown window: %d", got)
+	}
+	if got := toolResultCap(0, 1_000_000); got != toolResultCapMax {
+		t.Fatalf("max cap: %d", got)
 	}
 }
 

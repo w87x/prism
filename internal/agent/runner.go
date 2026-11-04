@@ -302,10 +302,7 @@ type RunResult struct {
 	Sources *tools.Sources
 }
 
-const (
-	maxToolResultChars = 14000
-	defaultToolTimeout = 3 * time.Minute
-)
+const defaultToolTimeout = 3 * time.Minute
 
 func (e *Engine) register(spec RunSpec) *activeRun {
 	if spec.Run != nil {
@@ -347,6 +344,11 @@ func (e *Engine) register(spec RunSpec) *activeRun {
 
 // Run executes one agent turn-sequence (until a final answer, a needed input, or budget exhaustion).
 func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
+	// Background root jobs and their descendants yield to interactive inference.
+	if spec.Task != nil && spec.Depth == 0 && (spec.Task.FromKind == "cron" || spec.Task.FromKind == "intent" || spec.Task.FromKind == "system") {
+		ctx = llm.WithBackground(ctx)
+	}
+
 	p := spec.Profile
 	if spec.Channel == "web" { // memory recall in this run (and its delegates) favours the chat's project
 		ctx = withChat(ctx, spec.Channel, spec.Topic)
