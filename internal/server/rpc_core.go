@@ -276,6 +276,15 @@ func (s *Server) registerCore() {
 		}
 		return a.Metrics.DelegationReport(ctx, time.Duration(days)*24*time.Hour)
 	})
+	rpc(s, "ops.workflows", func(ctx context.Context, r struct {
+		Days int `json:"days"`
+	}) ([]metrics.WorkflowTrace, error) {
+		days := r.Days
+		if days <= 0 || days > 30 {
+			days = 7
+		}
+		return a.Metrics.WorkflowTraces(ctx, time.Duration(days)*24*time.Hour)
+	})
 	rpc(s, "today.get", func(ctx context.Context, _ none) (app.Today, error) { return a.GetToday(ctx), nil })
 	// a hire made by an agent: confirm it (probation ends) or let the agent go (it is switched off)
 	rpc(s, "agents.probation", func(ctx context.Context, r struct {

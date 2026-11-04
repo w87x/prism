@@ -60,7 +60,7 @@ func (e *Engine) delegationGuard(ctx context.Context, env *tools.Env, to, instru
 			return fmt.Errorf("you have already asked %s %d times in this task. Each ask is a whole run: put everything you still need into ONE request (a list of all the items), or use what %s already returned (task_status shows the results)", to, n, to)
 		}
 	}
-	rows, err := e.DB.Query(ctx, `SELECT id, status, input, finished_at FROM tasks WHERE from_kind='agent' AND lower(from_name)=lower($1) AND lower(to_agent)=lower($2)
+	rows, err := e.DB.Query(ctx, `SELECT id, status, input, finished_at, parent_id FROM tasks WHERE from_kind='agent' AND lower(from_name)=lower($1) AND lower(to_agent)=lower($2)
 		AND created_at > now() - make_interval(secs => $3) ORDER BY id DESC LIMIT 30`, env.Agent, to, dupLookback.Seconds())
 	if err != nil {
 		return nil
@@ -71,12 +71,17 @@ func (e *Engine) delegationGuard(ctx context.Context, env *tools.Env, to, instru
 		var id int64
 		var status, input string
 		var fin *time.Time
-		if rows.Scan(&id, &status, &input, &fin) != nil || similarity(want, tokenWords(input)) < dupSimilarity {
+		var parent *int64
+		if rows.Scan(&id, &status, &input, &fin, &parent) != nil || similarity(want, tokenWords(input)) < dupSimilarity {
 			continue
 		}
 		switch status {
 		case "queued", "running", "waiting_input":
 			return fmt.Errorf("%s is already working on almost exactly this (task #%d). Wait for it: task_status(%d) shows the result when it is done", to, id, id)
+		case "failed", "partial", "cancelled":
+			if parent != nil && *parent == env.TaskID && strings.EqualFold(strings.Join(strings.Fields(input), " "), strings.Join(strings.Fields(instruction), " ")) {
+				return fmt.Errorf("a very similar assignment to %s already ended %s (task #%d). Inspect task_status(%d), then change the approach, instruction, or specialist rather than repeating it unchanged", to, status, id, id)
+			}
 		case "done":
 			if fin != nil && time.Since(*fin) < dupDoneWindow {
 				return fmt.Errorf("you asked %s almost exactly this %d minutes ago and it was answered (task #%d): read the answer with task_status(%d). If something changed since, say what changed in the new request", to, int(time.Since(*fin).Minutes()), id, id)

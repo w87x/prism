@@ -122,11 +122,21 @@ func (e *Engine) planProjects(ctx context.Context) []planProject {
 	return out
 }
 
+// These exact conversational acknowledgements do not require project routing or a work plan.
+func simpleAcknowledgement(text string) bool {
+	s := strings.ToLower(strings.Trim(strings.TrimSpace(text), ".!? "))
+	switch s {
+	case "thank you very much", "thanks for your help", "that was helpful", "thanks that was helpful", "спасибо большое", "большое спасибо":
+		return true
+	}
+	return false
+}
+
 // MakePlan reads one message. It returns nil when the pass is off, the message is not worth one, or the model fails — the message
 // then simply goes to Atlas as it is.
 func (e *Engine) MakePlan(ctx context.Context, text, topic string, projects []planProject) *Plan {
 	text = strings.TrimSpace(text)
-	if len([]rune(text)) < 14 || strings.HasPrefix(text, "/") || !e.plannerOn(ctx) {
+	if len([]rune(text)) < 14 || simpleAcknowledgement(text) || strings.HasPrefix(text, "/") || !e.plannerOn(ctx) {
 		return nil
 	}
 	var sb strings.Builder

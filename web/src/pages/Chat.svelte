@@ -285,6 +285,9 @@
     {#if unread > 0}<button class="pill" onclick={toBottom}>↓ {unread} new</button>{/if}
   </div>
 
+  {#each work.filter((t) => t.depth > 0 && t.status === 'waiting_input' && t.question) as task (task.id)}
+    <div class="workcard"><div class="attn">{task.to_agent} needs input: {task.question}</div><button class="worktoggle" onclick={() => { S.selectedTask = task.id; go('tasks'); }}>Open task to answer</button></div>
+  {/each}
   {#if work.length > 1 || workItems.length}
     <div class="workcard">
       <button class="worktoggle" onclick={() => (workOpen = !workOpen)} aria-expanded={workOpen}>
@@ -297,7 +300,7 @@
         {/each}
         {#if work.length > 1}<div class="sm mute">Delegated work</div>{/if}
         {#each work.filter((t) => t.depth > 0) as task (task.id)}
-          <div class="workstep"><span>{task.to_agent}: {task.title}</span><span>{task.status.replaceAll('_', ' ')}</span></div>
+          <div class="workstep"><span>{task.to_agent}: {task.title}{#if task.status === 'waiting_input' && task.question}<br /><span class="attn">{task.question}</span>{/if}</span><span>{task.status.replaceAll('_', ' ')}</span></div>
         {/each}
         <button class="worktoggle" onclick={() => { S.selectedTask = currentWork; go('tasks'); }}>Open task details</button>
       {/if}

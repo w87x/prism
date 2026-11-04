@@ -57,7 +57,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("instruction", "complete, self-contained instruction"),
 			tools.Str("title", "short label"),
 			tools.Bool("leaf", "for self-contained work: prevent this agent from delegating or asking others"),
-			tools.Bool("scout", "a cheap read-only recon is taken first and handed to the agent as a brief — for jobs that are risky, expensive or ambiguous (unknown files, an unfamiliar site, a large change); leave out for simple jobs"),
+			tools.Bool("scout", "optional separate read-only inspection before the main work, only when an unfamiliar environment or risky change needs it; omit for ordinary research and lookups"),
 			tools.Str("done_when", "what 'done' means for this item — concrete, checkable acceptance criteria (e.g. 'a file saved, its path reported, at least 5 entries'). The result is checked against it before it comes back to you; leave out for trivial work"),
 			tools.IntList("plan_items", "Atlas only: top-level numbered draft plan items this task covers; omit if there is no saved plan, when unrelated or unsure"),
 			tools.IntList("refs", "artifact ids with material the agent needs (artifact_save / scratchpad_share first) — hand over bulky material by reference, not pasted"),

@@ -126,7 +126,8 @@
           <span class={t.status === 'failed' ? 'err' : t.status === 'waiting_input' || t.status === 'partial' ? 'attn' : 'dim'} style="font-size:var(--fs-sm)" title={asleep(t) ? t.wake_note : ''}>{statusText(t)}</span>{#if asleep(t)}<Button size="sm" variant="ghost" title="End the sleep now: {t.wake_note}" onclick={(e) => wakeNow(t, e)}>Wake now</Button>{/if}
           <span class="mute sm">{fmtTokens(t.tokens_in)}↑ {fmtTokens(t.tokens_out)}↓</span><span class="grow"></span>
           {#if t.status === 'queued' || t.status === 'running' || t.status === 'waiting_input'}<Button size="sm" variant="danger" onclick={(e) => cancel(t, e)}>Stop</Button>
-          {:else if t.status === 'waiting_input'}<span class="grow"></span><Button size="sm" variant="accent" onclick={() => (answerId = t.id)}>Answer…</Button>
+          {/if}
+          {#if t.status === 'waiting_input'}<Button size="sm" variant="accent" onclick={() => (answerId = t.id)}>Answer…</Button>
       {:else if rerunnable(t)}<Button size="sm" variant="ghost" onclick={(e) => rerun(t, e)}>Rerun</Button>{/if}
         </div>
       </div>
@@ -161,6 +162,8 @@
               <td class="mute sm">{ago(t.created_at)}</td>
               <td>
                 {#if t.status === 'queued' || t.status === 'running' || t.status === 'waiting_input'}<Button size="sm" variant="danger" onclick={(e) => cancel(t, e)}>Stop</Button>
+                {/if}
+                {#if t.status === 'waiting_input'}<Button size="sm" variant="accent" onclick={() => (answerId = t.id)}>Answer…</Button>
                 {:else if rerunnable(t)}<Button size="sm" variant="ghost" onclick={(e) => rerun(t, e)}>Rerun</Button>
                 {:else if t.status === 'done' && t.to_agent !== 'Daedalus'}<Button size="sm" variant="ghost" onclick={(e) => saveRoutine(t, e)}>Save as routine</Button>{/if}
               </td>

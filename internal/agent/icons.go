@@ -2,10 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
-	"prism/internal/llm"
 	"prism/internal/textmatch"
 )
 
@@ -48,7 +46,7 @@ func (e *Engine) AssignIcon(ctx context.Context, id int64) {
 	}
 	text := p.Name + " " + p.Group + " " + p.Description + " " + strings.Join(p.Traits, " ")
 	// A purpose-based icon right away (keywords, no model): a slow local model may take a minute to answer, and until
-	// then every new agent would show the default robot. The model's pick, if it differs, replaces this guess.
+	// then every new agent would show the default robot. The offline keyword match needs no model call.
 	guess := GuessIcon(text)
 	if tag, err := e.DB.Exec(ctx, `UPDATE agent_profiles SET icon=$2 WHERE id=$1 AND icon=''`, id, guess); err != nil || tag.RowsAffected() == 0 {
 		return
@@ -56,36 +54,7 @@ func (e *Engine) AssignIcon(ctx context.Context, id int64) {
 	if e.Emit != nil {
 		e.Emit("agents.update", nil)
 	}
-	if !e.LLM.HasChat(ctx) {
-		return
-	}
-	names := make([]string, len(agentIcons))
-	for i, ic := range agentIcons {
-		names[i] = ic.Name
-	}
-	soul := p.Soul
-	if len(soul) > 1200 {
-		soul = soul[:1200]
-	}
-	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
-	out, err := e.LLM.Complete(cctx, e.LLM.ActionRef(cctx, "icons", "fast"), "You choose a Font Awesome icon that best represents an AI agent. Pick exactly one name from this list: "+strings.Join(names, ", ")+
-		`. Answer JSON only: {"icon":"<name>"}`, "Agent: "+p.Name+"\nGroup: "+p.Group+"\nPurpose: "+p.Description+"\nSoul:\n"+soul, true)
-	cancel()
-	if err != nil {
-		return
-	}
-	var r struct {
-		Icon string `json:"icon"`
-	}
-	if json.Unmarshal([]byte(llm.ExtractJSON(out)), &r) != nil {
-		return
-	}
-	// only replace OUR guess: an icon the user set meanwhile stays
-	if icon := normIcon(r.Icon); icon != "" && icon != guess {
-		if tag, err := e.DB.Exec(ctx, `UPDATE agent_profiles SET icon=$2 WHERE id=$1 AND icon=$3`, id, icon, guess); err == nil && tag.RowsAffected() > 0 && e.Emit != nil {
-			e.Emit("agents.update", nil)
-		}
-	}
+
 }
 
 // AssignMissingIcons gives every icon-less agent one (startup and after imports).

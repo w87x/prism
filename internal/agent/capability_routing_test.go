@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"prism/internal/tasks"
 	"prism/internal/tools"
 )
 
@@ -152,5 +153,39 @@ func TestRequiredToolsRouteAcrossDomains(t *testing.T) {
 	}
 	if _, err := h.e.bestSpecialistForTools(ctx, "two capabilities", "Atlas", []string{"fake_calendar_write", "fake_repo_read"}); err == nil {
 		t.Fatal("must not silently assign an agent missing one requirement")
+	}
+}
+
+func TestDelegationRejectsExactFailedRetryButAllowsChangedApproach(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	root, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "user", ToAgent: "Atlas", Input: "test"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := h.e.Tasks.Create(ctx, tasks.Task{ParentID: &root.ID, RootID: root.ID, FromKind: "agent", FromName: "Atlas", ToAgent: "Scout", Input: "Search the marketplace for a small computer"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Tasks.Finish(ctx, child.ID, tasks.Failed, "", "unavailable", ""); err != nil {
+		t.Fatal(err)
+	}
+	env := &tools.Env{Agent: "Atlas", TaskID: root.ID}
+	if err := h.e.delegationGuard(ctx, env, "Scout", "Search the marketplace for a small computer"); err == nil {
+		t.Fatal("repeated failed assignment accepted")
+	}
+	if err := h.e.delegationGuard(ctx, env, "Scout", "Search the marketplace for a small computer using a different source"); err != nil {
+		t.Fatalf("changed approach blocked: %v", err)
+	}
+}
+
+func TestPlannerAcknowledgementShortcutIsNarrow(t *testing.T) {
+	if !simpleAcknowledgement("Thanks for your help!") {
+		t.Fatal("acknowledgement not recognized")
+	}
+	for _, s := range []string{"Thanks for your help, now schedule a reminder", "What was that project?", "Thanks for your help with the database; change it"} {
+		if simpleAcknowledgement(s) {
+			t.Fatalf("work skipped: %q", s)
+		}
 	}
 }

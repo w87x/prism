@@ -93,6 +93,8 @@ func TestAtlasDelegatesAndSynthesizes(t *testing.T) {
 		_, sys, _ := msgAt(req, 0)
 		role, content, _ := msgAt(req, -1)
 		switch {
+		case strings.Contains(sys, "team lead checking a colleague"):
+			return testutil.Reply{Content: `{"met":true,"gap":""}`}
 		case strings.Contains(sys, "You are Atlas") && role == "user":
 			if !strings.Contains(sys, "Web: Scout") {
 				return testutil.Reply{Content: "catalog missing Scout"}

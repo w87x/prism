@@ -32,7 +32,8 @@ type Router struct {
 	usage   func(model string, u Usage)
 	onCall  func(Call)
 
-	health health
+	health   health
+	priority inferencePriority
 
 	active atomic.Int32                   // completions in flight (any caller: agents, memory, knowledge base…)
 	busy   func(active int, model string) // notified when the count changes
@@ -343,6 +344,7 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 	var resp *Response
 	action, modelRef := splitActionRef(ref)
 	ref = modelRef
+	priorityWait := 0
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = actionOutputLimit(action)
 	}
@@ -362,7 +364,7 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 		if r.onCall == nil || ctx.Err() != nil {
 			return // nobody is counting, or the caller gave up (a stop button is not a failure)
 		}
-		c := Call{TS: started, Model: model, Action: action, MS: int(time.Since(started).Milliseconds()), OK: final != nil && callErr == nil}
+		c := Call{TS: started, Model: model, Action: action, MS: max(0, int(time.Since(started).Milliseconds())-priorityWait), OK: final != nil && callErr == nil}
 		if final != nil {
 			c.Model, c.In, c.Out = final.Model, final.Usage.Prompt, final.Usage.Completion
 		}
@@ -375,9 +377,17 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 		if m := metaFrom(ctx); m != nil {
 			c.Agent, c.WaitMS, c.TaskID, c.RunID, c.ParentRun = m.Agent, m.WaitMS, m.TaskID, m.RunID, m.ParentRun
 		}
+		c.WaitMS += priorityWait
 		r.onCall(c)
 	}()
 	err := r.each(ctx, ref, "chat", func(ep Endpoint, t target) error {
+		queuedAt := time.Now()
+		release, err := r.priority.acquire(ctx, ep.BaseURL, backgroundAction(action))
+		priorityWait += int(time.Since(queuedAt).Milliseconds())
+		if err != nil {
+			return err
+		}
+		defer release()
 		streamed := false
 		wrapped := onDelta
 		if onDelta != nil {
