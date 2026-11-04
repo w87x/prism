@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"prism/internal/llm"
 )
 
 // A mental model is a standing question about the user's world ("What does Danil want from his media
@@ -90,7 +92,7 @@ func (s *Service) RefreshModel(ctx context.Context, id int64) (*Model, error) {
 		return nil, errors.New("model not found")
 	}
 	role := s.llm.ActionRef(ctx, "memory_analyze", "chat")
-	if s.llm.RoleRef(ctx, strings.TrimPrefix(role, "role:")) == "" {
+	if s.llm.RoleRef(ctx, strings.TrimPrefix(llm.ModelRef(role), "role:")) == "" {
 		return nil, errors.New("no model configured")
 	}
 	var specs []string

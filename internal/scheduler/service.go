@@ -43,6 +43,35 @@ type Cron struct {
 	// FinishedAt/FinishedNote: the job did what it was for (cron_finish); it is switched off but kept.
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 	FinishedNote string     `json:"finished_note,omitempty"`
+	Issues       []string   `json:"issues,omitempty"`
+}
+
+// CronPreview shows when an expression will fire in the configured time zone.
+type CronPreview struct {
+	Next    []time.Time `json:"next"`
+	Display []string    `json:"display"`
+	Warning string      `json:"warning,omitempty"`
+}
+
+func (s *Service) PreviewCron(ctx context.Context, expr string) (CronPreview, error) {
+	sched, err := cron.Parse(expr)
+	if err != nil {
+		return CronPreview{}, err
+	}
+	p := CronPreview{}
+	if err := checkDayFields(expr); err != nil {
+		p.Warning = err.Error()
+	}
+	next := time.Now().In(s.loc(ctx))
+	for range 3 {
+		next = sched.Next(next)
+		if next.IsZero() {
+			break
+		}
+		p.Next = append(p.Next, next)
+		p.Display = append(p.Display, next.Format("2 Jan 2006 15:04 MST"))
+	}
+	return p, nil
 }
 
 type Intent struct {
@@ -215,6 +244,33 @@ func (s *Service) Crons(ctx context.Context) ([]Cron, error) {
 			}
 		}
 	}
+	for i := range out {
+		c := &out[i]
+		if c.Enabled && !c.System {
+			if issue := checkDayFields(c.Expr); issue != nil {
+				c.Issues = append(c.Issues, issue.Error())
+			}
+		}
+	}
+	if s.Engine != nil && s.Engine.Profiles != nil {
+		if profiles, err := s.Engine.Profiles.List(ctx); err == nil {
+			known := map[string]bool{}
+			for _, p := range profiles {
+				known[strings.ToLower(p.Name)] = p.Enabled
+			}
+			for i := range out {
+				c := &out[i]
+				if !c.Enabled || c.System {
+					continue
+				}
+				if enabled, exists := known[strings.ToLower(c.Agent)]; !exists {
+					c.Issues = append(c.Issues, "The assigned agent no longer exists; review the assignment before this runs.")
+				} else if !enabled {
+					c.Issues = append(c.Issues, "The assigned agent is disabled.")
+				}
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -333,6 +389,12 @@ func (s *Service) DeleteCron(ctx context.Context, id int64) error {
 func (s *Service) resolveAgent(ctx context.Context, name string, update func(newName string) error) (resolved string, ok bool) {
 	if _, err := s.Engine.Profiles.Get(ctx, name); err == nil {
 		return name, true
+	}
+	if p, err := s.agentName(ctx, name); err == nil {
+		if update != nil {
+			_ = update(p)
+		}
+		return p, true
 	}
 	hits, err := s.Engine.Profiles.Search(ctx, name, 1)
 	if err != nil || len(hits) == 0 {

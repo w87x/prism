@@ -93,6 +93,18 @@
 
   // ── crons ──
   let crons = $state([]);
+  let cronPreview = $state(null);
+  $effect(() => {
+    const expr = cOpen ? nc?.expr : '';
+    cronPreview = null;
+    if (!expr) return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      const result = await call('crons.preview', { expr }, { quiet: true });
+      if (active) cronPreview = result || null;
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  });
   let cOpen = $state(false);
   let nc = $state(null);
   const presets = [
@@ -280,7 +292,7 @@
           <tbody>
             {#each crons as c (c.id)}
               <tr>
-                <td class="hi">{#if c.system}<Badge tone="accent">built-in</Badge> {/if}{#if c.finished_at}<Badge tone="mute" title={'Finished: ' + (c.finished_note || '')}>finished</Badge> {/if}{c.name}{#if c.topic}<Badge tone={c.project_bank_id ? 'accent' : 'mute'} title={c.project_bank_id ? `Telegram: shares the ${c.topic} project's topic` : `Telegram topic: ${c.topic}`}>#{c.topic}</Badge>{/if}</td>
+                <td class="hi">{#if c.system}<Badge tone="accent">built-in</Badge> {/if}{#if c.finished_at}<Badge tone="mute" title={'Finished: ' + (c.finished_note || '')}>finished</Badge> {/if}{c.name}{#if c.issues?.length} <Badge tone="attn" title={c.issues.join('\n')}>review</Badge>{/if}{#if c.topic}<Badge tone={c.project_bank_id ? 'accent' : 'mute'} title={c.project_bank_id ? `Telegram: shares the ${c.topic} project's topic` : `Telegram topic: ${c.topic}`}>#{c.topic}</Badge>{/if}</td>
                 <td class="dim">{c.agent}</td><td class="mute nowrap">{c.expr}</td>
                 <td class="dim sm"><Tip text={c.prompt} max={280} /></td>
                 <td class="mute sm">{c.enabled ? until(c.next_run) : '—'}</td><td class="mute sm">{ago(c.last_run)}</td>
@@ -452,12 +464,15 @@
 
 <Modal bind:open={cOpen} title={nc?.id ? 'Edit schedule' : 'New schedule'} width={620}>
   {#if nc}
+    {#if nc.issues?.length}<div class="sm" role="alert">{nc.issues.join(' ')}</div>{/if}
     <Field label="Name"><Input bind:value={nc.name} /></Field>
     <div class="row wrap gap-12">
       <div class="grow"><Field label="Agent"><Select bind:value={nc.agent} options={agentOpts} searchable /></Field></div>
       <div class="grow"><Field label="Preset"><Select value="" options={presets} placeholder="pick a preset…" onchange={(v) => v && (nc.expr = v)} /></Field></div>
     </div>
     <Field label="Cron expression" hint="min hour day month weekday · also @daily, @hourly, @every 2h"><Input bind:value={nc.expr} mono /></Field>
+    {#if cronPreview?.warning}<div class="sm" role="alert">{cronPreview.warning}</div>{/if}
+    {#if cronPreview?.display?.length}<div class="sm mute">Next runs: {cronPreview.display.join(' · ')}</div>{/if}
     <Field label="Standing prompt" hint="Say what to do and when you want updates; Atlas coordinates by default."><Textarea bind:value={nc.prompt} rows={6} mono={false} /></Field>
     <Switch bind:checked={nc.enabled} label="enabled" />
   {/if}

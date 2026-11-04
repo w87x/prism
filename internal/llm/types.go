@@ -142,6 +142,7 @@ type Call struct {
 	TS      time.Time
 	Model   string
 	Agent   string // who asked ("" = background work such as memory digestion)
+	Action  string // named background operation, empty for ordinary agent turns
 	In, Out int
 	MS      int // request start to last token
 	WaitMS  int // time spent queued for a model slot before the request

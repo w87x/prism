@@ -8,6 +8,7 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/settings"
+	"prism/internal/tasks"
 	"prism/internal/textutil"
 	"prism/internal/tools"
 )
@@ -41,6 +42,41 @@ type Plan struct {
 	Confidence string     `json:"confidence"` // high | low — how sure the project is
 	Tasks      []PlanTask `json:"tasks"`
 	Asks       []PlanAsk  `json:"asks"`
+}
+
+func planWorkItems(p *Plan) []tasks.WorkItem {
+	if p == nil || p.Class != "task" {
+		return nil
+	}
+	var out []tasks.WorkItem
+	for i, step := range p.Tasks {
+		if strings.TrimSpace(step.Title) != "" {
+			deps := make([]string, 0, len(step.Depends))
+			for _, dep := range step.Depends {
+				deps = append(deps, textutil.Clean(textutil.Brief(dep, 240)))
+			}
+			var criteria []string
+			if step.DoneWhen != "" {
+				criteria = append(criteria, step.DoneWhen)
+			}
+			var addSubtasks func([]PlanTask)
+			addSubtasks = func(sub []PlanTask) {
+				for _, child := range sub {
+					if strings.TrimSpace(child.Title) != "" {
+						item := child.Title
+						if child.DoneWhen != "" {
+							item += ": " + child.DoneWhen
+						}
+						criteria = append(criteria, item)
+					}
+					addSubtasks(child.Sub)
+				}
+			}
+			addSubtasks(step.Sub)
+			out = append(out, tasks.WorkItem{Number: i + 1, Title: textutil.Clean(textutil.Brief(step.Title, 240)), DoneWhen: textutil.Clean(textutil.Brief(strings.Join(criteria, "\n"), 1200)), DependsOn: deps})
+		}
+	}
+	return out
 }
 
 const planPrompt = `You are the front door of a personal assistant. You get a NEW message from the user together with their projects, the chat it arrived in and the last few messages of that chat. Classify and prepare it.
@@ -274,6 +310,7 @@ func planNote(p *Plan, facts []string, answers string) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n[Plan prepared for you before you started — use as a draft; revise it if the request, dependencies or evidence call for it]\nClass: " + p.Class + "\n")
 	if len(p.Tasks) > 0 {
+		sb.WriteString("The numbered top-level steps are saved as a draft checklist. When delegating a step, include its number in delegate.plan_items; use [] if the match is uncertain.\n")
 		if warning := planDependencyWarning(p.Tasks); warning != "" {
 			sb.WriteString("Plan warning: " + warning + "\n")
 		}
@@ -307,8 +344,10 @@ func (e *Engine) projectChat(ctx context.Context, pr planProject) (Chat, error) 
 
 // frontDoorResult is what the front door decided for one message.
 type frontDoorResult struct {
-	Topic string // the chat the message is handled in (changed when it was routed to a project chat)
-	Note  string // the plan note to append to Atlas's input
+	Topic      string // the chat the message is handled in (changed when it was routed to a project chat)
+	Note       string // the plan note to append to Atlas's input
+	Unanswered string // required clarification that timed out or was interrupted
+	Plan       *Plan
 }
 
 // frontDoor runs the structured pass for a message that arrived in chat topic: it may take the message to a project's chat (the
@@ -324,6 +363,7 @@ func (e *Engine) frontDoor(ctx context.Context, m UserMsg, msgID int64, ar *acti
 	if plan == nil {
 		return res
 	}
+	res.Plan = plan
 	label := ""
 	// ── routing ──
 	if e.routingOn(ctx) && plan.Project != "" {
@@ -393,6 +433,9 @@ func (e *Engine) frontDoor(ctx context.Context, m UserMsg, msgID int64, ar *acti
 			}
 			if ans, err := e.ask(ctx, ar.Info, q); err == nil {
 				answers = ans
+			} else {
+				res.Unanswered = q.Text
+				return res
 			}
 		}
 	}
@@ -412,8 +455,11 @@ func (e *Engine) moveToChat(ctx context.Context, msgID int64, from, to string, a
 		delete(e.chatRun, oldKey)
 	}
 	e.chatRun[newKey] = ar
+	ar.Info.ChatTopic = to
 	e.mu.Unlock()
 	e.touchChat(ctx, "web", to)
+	e.Emit("chat.preparing", map[string]any{"topic": from, "busy": false})
+	e.Emit("chat.preparing", map[string]any{"topic": to, "busy": true})
 	return true
 }
 

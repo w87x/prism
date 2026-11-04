@@ -19,7 +19,7 @@ import (
 const personBlock = "working_with_user"
 
 const personPrompt = `You maintain a short profile of how to work with one particular person, for AI agents that will read it before every task. You get samples of their own messages, when they are active, their ratings and complaints about results, facts memory holds about them, and the current profile.
-Write the updated profile: at most 650 characters, plain statements about "the user", no headings, no filler. Cover only what the evidence supports: how they write and like to be answered (language, length, tone), their rhythm (when they are around, when not to interrupt), what they dislike or complained about, and one or two standing do/don't rules that follow. Keep what the current profile says when it is still supported, drop what the evidence contradicts, never invent. Reply with the profile text only.`
+Write the updated profile: at most 650 characters, plain statements about "the user", no headings, no filler. Include durable communication preferences supported by the user's own words or repeated clear feedback. A schedule for one project is not a global preference. Message timestamps do not establish quiet hours or permission to interrupt. Do not turn an assistant's statements into user preferences or rules. Treat memory and the old profile as leads, not proof: remove unsupported or project-specific claims. Never invent. Reply with the profile text only.`
 
 // activeHours summarises when the user writes: the hours that hold a real share of their messages.
 func activeHours(ts []time.Time) string {
@@ -146,6 +146,9 @@ func (e *Engine) RefreshPersonModel(ctx context.Context) (string, error) {
 	}
 	if r := []rune(text); len(r) > 780 {
 		text = string(r[:780])
+		if end := strings.LastIndexAny(text, ".!?\n"); end >= 30 {
+			text = text[:end+1]
+		}
 	}
 	if err := e.Memory.SetCoreBlock(ctx, personBlock, text, "How to work with the user, learned from how they actually use PRISM (refreshed weekly)", "person-model"); err != nil {
 		return "", err

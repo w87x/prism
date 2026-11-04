@@ -186,6 +186,9 @@ func (c *Client) Chat(ctx context.Context, ep Endpoint, r Request, onDelta func(
 		body["temperature"] = *ep.Temp
 	}
 	if mt := r.MaxTokens; mt > 0 {
+		if ep.MaxOut > 0 && ep.MaxOut < mt {
+			mt = ep.MaxOut
+		}
 		body["max_tokens"] = mt
 	} else if ep.MaxOut > 0 {
 		body["max_tokens"] = ep.MaxOut

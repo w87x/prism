@@ -150,6 +150,7 @@ type target struct {
 }
 
 func (r *Router) resolve(ctx context.Context, ref, want string) ([]target, error) {
+	_, ref = splitActionRef(ref)
 	snap, err := r.load(ctx)
 	if err != nil {
 		return nil, err
@@ -340,6 +341,11 @@ func (r *Router) each(ctx context.Context, ref, want string, fn func(ep Endpoint
 // only happens while nothing has been streamed to the caller yet.
 func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func(Delta)) (final *Response, callErr error) {
 	var resp *Response
+	action, modelRef := splitActionRef(ref)
+	ref = modelRef
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = actionOutputLimit(action)
+	}
 	model := ref
 	if r.busy != nil {
 		r.busy(int(r.active.Add(1)), model)
@@ -356,7 +362,7 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 		if r.onCall == nil || ctx.Err() != nil {
 			return // nobody is counting, or the caller gave up (a stop button is not a failure)
 		}
-		c := Call{TS: started, Model: model, MS: int(time.Since(started).Milliseconds()), OK: final != nil && callErr == nil}
+		c := Call{TS: started, Model: model, Action: action, MS: int(time.Since(started).Milliseconds()), OK: final != nil && callErr == nil}
 		if final != nil {
 			c.Model, c.In, c.Out = final.Model, final.Usage.Prompt, final.Usage.Completion
 		}

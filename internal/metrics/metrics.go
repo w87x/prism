@@ -28,8 +28,8 @@ func (s *Store) RecordLLM(c llm.Call) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = s.DB.Exec(ctx, `INSERT INTO llm_calls(ts,model,agent,tokens_in,tokens_out,ms,wait_ms,ok,err,task_id,run_id,parent_run) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-			c.TS, c.Model, c.Agent, c.In, c.Out, c.MS, c.WaitMS, c.OK, short(c.Err, 300), nilIfZero(c.TaskID), nilIfZero(c.RunID), nilIfZero(c.ParentRun))
+		_, _ = s.DB.Exec(ctx, `INSERT INTO llm_calls(ts,model,agent,tokens_in,tokens_out,ms,wait_ms,ok,err,task_id,run_id,parent_run,action) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+			c.TS, c.Model, c.Agent, c.In, c.Out, c.MS, c.WaitMS, c.OK, short(c.Err, 300), nilIfZero(c.TaskID), nilIfZero(c.RunID), nilIfZero(c.ParentRun), c.Action)
 	}()
 }
 
@@ -105,6 +105,15 @@ type AgentRow struct {
 	Done   int64  `json:"tasks_done"`
 }
 
+type ActionRow struct {
+	Action string  `json:"action"`
+	Calls  int64   `json:"calls"`
+	Errors int64   `json:"errors"`
+	In     int64   `json:"tokens_in"`
+	Out    int64   `json:"tokens_out"`
+	AvgMS  float64 `json:"avg_ms"`
+}
+
 type ToolRow struct {
 	Tool   string  `json:"tool"`
 	Calls  int64   `json:"calls"`
@@ -122,15 +131,16 @@ type ErrorRow struct {
 }
 
 type Dashboard struct {
-	Days    int        `json:"days"`
-	Hourly  bool       `json:"hourly"`
-	TZ      string     `json:"tz"`
-	Buckets []Bucket   `json:"buckets"`
-	Totals  Totals     `json:"totals"`
-	Models  []ModelRow `json:"models"`
-	Agents  []AgentRow `json:"agents"`
-	Tools   []ToolRow  `json:"tools"`
-	Errors  []ErrorRow `json:"recent_errors"`
+	Days    int         `json:"days"`
+	Hourly  bool        `json:"hourly"`
+	TZ      string      `json:"tz"`
+	Buckets []Bucket    `json:"buckets"`
+	Totals  Totals      `json:"totals"`
+	Models  []ModelRow  `json:"models"`
+	Actions []ActionRow `json:"actions"`
+	Agents  []AgentRow  `json:"agents"`
+	Tools   []ToolRow   `json:"tools"`
+	Errors  []ErrorRow  `json:"recent_errors"`
 }
 
 // ActivityByAgent counts LLM calls per agent in the last `window` — a lightweight sibling of Dashboard's own
@@ -167,7 +177,7 @@ func (s *Store) Dashboard(ctx context.Context, days int, tz string) (*Dashboard,
 	if l, err := time.LoadLocation(tz); err == nil && tz != "" {
 		loc = l
 	}
-	d := &Dashboard{Days: days, Hourly: days == 1, TZ: loc.String(), Models: []ModelRow{}, Agents: []AgentRow{}, Tools: []ToolRow{}, Errors: []ErrorRow{}}
+	d := &Dashboard{Days: days, Hourly: days == 1, TZ: loc.String(), Models: []ModelRow{}, Actions: []ActionRow{}, Agents: []AgentRow{}, Tools: []ToolRow{}, Errors: []ErrorRow{}}
 	layout, step := "2006-01-02", 24*time.Hour
 	if d.Hourly {
 		layout = "2006-01-02T15:00"
@@ -273,6 +283,20 @@ func (s *Store) Dashboard(ctx context.Context, days int, tz string) (*Dashboard,
 			return nil, err
 		}
 		d.Models = append(d.Models, m)
+	}
+	rows.Close()
+
+	rows, err = s.DB.Query(ctx, `SELECT action,count(*),count(*) FILTER (WHERE NOT ok),COALESCE(sum(tokens_in),0),COALESCE(sum(tokens_out),0),COALESCE(avg(ms),0) FROM llm_calls WHERE ts >= $1 AND action<>'' GROUP BY action ORDER BY sum(tokens_in)+sum(tokens_out) DESC LIMIT 30`, from)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var a ActionRow
+		if err := rows.Scan(&a.Action, &a.Calls, &a.Errors, &a.In, &a.Out, &a.AvgMS); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		d.Actions = append(d.Actions, a)
 	}
 	rows.Close()
 

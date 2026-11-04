@@ -176,9 +176,16 @@ func TestMergingChatsMovesMessagesKeepsProjectAndCanBeUndone(t *testing.T) {
 		t.Fatal("the main chat is not mergeable as a source")
 	}
 
+	if _, err := h.e.DB.Exec(ctx, `INSERT INTO chat_background_results(channel,topic,result) VALUES('web',$1,'pending result')`, a.Topic); err != nil {
+		t.Fatal(err)
+	}
 	res, err := h.e.MergeChats(ctx, []int64{a.ID, b.ID}, target.ID, nil)
 	if err != nil || res.Moved != 3 || res.Merged != 2 {
 		t.Fatalf("merge: %+v %v", res, err)
+	}
+	var pendingTopic, movedFrom string
+	if err := h.e.DB.QueryRow(ctx, `SELECT topic,moved_from FROM chat_background_results WHERE result='pending result'`).Scan(&pendingTopic, &movedFrom); err != nil || pendingTopic != target.Topic || movedFrom != a.Topic {
+		t.Fatalf("pending result after merge: %s %s %v", pendingTopic, movedFrom, err)
 	}
 	if res.Target.Project != "project:Greenhouse" {
 		t.Fatalf("the sources' shared project is adopted by an unbound target: %+v", res.Target)
@@ -230,6 +237,9 @@ func TestMergingChatsMovesMessagesKeepsProjectAndCanBeUndone(t *testing.T) {
 	}
 	if err := h.e.UnmergeChat(ctx, a.ID); err != nil {
 		t.Fatal(err)
+	}
+	if err := h.e.DB.QueryRow(ctx, `SELECT topic,moved_from FROM chat_background_results WHERE result='pending result'`).Scan(&pendingTopic, &movedFrom); err != nil || pendingTopic != a.Topic || movedFrom != "" {
+		t.Fatalf("pending result after undo: %s %s %v", pendingTopic, movedFrom, err)
 	}
 	if restored, _ := h.e.ChatHistory(ctx, "web", a.Topic, 20); len(restored) != 2 {
 		t.Fatalf("undo returns its messages: %+v", restored)

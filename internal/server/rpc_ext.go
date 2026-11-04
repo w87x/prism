@@ -419,6 +419,9 @@ func (s *Server) registerAutonomy() {
 		return map[string][]string{"done": done, "failed": failed}, nil
 	})
 	rpc(s, "crons.list", func(ctx context.Context, _ none) ([]scheduler.Cron, error) { return sc().Crons(ctx) })
+	rpc(s, "crons.preview", func(ctx context.Context, r struct {
+		Expr string `json:"expr"`
+	}) (scheduler.CronPreview, error) { return sc().PreviewCron(ctx, r.Expr) })
 	rpc(s, "crons.save", func(ctx context.Context, c scheduler.Cron) (int64, error) { return sc().SaveCron(ctx, c) })
 	rpc(s, "crons.delete", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`

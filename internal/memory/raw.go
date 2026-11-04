@@ -78,6 +78,8 @@ Rules: one self-contained sentence per fact, third person ("User prefers tea ove
 
 Extract only what the excerpt actually states or establishes: never turn a question, failed search, plan, placeholder, speculation, or agent's intended action into an accomplished fact. Preserve uncertainty, the exact named entity, season/version, numbers, dates and attribution; do not combine details from different works or projects just because their names resemble one another. Do not record temporary job progress, agent discussions, individual file statuses or verification attempts unless a lasting decision or future task depends on them. Put ongoing monitoring and configuration details in their relevant project, not the user bank. If the claim's subject or evidence is unclear, omit it rather than guess.
 
+Attribute claims to their actual speaker. An assistant's suggestion, refusal, guess or summary is not a user preference or standing instruction. Keep project-specific requests scoped to their project. Do not infer quiet hours from message timestamps.
+
 For each fact, also give value_ratio: how likely this is to still matter in an unrelated future task. A standing attribute — identity, equipment/hardware, a preference, a relationship, a recurring habit — is high (0.7-1.0): "User has a Synology NAS" or "User prefers tea over coffee" will keep being relevant. A one-off event or transient state is low (0.1-0.3): "Downloaded files X and Y" or "The download failed with a 407 error" only matters right now and is very unlikely to help a later, unrelated task. This is independent of confidence (how sure you are it's true) — a one-off event can be 100% certain and still low value_ratio.
 Facts that are only true for a while — a price, stock or availability, a version "currently" in use, a status of something in progress — also get ttl_days: roughly how many days until they are likely stale (a price: 7-30, a status: 3-14). Leave ttl_days out (or 0) for anything lasting.
 When a fact is a plain statement about one thing, also split it into subject, predicate and object ("The user owns a Synology DS923" → subject "user", predicate "owns", object "Synology DS923"); keep the predicate a short verb phrase, reuse the same wording for the same relation, and leave all three out for anything that does not split cleanly.
@@ -363,8 +365,12 @@ func guessOwner(r rawRow) string {
 // never silently dropped.
 func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, project string) (stored, pending int, err error) {
 	tainted := false
+	hasUser := false
 	var taskID int64 // best-effort provenance: the first task any raw message in this batch belonged to
 	for _, r := range raws {
+		if strings.EqualFold(strings.TrimSpace(r.from), "user") {
+			hasUser = true
+		}
 		if r.tainted {
 			tainted = true
 		}
@@ -422,9 +428,11 @@ func (s *Service) distil(ctx context.Context, owner string, raws []rawRow, proje
 		if _, _, _, err := ParseSpec(bank, owner); err != nil {
 			bank = "domain:General"
 		}
-		conf, tags, src := rawFactPolicy(tainted, f.Confidence, f.Tags, "raw")
+		personal := bank == "user" || bank == "profile" || strings.HasPrefix(bank, "profile:")
+		unverified := tainted || (personal && !hasUser)
+		conf, tags, src := rawFactPolicy(unverified, f.Confidence, f.Tags, "raw")
 		if _, err := s.Store(ctx, StoreReq{Bank: bank, Agent: owner, Text: f.Text, Tags: tags, Source: src, Confidence: conf, ValueRatio: f.ValueRatio, TaskID: taskID, TTLDays: clampTTL(f.TTLDays), Subject: f.Subject, Predicate: f.Predicate, Object: f.Object}); err != nil {
-			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, f.ValueRatio, tainted, err)
+			s.queuePendingFact(ctx, ids, bank, owner, f.Text, tags, conf, f.ValueRatio, unverified, err)
 			pending++
 			continue
 		}

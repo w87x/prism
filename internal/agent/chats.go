@@ -169,6 +169,9 @@ func (e *Engine) DeleteChat(ctx context.Context, id int64) error {
 		return errors.New("the main chat cannot be deleted (clear it instead)")
 	}
 	e.StopChat(ChatKey("web", topic))
+	if _, err := e.DB.Exec(ctx, `DELETE FROM chat_background_results WHERE channel='web' AND topic=$1`, topic); err != nil {
+		return err
+	}
 	if _, err := e.DB.Exec(ctx, `DELETE FROM chat_messages WHERE channel='web' AND topic=$1`, topic); err != nil {
 		return err
 	}
@@ -440,6 +443,9 @@ func (e *Engine) MergeChats(ctx context.Context, sourceIDs []int64, targetID int
 			return nil, err
 		}
 		res.Moved += int(tag.RowsAffected())
+		if _, err := e.DB.Exec(ctx, `UPDATE chat_background_results SET topic=$1,moved_from=$2 WHERE channel='web' AND topic=$2 AND consumed_at IS NULL`, target.Topic, c.Topic); err != nil {
+			return nil, err
+		}
 		if note != "" {
 			_, _ = e.Sessions.Append(ctx, tsess.ID, Msg{Message: llmMsg("user", note), Provenance: "system"})
 		}
@@ -479,6 +485,9 @@ func (e *Engine) UnmergeChat(ctx context.Context, id int64) error {
 	if _, err := e.DB.Exec(ctx, `UPDATE chat_messages SET topic=moved_from, moved_from='' WHERE channel='web' AND topic=$1 AND moved_from=$2`, c.MergedInto, c.Topic); err != nil {
 		return err
 	}
+	if _, err := e.DB.Exec(ctx, `UPDATE chat_background_results SET topic=moved_from,moved_from='' WHERE channel='web' AND topic=$1 AND moved_from=$2 AND consumed_at IS NULL`, c.MergedInto, c.Topic); err != nil {
+		return err
+	}
 	if _, err := e.DB.Exec(ctx, `UPDATE chats SET archived=false, merged_into='', merged_at=NULL WHERE id=$1`, id); err != nil {
 		return err
 	}
@@ -506,6 +515,7 @@ func (e *Engine) PurgeMergedChats(ctx context.Context, olderThan time.Duration) 
 	}
 	rows.Close()
 	for _, r := range rs {
+		_, _ = e.DB.Exec(ctx, `DELETE FROM chat_background_results WHERE channel='web' AND topic=$1`, r.topic)
 		_, _ = e.DB.Exec(ctx, `DELETE FROM sessions WHERE kind='chat' AND key=$1`, ChatKey("web", r.topic))
 		_, _ = e.DB.Exec(ctx, `DELETE FROM chats WHERE id=$1`, r.id)
 	}

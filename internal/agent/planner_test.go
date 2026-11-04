@@ -39,6 +39,14 @@ func TestPlanNoteIncludesDependenciesAndCompletion(t *testing.T) {
 	}
 }
 
+func TestPlanWorkItemsKeepSubtaskCriteria(t *testing.T) {
+	p := &Plan{Class: "task", Tasks: []PlanTask{{Title: "Get movies", DoneWhen: "Both queued", Sub: []PlanTask{{Title: "Find first", DoneWhen: "Source found"}, {Title: "Queue second", DoneWhen: "Queue ID recorded"}}}}}
+	items := planWorkItems(p)
+	if len(items) != 1 || !strings.Contains(items[0].DoneWhen, "Source found") || !strings.Contains(items[0].DoneWhen, "Queue ID recorded") {
+		t.Fatalf("items: %+v", items)
+	}
+}
+
 func TestPlanDependencyWarning(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -27,7 +27,7 @@ type VerifyItem struct {
 // A claim about the user's own setup — an address on their network, a path on their disk, their device — cannot be settled on the public
 // web. Sent out all the same, "the user runs a Jackett server at http://192.168.88.2:8080" cost one agent 118 searches and 1.5 million
 // tokens looking for that address on the internet.
-var personalClaim = regexp.MustCompile(`(?i)(\b(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}(\.\d{1,3})?\b|\blocalhost\b|\b127\.0\.0\.1\b|\b[\w-]+\.(local|lan|home|internal)\b|(^|\s)(~|/volume\d|/Users/|/home/|/mnt/|[A-Z]:\\)\S*)`)
+var personalClaim = regexp.MustCompile(`(?i)(\b(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}(\.\d{1,3})?\b|\blocalhost\b|\b127\.0\.0\.1\b|\b[\w-]+\.(local|lan|home|internal)\b|(^|[\s(])(~|/(volume\d|Users|home|mnt|video|media)/|[A-Z]:\\)\S*|\b(the user|user|user's|users'|their|my|our)\b)`)
 
 // WebVerifiable reports whether a claim could be checked against the public web at all.
 func WebVerifiable(text string) bool { return !personalClaim.MatchString(text) }
@@ -47,9 +47,9 @@ func recentlyTried(tags []string, now time.Time) bool {
 
 // VerifyQueue lists what is worth checking: unverified facts, then open hypotheses.
 func (s *Service) VerifyQueue(ctx context.Context, max int) ([]VerifyItem, error) {
-	rows, err := s.db.Query(ctx, `SELECT f.id, f.text, f.kind, f.tags, b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END
+	rows, err := s.db.Query(ctx, `SELECT f.id, f.text, f.kind, f.tags, f.origins, b.kind||CASE WHEN b.kind='user' THEN '' ELSE ':'||b.name END
 		FROM memory_facts f JOIN memory_banks b ON b.id=f.bank_id
-		WHERE f.valid_to IS NULL AND f.status<>'proposed' AND ((f.kind='fact' AND f.confidence<0.5) OR (f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis']))
+		WHERE f.valid_to IS NULL AND f.status<>'proposed' AND ((f.kind='fact' AND f.confidence<0.5 AND cardinality(f.origins)>0) OR (f.kind='conclusion' AND f.source='analysis' AND f.tags && ARRAY['hypothesis']))
 		ORDER BY (f.kind='fact') DESC, f.rank DESC, f.id DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
@@ -59,12 +59,14 @@ func (s *Service) VerifyQueue(ctx context.Context, max int) ([]VerifyItem, error
 	now := time.Now()
 	for rows.Next() {
 		var it VerifyItem
-		var tags []string
+		var tags, origins []string
 		var kind string
-		if err := rows.Scan(&it.ID, &it.Text, &kind, &tags, &it.Bank); err != nil {
+		if err := rows.Scan(&it.ID, &it.Text, &kind, &tags, &origins, &it.Bank); err != nil {
 			return nil, err
 		}
-		if recentlyTried(tags, now) || len(out) >= max || !WebVerifiable(it.Text) {
+		// Automatic verification is for claims with an identifiable public source. Raw local observations
+		// and inferred personal claims cannot be established from arbitrary public pages.
+		if recentlyTried(tags, now) || len(out) >= max || !WebVerifiable(it.Text) || (kind == "fact" && len(origins) == 0) {
 			continue
 		}
 		it.Kind = "fact"

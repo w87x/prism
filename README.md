@@ -54,8 +54,26 @@ Development: `make dev` (backend on :7777 and the UI on :5173, proxying `/ws`).
 Tests: `PRISM_TEST_DSN=postgres://user@host:port/postgres go test ./...` (creates and drops throw-away databases).
 
 New user schedules and action-oriented intents default to Atlas, who coordinates the specialists when they run.
+The schedule editor previews the next three occurrences in the configured time zone and warns about expressions
+that restrict both day-of-month and weekday. Those fields match on either condition in standard cron.
 You can explicitly choose another agent. Simple watches notify directly, and built-in maintenance jobs keep their
 designated agents. Existing schedules and intents are not reassigned automatically.
+
+Clarification questions belong to their originating chat. A timed-out required question leaves a task waiting for
+an answer; its outcome is kept in the question history. The chat's work panel shows the actual statuses of delegated
+tasks. When a top-level delegation omits acceptance criteria, PRISM checks its report against the delegated request;
+an unmet check is marked incomplete rather than automatically repeating side effects.
+If a user message interrupts a delegation, its eventual result is retained for Atlas's next turn in that chat and
+treated as untrusted tool data. When the chat is idle, Atlas also makes a concise, tool-free follow-up. Clearing the
+chat also removes these retained results. Draft plan steps are saved with the request; a step shows a task's status
+only when Atlas explicitly links it to that task, otherwise it stays unassigned.
+
+Automatic web verification selects low-confidence facts with public-source metadata and excludes recognizable
+personal claims. A verification run and its delegates share a limit of 18 web calls and 8 delegation calls. Facts
+extracted solely from assistant messages about the user or an agent profile remain unverified. These safeguards are
+conservative filters; they do not retrospectively correct existing memories or establish that a source supports a claim.
+Named background operations appear separately in Usage for new model calls. Common short operations have an 8192-token
+output ceiling, or the model's configured limit when lower; larger analyses retain their existing model limit.
 
 For a small, synthetic check of a local model's front-door planning, run:
 

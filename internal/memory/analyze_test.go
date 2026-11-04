@@ -274,7 +274,7 @@ func TestVerifyVerdictsApplyAndQueueRespectsTries(t *testing.T) {
 	hyp, _ := s.insertDerived(ctx, bank.ID, "The user probably plans a greenhouse.", ids[:2], 0.7, nil, "analysis", []string{"insight", "hypothesis"}, maxHypothesisConf)
 
 	q, err := s.VerifyQueue(ctx, 10)
-	if err != nil || len(q) != 4 || q[0].Kind != "fact" || q[len(q)-1].Kind != "hypothesis" {
+	if err != nil || len(q) != 3 || q[0].Kind != "fact" {
 		t.Fatalf("queue = %+v err=%v", q, err)
 	}
 	if _, err := s.ApplyVerdict(ctx, web.ID, "confirmed", "", []string{"only.example"}); err == nil {

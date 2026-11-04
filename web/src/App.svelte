@@ -99,7 +99,9 @@
   const showOb = $derived(needOnboarding || S.onboardingOpen);
   // the chat page shows questions in its thinking panel, which is not drawn on a narrow screen — there they go in the bar too
   // on the chat page questions are in the conversation and (wide) approvals in the thinking panel; a narrow chat still shows approvals here
-  const otherAsks = $derived(S.page === 'chat' ? (narrow ? S.asks.filter((a) => a.kind === 'confirm') : []) : S.asks);
+  const otherAsks = $derived(S.page === 'chat' ? S.asks.filter((a) =>
+    a.kind === 'confirm' ? narrow : !(a.is_chat && a.chat_channel === 'web' && (a.chat_topic || '') === S.chatTopic)
+  ) : S.asks);
 </script>
 
 {#if !wallOnly}

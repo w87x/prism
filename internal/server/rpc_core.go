@@ -190,7 +190,9 @@ func (s *Server) registerCore() {
 	}) (bool, error) {
 		return true, a.Engine.UnmergeChat(ctx, r.ID)
 	})
-	rpc(s, "chats.suggestions", func(ctx context.Context, _ none) ([]agent.ChatSuggestion, error) { return a.Engine.ChatSuggestions(ctx) })
+	rpc(s, "chats.suggestions", func(ctx context.Context, _ none) ([]agent.ChatSuggestion, error) {
+		return a.Engine.ChatSuggestions(ctx)
+	})
 	rpc(s, "chats.suggestion.accept", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`
 	}) (bool, error) {
@@ -392,6 +394,11 @@ func (s *Server) registerCore() {
 		RootID int64 `json:"root_id"`
 	}) ([]tasks.Task, error) {
 		return a.Tasks.List(ctx, tasks.Filter{RootID: r.RootID, Limit: 200})
+	})
+	rpc(s, "tasks.work_items", func(ctx context.Context, r struct {
+		RootID int64 `json:"root_id"`
+	}) ([]tasks.WorkItem, error) {
+		return a.Tasks.WorkItems(ctx, r.RootID)
 	})
 	rpc(s, "tasks.cancel", func(ctx context.Context, r struct {
 		ID int64 `json:"id"`

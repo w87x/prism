@@ -340,11 +340,6 @@ func (a *App) VerifyMemory(ctx context.Context, ids []int64, auto bool) (int, er
 	if _, err := a.Engine.Enqueue(ctx, tasks.Task{FromKind: from, FromName: "memory verification", ToAgent: "Atlas", Title: title, Input: input}); err != nil {
 		return 0, err
 	}
-	var sent []int64
-	for _, it := range items {
-		sent = append(sent, it.ID)
-	}
-	a.Memory.MarkVerifyTried(ctx, sent)
 	if auto {
 		_ = a.Settings.Set(ctx, "memory.verify", st{LastAt: time.Now()})
 	}

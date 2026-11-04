@@ -111,8 +111,28 @@ func TestAcceptanceCriteriaSendAShortfallBack(t *testing.T) {
 	tk2, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "Atlas", ToAgent: "Atlas", Title: "r2", Input: "again", Depth: 1}, true)
 	h.e.Tasks.SetCriteria(ctx, tk2.ID, "something saved")
 	out2 := h.e.RunTask(ctx, tk2, TaskOpts{})
-	if !strings.Contains(out2.Result, "Acceptance check: NOT met") {
+	if out2.Status != tasks.Partial || !strings.Contains(out2.Result, "Acceptance check: NOT met") {
 		t.Fatalf("an unmet check must show in the result: %q", out2.Result)
+	}
+}
+
+func TestDefaultAcceptanceShortfallDoesNotRepeatSideEffects(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var attempts atomic.Int32
+	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		_, sys, _ := msgAt(req, 0)
+		if strings.Contains(sys, "team lead checking") {
+			return testutil.Reply{Content: `{"met":false,"gap":"one item remains"}`}
+		}
+		attempts.Add(1)
+		return testutil.Reply{Content: "One item was queued; another is missing."}
+	}
+	tk, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", FromName: "Atlas", ToAgent: "Atlas", Input: "Queue both items", Depth: 1}, true)
+	h.e.Tasks.SetCriteria(ctx, tk.ID, defaultDelegationCriteria)
+	out := h.e.RunTask(ctx, tk, TaskOpts{})
+	if attempts.Load() != 1 || out.Status != tasks.Partial {
+		t.Fatalf("attempts=%d status=%s result=%s", attempts.Load(), out.Status, out.Result)
 	}
 }
 

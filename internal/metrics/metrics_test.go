@@ -25,6 +25,9 @@ func TestDashboardAggregates(t *testing.T) {
 	ins(now, "qwen", "Scout", 0, 0, 100, 0, false, "HTTP 500: model crashed")
 	ins(now.AddDate(0, 0, -2), "nemotron", "", 500, 100, 1000, 0, true, "")
 	ins(now.AddDate(0, 0, -20), "old", "Atlas", 9999, 9999, 1, 0, true, "")
+	if _, err := d.Exec(ctx, `UPDATE llm_calls SET action='memory_extract' WHERE model='nemotron'`); err != nil {
+		t.Fatal(err)
+	}
 	for _, r := range []struct {
 		tool string
 		ms   int
@@ -44,6 +47,9 @@ func TestDashboardAggregates(t *testing.T) {
 	db, err := s.Dashboard(ctx, 7, "UTC")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(db.Actions) != 1 || db.Actions[0].Action != "memory_extract" || db.Actions[0].Out != 100 {
+		t.Fatalf("background attribution: %+v", db.Actions)
 	}
 	if len(db.Buckets) != 7 || db.Hourly {
 		t.Fatalf("7 daily buckets expected, got %d hourly=%v", len(db.Buckets), db.Hourly)

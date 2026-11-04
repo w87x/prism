@@ -144,6 +144,28 @@ func TestRawFactPolicyCapsConfidenceForTaintedContentOnly(t *testing.T) {
 	}
 }
 
+func TestAssistantOnlyPersonalFactIsUnverified(t *testing.T) {
+	s, fake := newSvc(t)
+	ctx := context.Background()
+	fake.Handler = func(req map[string]any, call int) testutil.Reply {
+		return testutil.Reply{Content: `{"facts":[{"text":"User prefers weekly checks","bank":"user","confidence":0.99}]}`}
+	}
+	if err := s.AddRaw(ctx, RawMsg{From: "Atlas", To: "Scout", Agent: "Atlas", Text: "The user prefers weekly checks."}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Process(ctx, 40, true); err != nil {
+		t.Fatal(err)
+	}
+	var confidence float32
+	var tags []string
+	if err := s.db.QueryRow(ctx, `SELECT confidence,tags FROM memory_facts WHERE text=$1`, "User prefers weekly checks").Scan(&confidence, &tags); err != nil {
+		t.Fatal(err)
+	}
+	if confidence > 0.401 || !contains(tags, "unverified") {
+		t.Fatalf("assistant-only claim trusted: %v %v", confidence, tags)
+	}
+}
+
 func contains(ss []string, v string) bool {
 	for _, s := range ss {
 		if s == v {

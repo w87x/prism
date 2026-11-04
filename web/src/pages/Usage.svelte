@@ -108,6 +108,13 @@
               {:else}<tr><td colspan="6"><Empty>no agent activity</Empty></td></tr>{/each}</tbody>
           </table>
         </Panel>
+        <Panel title="Background operations" flush>
+          <table class="t">
+            <thead><tr><th>Operation</th><th class="r">Calls</th><th class="r">Tokens</th><th class="r">Avg</th><th class="r">Failed</th></tr></thead>
+            <tbody>{#each d.actions || [] as a}<tr><td class="hi">{a.action.replaceAll('_', ' ')}</td><td class="r">{n(a.calls)}</td><td class="r">{fmtTokens(a.tokens_in + a.tokens_out)}</td><td class="r">{secs(a.avg_ms)}</td><td class="r" class:err={a.errors}>{a.errors || '—'}</td></tr>
+              {:else}<tr><td colspan="5"><Empty>no attributed background operations yet</Empty></td></tr>{/each}</tbody>
+          </table>
+        </Panel>
         <Panel title="Tools" flush>
           <table class="t">
             <thead><tr><th>Tool</th><th class="r">Calls</th><th class="r">Failed</th><th class="r">Avg</th><th class="r">p95</th></tr></thead>

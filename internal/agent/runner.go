@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"prism/internal/llm"
@@ -146,6 +147,35 @@ type activeRun struct {
 	approved            sync.Map        // tool name → true: user chose "allow for this task"
 	imgMu               sync.Mutex
 	pendingImages       []int64 // pictures sent while the run was working, delivered with the next steering message
+	verification        *verificationBudget
+}
+
+// A shared budget prevents a verification job from multiplying its searches through delegates.
+type verificationBudget struct{ web, delegation atomic.Int64 }
+
+func (b *verificationBudget) allow(tool string) bool {
+	if b == nil {
+		return true
+	}
+	var counter *atomic.Int64
+	var limit int64
+	switch tool {
+	case "web_search", "web_fetch", "web_extract", "web_structured":
+		counter, limit = &b.web, 18
+	case "delegate", "ask_colleague":
+		counter, limit = &b.delegation, 8
+	default:
+		return true
+	}
+	for {
+		n := counter.Load()
+		if n >= limit {
+			return false
+		}
+		if counter.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
 }
 
 // touch records a sign of life; the stall watchdog reads it.
@@ -300,6 +330,13 @@ func (e *Engine) register(spec RunSpec) *activeRun {
 		}
 	}
 	ar.Info = RunInfo{ID: e.runSeq.Add(1), Agent: spec.Profile.Name, Depth: spec.Depth, ParentRun: spec.ParentRun, SessionID: spec.Session.ID, Kind: kind}
+	if parent, ok := e.runs[spec.ParentRun]; ok {
+		ar.Info.ChatTopic, ar.Info.ChatChannel = parent.Info.ChatTopic, parent.Info.ChatChannel
+		ar.verification = parent.verification
+	}
+	if spec.Task != nil && spec.Task.FromName == "memory verification" {
+		ar.verification = &verificationBudget{}
+	}
 	if spec.Task != nil {
 		ar.Info.TaskID, ar.Info.Title = spec.Task.ID, spec.Task.Title
 	}
@@ -1147,6 +1184,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		}
 		return toolResult{text: fmt.Sprintf("Error: %s is not in your toolset and tools cannot be loaded at run time — %s.", tc.Name, hint)}
 	}
+	if !ar.verification.allow(tc.Name) {
+		emit("denied", false, "memory verification budget exhausted")
+		return toolResult{text: "Error: the shared memory verification budget is exhausted. Stop searching or delegating; record unresolved claims as unclear and report what was actually verified."}
+	}
 	if strings.TrimSpace(tc.Arguments) == "" {
 		tc.Arguments = "{}"
 	}
@@ -1296,7 +1337,24 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 						if r.err != nil {
 							txt = "failed: " + r.err.Error()
 						}
-						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, textutil.Brief(txt, 600)), spec.Channel, spec.Topic, env.TaskID)
+						deliveryTopic, movedFrom := spec.Topic, ""
+						if spec.Channel == "web" && e.DB != nil {
+							var merged string
+							err := e.DB.QueryRow(context.WithoutCancel(ctx), `SELECT merged_into FROM chats WHERE topic=$1`, spec.Topic).Scan(&merged)
+							if errors.Is(err, pgx.ErrNoRows) {
+								return
+							}
+							if err == nil && merged != "" {
+								deliveryTopic, movedFrom = merged, spec.Topic
+							}
+						}
+						if spec.Interactive && (spec.Channel == "web" || spec.Channel == "telegram") && e.DB != nil {
+							var backgroundID int64
+							if err := e.DB.QueryRow(context.WithoutCancel(ctx), `INSERT INTO chat_background_results(channel,topic,task_id,result,moved_from) VALUES($1,$2,NULLIF($3,0),$4,$5) RETURNING id`, spec.Channel, deliveryTopic, env.TaskID, textutil.Clean(textutil.Brief(txt, 6000)), movedFrom).Scan(&backgroundID); err == nil && spec.Channel == "web" {
+								go e.summarizeBackground(context.WithoutCancel(ctx), backgroundID, spec.Channel, deliveryTopic, env.TaskID, txt)
+							}
+						}
+						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, textutil.Brief(txt, 600)), spec.Channel, deliveryTopic, env.TaskID)
 					}
 				}()
 				return toolResult{text: e.interruptedText(ctx, tool.Name, env.TaskID, detached, spec.SteerFrom)}

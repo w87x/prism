@@ -183,6 +183,22 @@ func TestOutputLimitInsideToolCallIsAnError(t *testing.T) {
 	}
 }
 
+func TestRequestOutputBudgetRespectsModelLimit(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sse(w, `{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	_, err := NewClient().Chat(context.Background(), Endpoint{BaseURL: srv.URL, Model: "m", MaxOut: 1000}, Request{MaxTokens: 8192}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["max_tokens"] != float64(1000) {
+		t.Fatalf("body=%+v", body)
+	}
+}
+
 func TestStalledServerIsCutOff(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

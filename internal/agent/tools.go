@@ -57,6 +57,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			tools.Str("title", "short label"),
 			tools.Bool("scout", "a cheap read-only recon is taken first and handed to the agent as a brief — for jobs that are risky, expensive or ambiguous (unknown files, an unfamiliar site, a large change); leave out for simple jobs"),
 			tools.Str("done_when", "what 'done' means for this item — concrete, checkable acceptance criteria (e.g. 'a file saved, its path reported, at least 5 entries'). The result is checked against it before it comes back to you; leave out for trivial work"),
+			tools.IntList("plan_items", "Atlas only: top-level numbered draft plan items this task covers; omit if there is no saved plan, when unrelated or unsure"),
 			tools.IntList("refs", "artifact ids with material the agent needs (artifact_save / scratchpad_share first) — hand over bulky material by reference, not pasted"),
 			tools.Int("task_id", "ONLY to continue a task that answered status waiting_input, using the exact id it reported; never invent one. Leave out for new work"))),
 		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
@@ -69,6 +70,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 					Scout       bool    `json:"scout"`
 					TaskID      int64   `json:"task_id"`
 					Refs        []int64 `json:"refs"`
+					PlanItems   []int   `json:"plan_items"`
 				} `json:"tasks"`
 			}](raw)
 			if err != nil {
@@ -82,6 +84,14 @@ func (e *Engine) toolDelegate() *tools.Tool {
 			}
 			if env.Depth >= MaxDepth {
 				return "", fmt.Errorf("delegation depth limit (%d) reached: do this work yourself", MaxDepth)
+			}
+			checkByDefault := false
+			var planItems []tasks.WorkItem
+			if env.Depth == 0 && env.TaskID != 0 {
+				if parent, err := e.Tasks.Get(ctx, env.TaskID); err == nil {
+					checkByDefault = parent.FromKind == "user" || parent.FromKind == "telegram" || parent.FromKind == "cron" || parent.FromKind == "intent"
+				}
+				planItems, _ = e.Tasks.WorkItems(ctx, env.TaskID)
 			}
 			out := make([]string, len(a.Tasks))
 			tainted := make([]bool, len(a.Tasks))
@@ -104,7 +114,18 @@ func (e *Engine) toolDelegate() *tools.Tool {
 							return
 						}
 					}
-					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, it.DoneWhen, it.Scout)
+					criteria := strings.TrimSpace(it.DoneWhen)
+					if criteria == "" && checkByDefault && it.TaskID == 0 {
+						criteria = defaultDelegationCriteria
+					}
+					for _, no := range it.PlanItems {
+						for _, item := range planItems {
+							if item.Number == no && item.DoneWhen != "" {
+								criteria += "\nPlan item " + fmt.Sprint(no) + ": " + item.DoneWhen
+							}
+						}
+					}
+					t, tn, err := e.delegateOne(ctx, env, agentName, it.Instruction, it.Title, it.TaskID, false, criteria, it.Scout, it.PlanItems)
 					tainted[i] = tn
 					if err != nil {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
@@ -171,7 +192,7 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 					name = best
 				}
 			}
-			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen, false)
+			t, tainted, err := e.delegateOne(ctx, env, name, a.Request, "help for "+env.Agent, 0, true, a.DoneWhen, false, nil)
 			if err != nil {
 				return "", err
 			}
@@ -257,11 +278,11 @@ func notCapable(result string) (string, bool) {
 }
 
 func formatTaskResult(t tasks.Task) string {
+	if why, ok := notCapable(t.Result); ok {
+		return fmt.Sprintf("## Task #%d → %s [NOT CAPABLE]\n%s\n(%s could not do this work. Pick a suitable agent or report what remains blocked.)", t.ID, t.ToAgent, why, t.ToAgent)
+	}
 	switch t.Status {
 	case tasks.Done:
-		if why, ok := notCapable(t.Result); ok {
-			return fmt.Sprintf("## Task #%d → %s [NOT CAPABLE]\n%s\n(%s is not the right agent for this and did nothing. Pick a better-suited agent (agent_find, tool_search) and ask or delegate again. If none fits and you can delegate: have Forge design a suitable agent, or Metis improve the closest one, then retry; otherwise do it yourself or report_blocked to whoever asked you.)", t.ID, t.ToAgent, why, t.ToAgent)
-		}
 		return fmt.Sprintf("## Task #%d → %s [done]\n%s", t.ID, t.ToAgent, strings.TrimSpace(t.Result))
 	case tasks.WaitingInput:
 		return fmt.Sprintf("## Task #%d → %s [needs input]\nQuestion: %s\n(Answer it yourself if you can, else use ask_user; then continue with delegate(task_id=%d, instruction=<answer>).)", t.ID, t.ToAgent, t.Question, t.ID)
@@ -276,12 +297,15 @@ func formatTaskResult(t tasks.Task) string {
 	}
 }
 
-func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string, scout bool) (tasks.Task, bool, error) {
+func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, instruction, title string, taskID int64, leaf bool, criteria string, scout bool, planItems []int) (tasks.Task, bool, error) {
 	if strings.TrimSpace(instruction) == "" {
 		return tasks.Task{}, false, errors.New("empty instruction")
 	}
 	opts := TaskOpts{Tainted: env.Tainted, ParentRun: env.RunID, Leaf: leaf, Restricted: env.Restricted}
 	if taskID != 0 { // multi-turn continuation
+		if len(planItems) > 0 {
+			return tasks.Task{}, false, errors.New("plan_items are only for new tasks; a continued task keeps its existing links")
+		}
 		t, err := e.Tasks.Get(ctx, taskID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -345,6 +369,10 @@ func (e *Engine) delegateOne(ctx context.Context, env *tools.Env, agentName, ins
 	}
 	t, err := e.childTask(ctx, env, p, title, instruction, depth)
 	if err != nil {
+		return t, false, err
+	}
+	if err := e.Tasks.LinkWorkItems(ctx, env.TaskID, t.ID, planItems); err != nil {
+		_ = e.Tasks.Finish(ctx, t.ID, tasks.Cancelled, "", "plan link failed", "")
 		return t, false, err
 	}
 	e.Tasks.SetCriteria(ctx, t.ID, criteria)

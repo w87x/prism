@@ -79,12 +79,12 @@ export async function openProposal(id) {
 // Methods a view-only tab may still call: everything that only reads. Unknown methods are refused, so a
 // newly added writing RPC is safe by default.
 const READ_ONLY_OK = new Set(`app.state agents.activity agents.get agents.history agents.list agents.proposals artifacts.list autonomy.audit bookmarks.list briefings.list
-browser.status chat.commands chat.history chats.list crons.list docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
+browser.status chat.commands chat.history chats.list crons.list crons.preview docs.search docs.sources downloads.list editor.claim elevenlabs.status foldermap.entries
 foldermap.list fs.browse intents.list kb.page_get kb.tree lists.list logs.list mail.accounts mail.himalaya mcp.list memory.banks memory.entity_facts
 memory.entity_graph memory.export memory.fact memory.facts memory.find memory.full_graph memory.graph memory.links memory.ops memory.review
 memory.stats models.list notifications.list obsidian.status onboarding.state onboarding.templates ops.dashboard ops.delegation plugins.get
 plugins.info plugins.list plugins.status processes.list processes.log providers.list roles.get runs.snapshot search.all settings.get setup.info
-shortcuts.list skills.get skills.hubs skills.list tasks.get tasks.list tasks.tree telegram.status today.get tools.list trackers.get trackers.list
+shortcuts.list skills.get skills.hubs skills.list tasks.get tasks.list tasks.tree tasks.work_items telegram.status today.get tools.list trackers.get trackers.list
 web.providers runbooks.list jobs.proposals evolution.watches decisions.list review.log standup.list llm.health codex.status tools.arm_suggestions skills.usage watch.list breaker.list trails.list trust.list antibodies.list core.list`.split(/\s+/));
 setRpcGuard((method) => (S.editor.editor || READ_ONLY_OK.has(method) ? '' : 'This tab is view-only — another window is the master. Use the badge in the corner to make this one the master.'));
 export function takeOver() { return rpc('editor.claim'); }
@@ -280,6 +280,7 @@ function wire() {
     else if (topic) loadChats(); // a chat this tab has not heard of yet
   });
   on('chat.cleared', (e) => { if (e.channel === 'web' && (e.topic || '') === S.chatTopic) S.chat = []; });
+  on('chat.preparing', (e) => { S.chatBusy[e.topic || ''] = !!e.busy; });
   on('chats.update', () => loadChats());
   // the front door took a message to a project's chat: follow it, if the user is looking at the chat they typed it in
   on('chat.routed', async (e) => {
@@ -363,6 +364,7 @@ export async function refreshAll() {
     S.asks = snap.asks || [];
     S.chatBusy = {};
     for (const r of snap.runs || []) if (r.is_chat && (r.depth || 0) === 0 && r.kind !== 'quick') S.chatBusy[r.chat_topic || ''] = true;
+    for (const a of snap.asks || []) if (a.is_chat && a.chat_channel === 'web') S.chatBusy[a.chat_topic || ''] = true;
   }
   loadAgents();
   loadModels();

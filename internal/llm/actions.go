@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"strings"
 
 	"prism/internal/settings"
 )
@@ -19,6 +20,7 @@ type Action struct {
 var Actions = []Action{
 	{"plan", "Classify and decompose each message (the front door)", "Chat", "aux"},
 	{"chat_naming", "Name chats, suggest projects, summarise merged chats", "Chat", "aux"},
+	{"background_summary", "Summarise finished background work", "Chat", "aux"},
 	{"compaction", "Compact a long conversation", "Chat", "aux"},
 	{"icons", "Choose agents' icons", "Agents", "aux"},
 	{"routine", "Routine jobs (cron, standing intents)", "Autonomy", "aux"},
@@ -60,5 +62,29 @@ func (r *Router) ActionRef(ctx context.Context, id, def string) string {
 	case "aux":
 		def = "fast"
 	}
-	return "role:" + def
+	return "action:" + id + ":role:" + def
+}
+
+// splitActionRef keeps the action attached through all normal model resolution and fallback paths.
+func splitActionRef(ref string) (string, string) {
+	if s, ok := strings.CutPrefix(ref, "action:"); ok {
+		if action, model, ok := strings.Cut(s, ":"); ok && action != "" && model != "" {
+			return action, model
+		}
+	}
+	return "", ref
+}
+
+// ModelRef returns the underlying model reference without its action label.
+func ModelRef(ref string) string { _, model := splitActionRef(ref); return model }
+
+// Background operations need room for small-model reasoning, but should not generate indefinitely.
+// Complex analysis is intentionally left to the model's own configured limit.
+func actionOutputLimit(action string) int {
+	switch action {
+	case "plan", "memory_extract", "memory_reflect", "person_model", "chat_naming", "background_summary", "acceptance", "task_summary":
+		return 8192
+	default:
+		return 0
+	}
 }

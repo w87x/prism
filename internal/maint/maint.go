@@ -39,6 +39,8 @@ func Cleanup(ctx context.Context, db *pgxpool.Pool, logsDays, tasksDays int, sta
 		// watches that are over (fired, cancelled, expired, failed) pile up otherwise
 		_, _ = db.Exec(ctx, `DELETE FROM intents WHERE status<>'active' AND COALESCE(fired_at, last_check, created_at) < now() - interval '60 days'`)
 		_, _ = db.Exec(ctx, `DELETE FROM tool_approvals WHERE at < now() - interval '180 days'`)
+		_, _ = db.Exec(ctx, `DELETE FROM ask_history WHERE ended_at < now() - interval '180 days'`)
+		_, _ = db.Exec(ctx, `DELETE FROM chat_background_results WHERE consumed_at < now() - interval '180 days'`)
 		t, err = db.Exec(ctx, `DELETE FROM sessions WHERE kind='task' AND (task_id IS NULL OR task_id NOT IN (SELECT id FROM tasks))`)
 		if err != nil {
 			return r, err

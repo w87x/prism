@@ -15,6 +15,39 @@ import (
 	"prism/internal/tools"
 )
 
+func TestCronPreviewReportsNextRunsAndAmbiguousDayFields(t *testing.T) {
+	s, _ := setup(t)
+	p, err := s.PreviewCron(context.Background(), "0 12 20,21,22 * 1")
+	if err != nil || len(p.Next) != 3 || !strings.Contains(p.Warning, "EITHER") {
+		t.Fatalf("preview: %+v err=%v", p, err)
+	}
+	if !p.Next[0].Before(p.Next[1]) || !p.Next[1].Before(p.Next[2]) {
+		t.Fatalf("dates not increasing: %+v", p.Next)
+	}
+}
+
+func TestScheduleListSurfacesLegacyProblems(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	_, err := s.DB.Exec(ctx, `INSERT INTO crons(name,agent,expr,prompt,enabled,system) VALUES('legacy','missing agent','0 12 20,21,22 * 1','check',true,false)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := s.Crons(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cs {
+		if c.Name == "legacy" {
+			if len(c.Issues) != 2 {
+				t.Fatalf("issues: %+v", c.Issues)
+			}
+			return
+		}
+	}
+	t.Fatal("legacy schedule not found")
+}
+
 func TestNewCronDefaultsToAtlasAndKeepsExplicitAgent(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()

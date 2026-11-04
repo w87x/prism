@@ -2032,6 +2032,10 @@ func TestSteeringInterruptsAWaitOnDelegatedWork(t *testing.T) {
 		}
 		return false
 	})
+	var pending int
+	if err := h.e.DB.QueryRow(ctx, `SELECT count(*) FROM chat_background_results WHERE channel='web' AND topic='' AND consumed_at IS NULL AND result LIKE '%slow result ready%'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("background result not saved for Atlas: count=%d err=%v", pending, err)
+	}
 }
 
 // A non-delegating tool that is still running when a message arrives is cancelled, and the model is told so.
@@ -3042,16 +3046,16 @@ func TestModelActionsOverrideTheDefaults(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	r := h.e.LLM
-	if got := r.ActionRef(ctx, "plan", "fast"); got != "role:fast" {
+	if got := r.ActionRef(ctx, "plan", "fast"); got != "action:plan:role:fast" {
 		t.Fatalf("default for the planner: %q", got)
 	}
-	if got := r.ActionRef(ctx, "memory_analyze", "chat"); got != "role:chat" {
+	if got := r.ActionRef(ctx, "memory_analyze", "chat"); got != "action:memory_analyze:role:chat" {
 		t.Fatalf("default for deep analysis: %q", got)
 	}
 	if err := h.e.Settings.Set(ctx, settings.KeyModelActions, settings.ModelActions{Choice: map[string]string{"plan": "main", "memory_analyze": "aux", "routine": "main"}}); err != nil {
 		t.Fatal(err)
 	}
-	if r.ActionRef(ctx, "plan", "fast") != "role:chat" || r.ActionRef(ctx, "memory_analyze", "chat") != "role:fast" || r.ActionRef(ctx, "icons", "fast") != "role:fast" {
+	if r.ActionRef(ctx, "plan", "fast") != "action:plan:role:chat" || r.ActionRef(ctx, "memory_analyze", "chat") != "action:memory_analyze:role:fast" || r.ActionRef(ctx, "icons", "fast") != "action:icons:role:fast" {
 		t.Fatal("a choice replaces the default for that action only")
 	}
 	cron, _ := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "cron", FromName: "x", ToAgent: "Atlas", Title: "x", Input: "x"}, true)

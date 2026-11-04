@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { S, call, toast, clock, stamp, setActivityMode, answerAsk } from '../lib/store.svelte.js';
+  import { S, call, toast, clock, stamp, setActivityMode, answerAsk, go } from '../lib/store.svelte.js';
   import ChatList from '../lib/ChatList.svelte';
   import ChatHeader from '../lib/ChatHeader.svelte';
   import AskCard from '../lib/AskCard.svelte';
@@ -16,6 +16,7 @@
   import Segmented from '../lib/ui/Segmented.svelte';
   import Icon from '../lib/ui/Icon.svelte';
   import Modal from '../lib/ui/Modal.svelte';
+  import { asksForChat } from '../lib/chatAsks.js';
 
   let text = $state('');
   let list = $state();
@@ -31,6 +32,26 @@
   let listOpen = $state(false); // narrow screens: the chat list is a drawer
   const busy = $derived(!!S.chatBusy[S.chatTopic]);
   const topic = $derived(S.chatTopic);
+  const chatAsks = $derived(asksForChat(S.asks, topic));
+  let work = $state([]);
+  let workItems = $state([]);
+  let workOpen = $state(false);
+  const currentWork = $derived(Object.values(S.runs).find((r) => r.chat === topic && r.depth === 0 && r.kind !== 'quick' && !r.done)?.task || [...S.chat].reverse().find((m) => m.role === 'agent' && m.task_id)?.task_id || 0);
+  $effect(() => {
+    const id = currentWork;
+    work = [];
+    workItems = [];
+    if (!id) return;
+    let active = true;
+    async function refresh() {
+      const [rows, items] = await Promise.all([call('tasks.tree', { root_id: id }, { quiet: true }), call('tasks.work_items', { root_id: id }, { quiet: true })]);
+      if (active && rows) work = rows;
+      if (active) workItems = items || [];
+    }
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => { active = false; clearInterval(timer); };
+  });
 
   // ── pictures: paste, drop or pick; shown as removable thumbnails until sent ──
   let atts = $state([]); // {name, mime, data, preview}
@@ -118,7 +139,7 @@
   // ── scrolling: follow new content unless the user scrolled up to read ──
   // a new question brings the chat to it
   let askSeen = 0;
-  $effect(() => { const n = S.asks.filter((a) => a.kind !== 'confirm').length; if (n > askSeen) tick().then(() => toBottom()); askSeen = n; });
+  $effect(() => { const n = chatAsks.length; if (n > askSeen) tick().then(() => toBottom()); askSeen = n; });
   const toBottom = () => { if (list) { list.scrollTop = list.scrollHeight; stick = true; unread = 0; } };
   function onScroll() { stick = list.scrollHeight - list.scrollTop - list.clientHeight < 48; if (stick) unread = 0; }
   let seen = 0;
@@ -162,7 +183,7 @@
     const sent = atts, sentDocs = docs, sentPaths = paths;
     let r;
     // an agent is waiting on one question and the answer was typed here, not in its form: that is the answer
-    const open = S.asks.filter((x) => x.kind !== 'confirm');
+    const open = chatAsks;
     if (open.length === 1 && t && !t.startsWith('/') && !sent.length && !sentDocs.length && !sentPaths.length) {
       if (await answerAsk(open[0].id, t)) { sending = false; ta?.focus(); return; }
       S.asks = S.asks.filter((x) => x.id !== open[0].id); // no longer pending (answered elsewhere, or the run ended): drop the stale form and send it as a message
@@ -257,13 +278,31 @@
         <div class="m agent"><span class="who"><span class="gl"><Glyph name="Atlas" /></span>Atlas:</span><span class="tx">Hi! I'm Atlas — tell me what you need and I'll take it from there. Type <code>/</code> for commands.</span></div>
       {/each}
       <!-- clarification questions from an agent that really does not know what to do sit here, in the conversation, as one form -->
-      {#each S.asks.filter((a) => a.kind !== 'confirm') as a (a.id)}
+      {#each chatAsks as a (a.id)}
         <div class="m askrow"><span class="who"><span class="gl"><Glyph name={a.agent} /></span>{a.agent} needs you:</span><div class="tx askbox"><AskCard ask={a} /></div></div>
       {/each}
     </div>
     {#if unread > 0}<button class="pill" onclick={toBottom}>↓ {unread} new</button>{/if}
   </div>
 
+  {#if work.length > 1 || workItems.length}
+    <div class="workcard">
+      <button class="worktoggle" onclick={() => (workOpen = !workOpen)} aria-expanded={workOpen}>
+        {workOpen ? '▾' : '▸'} Work on this request · {work.filter((t) => t.depth > 0 && (t.status === 'running' || t.status === 'queued')).length} active · {work.filter((t) => t.depth > 0 && (t.status === 'partial' || t.status === 'failed' || t.status === 'waiting_input')).length} incomplete
+      </button>
+      {#if workOpen}
+        {#if workItems.length}<div class="sm mute">Draft plan · linked steps show their task's status</div>{/if}
+        {#each workItems as item (item.number)}
+          <div class="workstep"><span>{item.number}. {item.title}</span><span>{item.status.replaceAll('_', ' ')}</span></div>
+        {/each}
+        {#if work.length > 1}<div class="sm mute">Delegated work</div>{/if}
+        {#each work.filter((t) => t.depth > 0) as task (task.id)}
+          <div class="workstep"><span>{task.to_agent}: {task.title}</span><span>{task.status.replaceAll('_', ' ')}</span></div>
+        {/each}
+        <button class="worktoggle" onclick={() => { S.selectedTask = currentWork; go('tasks'); }}>Open task details</button>
+      {/if}
+    </div>
+  {/if}
   {#if !S.narrow}<ThinkingPanel />{/if}
 
   <div class="input">
@@ -359,6 +398,9 @@
 </Modal>
 
 <style>
+  .workcard { border-top: 1px solid var(--line); padding: 6px 12px; font-size: var(--fs-sm); }
+  .worktoggle { background: none; border: 0; color: var(--fg-dim); cursor: pointer; text-align: left; padding: 3px 0; }
+  .workstep { display: flex; justify-content: space-between; gap: 12px; color: var(--fg-mute); padding: 2px 0; }
   .shell { display: flex; gap: 6px; height: 100%; min-height: 0; }
   .page { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; flex: 1; min-width: 0; }
   .drawer { display: flex; min-height: 0; }

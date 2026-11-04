@@ -17,18 +17,43 @@ const acceptancePrompt = `You are the team lead checking a colleague's report ag
 Judge ONLY against the acceptance criteria, using the report and the list of what the colleague actually did. A claim the trail does not support (it says it saved or sent something but no such call appears) does not count as done.
 Answer JSON only: {"met":true|false,"gap":"what is missing or unsupported, in one or two sentences (empty when met)"}`
 
+const defaultDelegationCriteria = "Complete the requested work in the instruction; report each requested outcome and clearly identify anything unfinished or unsupported."
+
 type acceptanceVerdict struct {
 	Met *bool  `json:"met"`
 	Gap string `json:"gap"`
 }
 
-func (e *Engine) judgeAcceptance(ctx context.Context, criteria, instruction, text string, session *int64) (met bool, gap string, ok bool) {
+func (e *Engine) judgeAcceptance(ctx context.Context, criteria, instruction, text string, taskID int64, session *int64) (met bool, gap string, ok bool) {
 	if e.LLM == nil || e.LLM.RoleRef(ctx, "chat") == "" {
 		return true, "", false
 	}
 	trail := ""
 	if session != nil {
 		trail = e.toolTrail(ctx, *session)
+	}
+	if taskID != 0 && e.DB != nil {
+		rows, err := e.DB.Query(ctx, `WITH RECURSIVE descendants AS (SELECT id,to_agent,session_id FROM tasks WHERE parent_id=$1 UNION ALL SELECT t.id,t.to_agent,t.session_id FROM tasks t JOIN descendants d ON t.parent_id=d.id) SELECT to_agent,session_id FROM descendants WHERE session_id IS NOT NULL ORDER BY id LIMIT 40`, taskID)
+		if err == nil {
+			type descendant struct {
+				agent   string
+				session int64
+			}
+			var ds []descendant
+			for rows.Next() {
+				var d descendant
+				if rows.Scan(&d.agent, &d.session) == nil {
+					ds = append(ds, d)
+				}
+			}
+			rows.Close()
+			for _, d := range ds {
+				trail += "\n[" + d.agent + "]\n" + e.toolTrail(ctx, d.session)
+				if len(trail) > 9000 {
+					break
+				}
+			}
+		}
 	}
 	var v acceptanceVerdict
 	cctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
@@ -60,19 +85,19 @@ func (e *Engine) checkAcceptance(ctx context.Context, spec RunSpec, res *RunResu
 	if crit == "" {
 		return res
 	}
-	met, gap, ran := e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.SessionID)
+	met, gap, ran := e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.ID, t.SessionID)
 	if !ran {
 		e.Tasks.SetCriteriaUnknown(ctx, t.ID, "Acceptance check could not run or returned no verdict.")
 		res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance check unavailable; completion has not been independently checked.]"
 		return res
 	}
-	if !met {
+	if !met && !strings.HasPrefix(crit, defaultDelegationCriteria) {
 		e.Emit("task.criteria", map[string]any{"task": t.ID, "met": false, "gap": gap})
 		retry := spec
 		retry.Input = fmt.Sprintf("[Lead's check] Your report does not meet the acceptance criteria.\nCriteria: %s\nWhat is missing: %s\nDo what is missing now, then give the complete final report.", crit, orNone(gap))
 		if again, err := e.Run(ctx, retry); err == nil && again != nil && again.Aborted == "" && again.NeedsInput == "" && strings.TrimSpace(again.Text) != "" {
 			res = again
-			met, gap, ran = e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.SessionID)
+			met, gap, ran = e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.ID, t.SessionID)
 			if !ran {
 				e.Tasks.SetCriteriaUnknown(ctx, t.ID, "Acceptance re-check could not run or returned no verdict.")
 				res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance re-check unavailable; completion has not been independently checked.]"
