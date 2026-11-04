@@ -41,7 +41,15 @@ func runLiveWorkflowFixture(t *testing.T, f liveFixture) {
 		t.Fatal("PRISM_TEST_DSN is required for an isolated evaluation database")
 	}
 	h := newHarness(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	timeout := 5 * time.Minute
+	if raw := os.Getenv("PRISM_EVAL_TIMEOUT"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			t.Fatalf("invalid PRISM_EVAL_TIMEOUT %q", raw)
+		}
+		timeout = parsed
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	pid, err := h.e.LLM.Store().SaveProvider(ctx, llm.Provider{Name: "eval-local", Kind: "custom", BaseURL: base, Enabled: true})
 	if err != nil {

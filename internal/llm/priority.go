@@ -99,7 +99,7 @@ type backgroundContextKey struct{}
 func WithBackground(ctx context.Context) context.Context {
 	return context.WithValue(ctx, backgroundContextKey{}, true)
 }
-func backgroundContext(ctx context.Context) bool {
+func IsBackground(ctx context.Context) bool {
 	b, _ := ctx.Value(backgroundContextKey{}).(bool)
 	return b
 }

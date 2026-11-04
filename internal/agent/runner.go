@@ -545,7 +545,7 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 		specs := e.toolSpecs(active)
 		sysPrompt := e.buildSystem(ctx, spec, env, active)
 		// ── compaction (80% → 20% of the window) ──
-		view := foldedView(history)
+		view := historyView(history, int64(window))
 		toolTok, sysTok := llm.EstimateTools(specs), llm.EstimateTokens(sysPrompt)
 		est := int(float64(llm.EstimateMessages(view)+toolTok+sysTok) * calib)
 		ar.ctxTokens.Store(int64(est))
@@ -697,8 +697,8 @@ func msgsOf(ms []Msg) []llm.Message {
 const keepImages = 3
 
 // msgsForModel is msgsOf with the picture bytes loaded, for the request to the model.
-func (e *Engine) msgsForModel(ctx context.Context, ms []Msg) []llm.Message {
-	out := foldedView(ms)
+func (e *Engine) msgsForModel(ctx context.Context, ms []Msg, window int64) []llm.Message {
+	out := historyView(ms, window)
 	seen := 0
 	for i := len(ms) - 1; i >= 0; i-- {
 		if len(ms[i].ImageIDs) == 0 {
@@ -757,18 +757,24 @@ func (e *Engine) chat(ctx context.Context, modelRef, system string, history []Ms
 				return nil, ctx.Err()
 			}
 		}
-		msgs := append([]llm.Message{{Role: "system", Content: system}}, e.msgsForModel(ctx, history)...)
+		msgs := append([]llm.Message{{Role: "system", Content: system}}, e.msgsForModel(ctx, history, ar.window.Load())...)
 		sanitizeToolPairs(&msgs)
 		queued := time.Now()
-		sem := e.sem()
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		var sem chan struct{}
+		if !llm.IsBackground(ctx) {
+			sem = e.sem()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 		meta := &llm.CallMeta{Agent: agent, WaitMS: int(time.Since(queued).Milliseconds()), TaskID: ar.Info.TaskID, RunID: ar.Info.ID, ParentRun: ar.Info.ParentRun}
 		est := llm.EstimateMessages(msgs) + llm.EstimateTools(specs)
 		resp, err := e.LLM.Chat(llm.WithMeta(ctx, meta), modelRef, llm.Request{Messages: msgs, Tools: specs}, func(d llm.Delta) {
+			if d.Reasoning != "" || d.Content != "" {
+				ar.touch()
+			}
 			if d.Reasoning != "" {
 				e.Emit("run.delta", map[string]any{"run": ar.Info.ID, "agent": agent, "kind": "thinking", "text": d.Reasoning})
 			}
@@ -776,7 +782,9 @@ func (e *Engine) chat(ctx context.Context, modelRef, system string, history []Ms
 				e.Emit("run.delta", map[string]any{"run": ar.Info.ID, "agent": agent, "kind": "content", "text": d.Content})
 			}
 		})
-		<-sem
+		if sem != nil {
+			<-sem
+		}
 		if err == nil {
 			if resp.Usage.Prompt > 0 && est > 0 {
 				r := float64(resp.Usage.Prompt) / float64(est)

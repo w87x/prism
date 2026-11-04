@@ -159,3 +159,17 @@ func TestFoldDelegationsKeepsHeaderAndPointerButNotNeedsInput(t *testing.T) {
 		t.Fatalf("a recent delegation result must stay whole")
 	}
 }
+
+func TestHistoryViewPreservesEvidenceWhenWindowHasRoom(t *testing.T) {
+	result := "## Task #42 → Scout [done]\n" + strings.Repeat("source facts and evidence ", 100)
+	ms := []Msg{{Message: llm.Message{Role: "tool", Name: "delegate", Content: result}}}
+	for i := 0; i < 10; i++ {
+		ms = append(ms, Msg{Message: llm.Message{Role: "user", Content: "continue"}})
+	}
+	if got := historyView(ms, 262144); got[0].Content != result {
+		t.Fatal("large window lost specialist evidence")
+	}
+	if got := historyView(ms, 500); got[0].Content == result {
+		t.Fatal("context pressure did not fold older evidence")
+	}
+}

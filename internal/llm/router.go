@@ -379,7 +379,7 @@ func (r *Router) Chat(ctx context.Context, ref string, req Request, onDelta func
 	}()
 	err := r.each(ctx, ref, "chat", func(ep Endpoint, t target) error {
 		queuedAt := time.Now()
-		release, err := r.priority.acquire(ctx, ep.BaseURL, backgroundAction(action) || backgroundContext(ctx))
+		release, err := r.priority.acquire(ctx, ep.BaseURL, backgroundAction(action) || IsBackground(ctx))
 		priorityWait += int(time.Since(queuedAt).Milliseconds())
 		if err != nil {
 			return err

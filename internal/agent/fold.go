@@ -149,6 +149,16 @@ func foldedView(ms []Msg) []llm.Message {
 	return out
 }
 
+// historyView keeps full task evidence while the configured model window has
+// ample room. Folding becomes available under pressure; stored history is unchanged.
+func historyView(ms []Msg, window int64) []llm.Message {
+	raw := msgsOf(ms)
+	if window > 0 && int64(llm.EstimateMessages(raw)) < window/2 {
+		return raw
+	}
+	return foldedView(ms)
+}
+
 // ctxBreakdown splits the estimated prompt into where the tokens go, for the live-run view.
 func ctxBreakdown(sys, toolSpecs int, view []llm.Message) map[string]int {
 	b := map[string]int{"system": sys, "tools": toolSpecs}

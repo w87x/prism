@@ -101,7 +101,7 @@ func TestBackgroundCallsOnSameEndpointAreSerialized(t *testing.T) {
 
 func TestBackgroundContextIsInherited(t *testing.T) {
 	ctx := WithBackground(context.Background())
-	if !backgroundContext(context.WithoutCancel(ctx)) || backgroundContext(context.Background()) {
+	if !IsBackground(context.WithoutCancel(ctx)) || IsBackground(context.Background()) {
 		t.Fatal("background task priority was not inherited")
 	}
 }

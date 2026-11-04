@@ -98,6 +98,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 				planItems, _ = e.Tasks.WorkItems(ctx, env.TaskID)
 			}
 			out := make([]string, len(a.Tasks))
+			resultBudget := e.delegatedResultBudget(env, len(a.Tasks))
 			tainted := make([]bool, len(a.Tasks))
 			var wg sync.WaitGroup
 			for i, it := range a.Tasks {
@@ -157,7 +158,7 @@ func (e *Engine) toolDelegate() *tools.Tool {
 						out[i] = fmt.Sprintf("## %s — error\n%s", it.Agent, err.Error())
 						return
 					}
-					out[i] = formatDelegated(t)
+					out[i] = formatDelegatedLimit(t, resultBudget)
 				}(i)
 			}
 			wg.Wait()
@@ -244,18 +245,38 @@ func (e *Engine) toolAskColleague() *tools.Tool {
 			if tainted && env.Taint != nil {
 				env.Taint()
 			}
-			return prefix + formatDelegated(t), nil
+			return prefix + formatDelegatedLimit(t, e.delegatedResultBudget(env, 1)), nil
 		},
 	}
 }
 
-// maxDelegatedResult bounds a delegate's answer as it lands in the PARENT's context, where it is resent on
-// every remaining turn. The full text stays in the task record: task_status returns it uncapped.
+// maxDelegatedResult is the conservative fallback when no live run is available.
 const maxDelegatedResult = 6000
 
-func formatDelegated(t tasks.Task) string {
-	if r := []rune(strings.TrimSpace(t.Result)); len(r) > maxDelegatedResult {
-		t.Result = string(r[:maxDelegatedResult]) + fmt.Sprintf("\n…[%d more chars not shown — task_status(%d) returns the full result]", len(r)-maxDelegatedResult, t.ID)
+// Divide the current result budget across the batch so later parallel results
+// are not lost when the combined tool output is capped.
+func (e *Engine) delegatedResultBudget(env *tools.Env, batch int) int {
+	if env == nil || env.RunID == 0 {
+		return maxDelegatedResult
+	}
+	e.mu.Lock()
+	run := e.runs[env.RunID]
+	e.mu.Unlock()
+	if run == nil {
+		return maxDelegatedResult
+	}
+	if batch < 1 {
+		batch = 1
+	}
+	return max(512, (toolResultCap(run.ctxTokens.Load(), run.window.Load())-2000)/batch)
+}
+func formatDelegated(t tasks.Task) string { return formatDelegatedLimit(t, maxDelegatedResult) }
+func formatDelegatedLimit(t tasks.Task, limit int) string {
+	if limit < 1 {
+		limit = maxDelegatedResult
+	}
+	if r := []rune(strings.TrimSpace(t.Result)); len(r) > limit {
+		t.Result = string(r[:limit]) + fmt.Sprintf("\n…[%d more chars not shown — task_status(%d) returns the full result]", len(r)-limit, t.ID)
 	}
 	return formatTaskResult(t)
 }
