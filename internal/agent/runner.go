@@ -981,6 +981,9 @@ func (g *loopGuard) progressing() bool {
 func (g *loopGuard) noteReadResult(tool, output string) string {
 	output = strings.TrimSpace(output)
 	if len([]rune(output)) < 40 {
+		g.mu.Lock()
+		g.results = nil
+		g.mu.Unlock()
 		return ""
 	}
 	h := sha1.Sum([]byte(tool + "\x00" + output))

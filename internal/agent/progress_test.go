@@ -30,4 +30,10 @@ func TestRepeatedReadResultsWarnWithoutAborting(t *testing.T) {
 	if !g.progressing() {
 		t.Fatal("new evidence should restore progress")
 	}
+	g.noteReadResult("search", result)
+	g.noteReadResult("search", result)
+	g.noteReadResult("search", "short")
+	if got := g.noteReadResult("search", result); got != "" {
+		t.Fatalf("short intervening result must reset streak: %s", got)
+	}
 }
