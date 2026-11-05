@@ -74,16 +74,14 @@ func (e *Engine) CreateChat(ctx context.Context, title string, projectBankID int
 	if projectBankID != 0 {
 		pb = projectBankID
 	}
-	var id int64
-	if err := e.DB.QueryRow(ctx, `INSERT INTO chats(topic,title,auto_title,project_bank_id) VALUES('tmp-'||md5(random()::text), $1, $2, $3) RETURNING id`, title, title == "", pb).Scan(&id); err != nil {
-		return Chat{}, err
-	}
-	topic := fmt.Sprintf("c%d", id)
-	if _, err := e.DB.Exec(ctx, `UPDATE chats SET topic=$2 WHERE id=$1`, id, topic); err != nil {
+	var topic string
+	if err := e.DB.QueryRow(ctx, `WITH new_chat AS (SELECT nextval(pg_get_serial_sequence('chats','id')) AS id)
+		INSERT INTO chats(id,topic,title,auto_title,project_bank_id)
+		SELECT id,'c'||id,$1,$2,$3 FROM new_chat RETURNING topic`, title, title == "", pb).Scan(&topic); err != nil {
 		return Chat{}, err
 	}
 	if projectBankID != 0 {
-		_, _ = e.DB.Exec(ctx, `UPDATE chats SET suggestion_done=true WHERE id=$1`, id)
+		_, _ = e.DB.Exec(ctx, `UPDATE chats SET suggestion_done=true WHERE topic=$1`, topic)
 	}
 	e.Emit("chats.update", map[string]any{"topic": topic})
 	return e.GetChat(ctx, topic)

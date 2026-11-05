@@ -365,7 +365,7 @@
           <Field label="Timezone" hint="cron schedules, reminders and agents' clock"><Select bind:value={gen.timezone} options={zoneOpts} searchable /></Field>
           <Checkbox checked={!gen.planner_off} onchange={(v) => (gen.planner_off = !v)} label="plan messages first — a quick pass classifies each message, splits real work into steps, looks up the memory they need and asks what only you can decide, before Atlas starts" />
           <Checkbox checked={gen.deferred_mcp} onchange={(v) => (gen.deferred_mcp = v)} label="load assigned MCP tool schemas on demand (experimental; requires reliable tool search)" />
-          <Checkbox checked={!gen.routing_off} onchange={(v) => (gen.routing_off = !v)} label="take messages to their project's chat — a message about a project goes to that project's chat (asking when unsure)" />
+          <Checkbox checked={!gen.routing_off} onchange={(v) => (gen.routing_off = !v)} label="route project messages from Main to their project's chat — messages in other chats stay where you wrote them" />
           <Checkbox checked={!gen.chat_housekeeping_off} onchange={(v) => (gen.chat_housekeeping_off = !v)} label="tidy chats — once a day suggest merging two chats about one subject, moving off-topic messages to a chat of their own, archiving a stale chat or renaming one that drifted (nothing happens until you agree)" />
           <div class="row"><Button variant="primary" onclick={() => saveSetting('general', gen, 'Saved')}>Save</Button></div>
         </Panel>

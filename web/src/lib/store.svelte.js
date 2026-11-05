@@ -2,9 +2,12 @@
 import { untrack } from 'svelte';
 import { FA } from './icons.js';
 import { connect, on, onOpen, onConnState, rpc, setRpcGuard, forceReconnect } from './ws.js';
+import { mergeChatHistory } from './chatHistory.js';
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+let chatListRequest = 0;
+let chatViewVersion = 0;
 
 export const S = $state({
   conn: 'connecting',
@@ -287,7 +290,7 @@ function wire() {
     await loadChats();
     if ((e.from || '') === S.chatTopic) { await selectChat(e.to); toast(`Taken to the “${e.project}” chat`, 'info'); }
   });
-  on('chat.reload', async (e) => { if ((e.topic || '') === S.chatTopic) { const h = await call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }); if (h && S.chatTopic === (e.topic || '')) S.chat = h; } });
+  on('chat.reload', async (e) => { if ((e.topic || '') === S.chatTopic) await loadChatHistory(S.chatTopic); });
   on('notice', (n) => { if (n.level === 'attention' || n.level === 'warning' || n.level === 'error') toast(`${n.agent}: ${short(n.text, 140)}`, n.level === 'attention' ? 'attn' : n.level === 'warning' ? 'warn' : 'err', 9000); });
   on('log', (l) => { if (l.level === 'error') toast(`${l.source}: ${short(l.message, 160)}`, 'err', 8000); });
   on('agents.update', () => { loadAgents(); S.refresh++; });
@@ -351,8 +354,7 @@ export async function refreshAll() {
   call('llm.health', {}, { quiet: true }).then((h) => { if (h) { S.llm.down = !!h.down; S.llm.reason = h.reason || ''; } });
   if (!st || st.setup || st.starting) return; // starting: the splash shows progress; a `startup` event brings us back here when ready
   await loadChats();
-  const [hist, snap] = await Promise.all([call('chat.history', { limit: 120, topic: S.chatTopic }, { quiet: true }), call('runs.snapshot', {}, { quiet: true })]);
-  if (hist) { S.chat = hist; if (hist.length) markRead(S.chatTopic, hist[hist.length - 1].id); }
+  const [, snap] = await Promise.all([loadChatHistory(S.chatTopic), call('runs.snapshot', {}, { quiet: true })]);
   if (snap) {
     S.runs = {};
     for (const r of snap.runs || []) S.runs[r.run] = { ...newRun(r), task_text: r.task_text, tokens_in: r.tokens_in, tokens_out: r.tokens_out, context: r.context, window: r.window, started: r.started, calls: r.calls || 0, breakdown: r.breakdown, _baseCtx: r.context };
@@ -378,11 +380,12 @@ export function markRead(topic, id) {
   if (id && (S.chatRead[topic] || 0) < id) { S.chatRead[topic] = id; lsSet('prism.chatRead', $state.snapshot(S.chatRead)); }
 }
 export async function loadChats() {
+  const request = ++chatListRequest;
   const r = await call('chats.list', {}, { quiet: true });
-  if (!r) return;
+  if (!r || request !== chatListRequest) return;
   S.chats = r;
   for (const c of r) if (c.busy) S.chatBusy[c.topic] = true;
-  if (!r.find((c) => c.topic === S.chatTopic)) S.chatTopic = ''; // the open chat was deleted
+  if (!r.find((c) => c.topic === S.chatTopic)) await selectChat(''); // the open chat was deleted
 }
 /** A chat other than the open one has something the user has not seen yet. */
 export function chatHasNew(c) {
@@ -393,12 +396,18 @@ export function chatHasNew(c) {
 }
 export async function selectChat(topic) {
   if (topic === S.chatTopic) return;
+  chatViewVersion++;
   S.chatTopic = topic;
   lsSet('prism.chatTopic', topic);
   S.chat = [];
+  await loadChatHistory(topic);
+}
+async function loadChatHistory(topic) {
+  const version = ++chatViewVersion;
+  const lastID = S.chat.reduce((max, m) => Math.max(max, m.id || 0), 0);
   const hist = await call('chat.history', { limit: 120, topic }, { quiet: true });
-  if (S.chatTopic !== topic) return; // the user moved on while it loaded
-  S.chat = hist || [];
+  if (!hist || version !== chatViewVersion || S.chatTopic !== topic) return;
+  S.chat = mergeChatHistory(hist, S.chat, lastID);
   markRead(topic, S.chat.length ? S.chat[S.chat.length - 1].id : 0);
 }
 export async function newChat(title = '', projectBankId = 0) {

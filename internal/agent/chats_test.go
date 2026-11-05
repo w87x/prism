@@ -13,6 +13,24 @@ import (
 
 // Web chats are independent: their own history, their own running turn (two can be busy at once), and a
 // "do not remember" chat leaves nothing for memory.
+func TestNewChatIsCreatedWithItsFinalTopic(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	_, err := h.e.DB.Exec(ctx, `CREATE FUNCTION check_new_chat_topic() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN
+		IF NEW.topic <> 'c' || NEW.id THEN RAISE EXCEPTION 'temporary topic is visible'; END IF;
+		RETURN NEW;
+	END $$;
+	CREATE TRIGGER check_new_chat_topic BEFORE INSERT ON chats FOR EACH ROW EXECUTE FUNCTION check_new_chat_topic()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := h.e.CreateChat(ctx, "New chat", 0)
+	if err != nil || chat.Topic != fmt.Sprintf("c%d", chat.ID) {
+		t.Fatalf("chat must have its final topic at insertion: %+v, %v", chat, err)
+	}
+}
+
 func TestWebChatsAreIndependentAndCanRunTogether(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

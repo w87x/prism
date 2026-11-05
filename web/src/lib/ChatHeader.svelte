@@ -1,7 +1,7 @@
 <script>
   // The open chat's bar: its title (click to rename), project focus, whether it feeds memory, archive / delete. Main cannot be
   // renamed or removed. On narrow screens the menu button opens the chat list.
-  import { S, call, toast, confirmBox } from './store.svelte.js';
+  import { S, call, toast, confirmBox, selectChat } from './store.svelte.js';
   import Badge from './ui/Badge.svelte';
   import Button from './ui/Button.svelte';
   import Select from './ui/Select.svelte';
@@ -22,7 +22,7 @@
   let draft = $state('');
   function edit() { if (!chat?.topic) return; draft = chat.title || ''; editing = true; }
   async function saveTitle() { editing = false; if (chat && draft.trim() && draft.trim() !== chat.title) await call('chats.update', { id: chat.id, title: draft.trim() }); }
-  const archive = () => call('chats.update', { id: chat.id, archived: true }).then(() => { S.chatTopic = ''; });
+  const archive = () => call('chats.update', { id: chat.id, archived: true }).then((ok) => { if (ok) selectChat(''); });
   async function remove() {
     if (await confirmBox({ title: 'Delete chat', text: `Delete “${chat.title || 'New chat'}” with all its messages? Facts already learned from it stay in memory.`, ok: 'Delete', danger: true })) await call('chats.delete', { id: chat.id });
   }
