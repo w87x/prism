@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/llm"
 	"prism/internal/settings"
 	"prism/internal/tasks"
 	"prism/internal/textutil"
@@ -141,7 +142,7 @@ func (e *Engine) afterRoutine(ctx context.Context, t tasks.Task, state string, r
 		}
 		r, _ := e.runbookOf(ctx, key)
 		if r.LearnWins >= need {
-			go e.writeRunbook(context.WithoutCancel(ctx), t, r)
+			go e.writeRunbook(llm.WithBackground(context.WithoutCancel(ctx)), t, r)
 		}
 	case "active":
 		if onMain {
@@ -231,7 +232,7 @@ func (e *Engine) maybeAudit(ctx context.Context, t tasks.Task, rb Runbook) {
 		return
 	}
 	go func() {
-		bg := context.WithoutCancel(ctx)
+		bg := llm.WithBackground(context.WithoutCancel(ctx))
 		cctx, cancel := context.WithTimeout(bg, llmCallTimeout)
 		defer cancel()
 		var v struct {

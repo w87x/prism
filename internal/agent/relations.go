@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/llm"
 	"prism/internal/settings"
 	"prism/internal/tasks"
 	"prism/internal/textutil"
@@ -110,7 +111,7 @@ func (e *Engine) startRepair(ctx context.Context, t tasks.Task, note string) {
 	}
 	_, _ = e.DB.Exec(ctx, `INSERT INTO repairs (task_id, agent, what, repair_task, due_at) VALUES ($1,$2,$3,$4, now()+interval '7 days')`, t.ID, t.ToAgent, note, rid)
 	if note != "" {
-		go e.antibodyFromComplaint(context.WithoutCancel(ctx), t, note)
+		go e.antibodyFromComplaint(llm.WithBackground(context.WithoutCancel(ctx)), t, note)
 	}
 }
 

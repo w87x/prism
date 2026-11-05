@@ -397,6 +397,11 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec) (*RunResult, error) {
 	if spec.ReadOnly && p.Model == "" && e.LLM.RoleRef(ctx, "fast") != "" {
 		modelRef = "role:fast" // a scout's look is cheap
 	}
+	if !llm.IsBackground(ctx) && (spec.Interactive || spec.Kind == "quick" || llm.IsInteractive(ctx)) && e.LLM != nil {
+		var finish func()
+		ctx, finish = e.LLM.BeginInteractive(ctx, modelRef, "role:fast")
+		defer finish()
+	}
 	window := e.LLM.Window(ctx, modelRef)
 	ar.window.Store(int64(window))
 
@@ -1428,7 +1433,7 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 						if spec.Interactive && (spec.Channel == "web" || spec.Channel == "telegram") && e.DB != nil {
 							var backgroundID int64
 							if err := e.DB.QueryRow(context.WithoutCancel(ctx), `INSERT INTO chat_background_results(channel,topic,task_id,result,moved_from) VALUES($1,$2,NULLIF($3,0),$4,$5) RETURNING id`, spec.Channel, deliveryTopic, env.TaskID, textutil.Clean(textutil.Brief(txt, 6000)), movedFrom).Scan(&backgroundID); err == nil && spec.Channel == "web" {
-								go e.summarizeBackground(context.WithoutCancel(ctx), backgroundID, spec.Channel, deliveryTopic, env.TaskID, txt)
+								go e.summarizeBackground(llm.WithBackground(context.WithoutCancel(ctx)), backgroundID, spec.Channel, deliveryTopic, env.TaskID, txt)
 							}
 						}
 						e.logChat(context.WithoutCancel(ctx), "system", "", fmt.Sprintf("%s finished in the background: %s", tc.Name, textutil.Brief(txt, 600)), spec.Channel, deliveryTopic, env.TaskID)

@@ -77,6 +77,8 @@ type Notice struct {
 }
 
 func (e *Engine) ask(ctx context.Context, info RunInfo, q tools.Question) (answer string, resultErr error) {
+	resume := llm.SuspendInteractive(ctx)
+	defer resume()
 	pa := &pendingAsk{ID: e.askSeq.Add(1), Q: q, Run: info, ch: make(chan string, 1), Since: time.Now()}
 	e.mu.Lock()
 	e.asks[pa.ID] = pa
@@ -413,6 +415,11 @@ func (e *Engine) UserMessage(ctx context.Context, m UserMsg) error {
 }
 
 func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key string, atlas *Profile, sess *Session, ar *activeRun, msgID int64) {
+	if e.LLM != nil {
+		var finish func()
+		ctx, finish = e.LLM.BeginInteractive(ctx, atlas.Model, "role:fast")
+		defer finish()
+	}
 	input := m.Text
 	// the front door: classify and decompose the message, take it to its project's chat, ask what only the user can decide
 	note := ""
@@ -492,7 +499,7 @@ func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key st
 			e.logChat(ctx, "agent", atlas.Name, text, m.Channel, m.Topic, task.ID)
 			e.touchChat(ctx, m.Channel, m.Topic)
 			if m.Channel == "web" && m.Topic != "" {
-				go e.nameChat(context.WithoutCancel(ctx), m.Topic) // a title and a project suggestion after the first exchange
+				go e.nameChat(llm.WithBackground(context.WithoutCancel(ctx)), m.Topic) // a title and a project suggestion after the first exchange
 			}
 			if e.Memory != nil && e.ChatRemembers(ctx, m.Channel, m.Topic) {
 				_ = e.Memory.AddRaw(ctx, memory.RawMsg{From: atlas.Name, To: "user", Channel: m.Channel, Topic: m.Topic, Text: text, TaskID: task.ID, Agent: atlas.Name, Tainted: res.Tainted})
@@ -1126,14 +1133,14 @@ func (e *Engine) RunTask(ctx context.Context, t tasks.Task, o TaskOpts) tasks.Ta
 		e.afterRoutine(ctx, out, rbState, rb, onMain)
 	}
 	if !o.Scout {
-		go e.learnFromOutcome(context.WithoutCancel(ctx), out) // trails and trust
+		go e.learnFromOutcome(llm.WithBackground(context.WithoutCancel(ctx)), out) // trails and trust
 		if out.Status == tasks.Partial || out.Status == tasks.Failed || out.Status == tasks.WaitingInput {
-			go e.writeHandover(context.WithoutCancel(ctx), out)
+			go e.writeHandover(llm.WithBackground(context.WithoutCancel(ctx)), out)
 		}
 	}
 	e.reopenPromiseIfNotDone(ctx, out)
 	if out.Status == tasks.Done && reviewsPromises(out) { // did the agent do what it said it did (or would do)?
-		go e.ReviewPromises(context.WithoutCancel(ctx), out)
+		go e.ReviewPromises(llm.WithBackground(context.WithoutCancel(ctx)), out)
 	}
 	if e.OnTaskDone != nil && out.Status == tasks.Done {
 		e.OnTaskDone(ctx, out)

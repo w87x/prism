@@ -105,3 +105,103 @@ func TestBackgroundContextIsInherited(t *testing.T) {
 		t.Fatal("background task priority was not inherited")
 	}
 }
+
+func TestInteractiveLeaseYieldsWhileAskingAndPreservesRequiredWork(t *testing.T) {
+	p := inferencePriority{maxWait: time.Second}
+	ctx, finish := p.beginInteractive(context.Background(), []string{"local"})
+	if !IsInteractive(ctx) || isBackgroundInference(ctx, "memory_dedupe") || !isBackgroundInference(WithBackground(ctx), "memory_dedupe") {
+		t.Fatal("wrong inference priority in user task")
+	}
+	ready := make(chan func(), 1)
+	go func() {
+		release, err := p.acquire(context.Background(), "local", true)
+		if err == nil {
+			ready <- release
+		}
+	}()
+	select {
+	case <-ready:
+		t.Fatal("maintenance started during user task")
+	case <-time.After(20 * time.Millisecond):
+	}
+	resume := SuspendInteractive(ctx)
+	select {
+	case release := <-ready:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not resume while user question was pending")
+	}
+	resume()
+	finish()
+	resume()
+	if IsInteractive(ctx) {
+		t.Fatal("finished lease remained active")
+	}
+	if !isBackgroundInference(ctx, "memory_dedupe") {
+		t.Fatal("detached maintenance retained foreground priority")
+	}
+}
+
+func TestFinishWhileInteractiveLeaseIsSuspended(t *testing.T) {
+	p := inferencePriority{}
+	ctx, finish := p.beginInteractive(context.Background(), []string{"local"})
+	resume := SuspendInteractive(ctx)
+	finish()
+	resume()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.foreground["local"] != 0 {
+		t.Fatal("finished suspended lease was reacquired")
+	}
+}
+
+func TestPausingOneUserDoesNotReleaseAnotherUsersPriority(t *testing.T) {
+	p := inferencePriority{maxWait: time.Second}
+	first, finishFirst := p.beginInteractive(context.Background(), []string{"local"})
+	_, finishSecond := p.beginInteractive(context.Background(), []string{"local"})
+	resume := SuspendInteractive(first)
+	ready := make(chan func(), 1)
+	go func() {
+		done, err := p.acquire(context.Background(), "local", true)
+		if err == nil {
+			ready <- done
+		}
+	}()
+	select {
+	case <-ready:
+		t.Fatal("maintenance bypassed the other active user")
+	case <-time.After(20 * time.Millisecond):
+	}
+	finishSecond()
+	select {
+	case done := <-ready:
+		done()
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not start after both users yielded")
+	}
+	resume()
+	finishFirst()
+}
+
+func TestInteractiveLeaseExtendsToSpecialistEndpoint(t *testing.T) {
+	p := inferencePriority{}
+	ctx, finish := p.beginInteractive(context.Background(), []string{"atlas"})
+	l := interactiveFrom(ctx)
+	if !l.extend([]string{"atlas", "specialist"}) {
+		t.Fatal("active lease could not be extended")
+	}
+	p.mu.Lock()
+	if p.foreground["atlas"] != 1 || p.foreground["specialist"] != 1 {
+		t.Fatal("specialist endpoint was not reserved exactly once")
+	}
+	p.mu.Unlock()
+	resume := SuspendInteractive(ctx)
+	l.extend([]string{"another"})
+	resume()
+	p.mu.Lock()
+	if p.foreground["another"] != 1 {
+		t.Fatal("endpoint added while suspended was not reserved on resume")
+	}
+	p.mu.Unlock()
+	finish()
+}
