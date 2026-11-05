@@ -81,19 +81,31 @@ func (e *Engine) checkAcceptance(ctx context.Context, spec RunSpec, res *RunResu
 	if _, declined := notCapable(res.Text); declined {
 		return res
 	}
-	crit := e.Tasks.MetaOf(ctx, t.ID).Criteria
-	if crit == "" {
-		return res
-	}
+	meta := e.Tasks.MetaOf(ctx, t.ID)
+	crit := meta.Criteria
+	checksOK := true
 	if t.SessionID != nil {
 		checks := []func(context.Context, int64, string) (string, error){e.missingSavedArtifact, e.missingCreatedCron}
 		for _, check := range checks {
-			if missing, err := check(ctx, *t.SessionID, res.Text); err == nil && missing != "" {
+			missing, err := check(ctx, *t.SessionID, res.Text)
+			if err != nil {
+				checksOK = false
+				continue
+			}
+			if missing != "" {
 				e.Tasks.SetCriteriaResult(ctx, t.ID, false, missing)
 				res.Text = strings.TrimSpace(res.Text) + "\n\n[Acceptance check: NOT met — " + missing + ".]"
 				return res
 			}
 		}
+	}
+	if crit == "" {
+		// A resumed task may have had a prior deterministic failure. Clear it
+		// once the check no longer finds a missing resource.
+		if checksOK && (meta.CriteriaMet != nil || meta.Gap != "") {
+			e.Tasks.SetCriteriaUnknown(ctx, t.ID, "")
+		}
+		return res
 	}
 	met, gap, ran := e.judgeAcceptance(ctx, crit, t.Input, res.Text, t.ID, t.SessionID)
 	if !ran {

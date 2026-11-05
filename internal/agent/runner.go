@@ -990,6 +990,16 @@ func (g *loopGuard) progressing() bool {
 // aborts a run: repeated results can be legitimate, and the agent decides what to do.
 func (g *loopGuard) noteReadResult(tool, output string) string {
 	output = strings.TrimSpace(output)
+	if tool == "web_fetch" {
+		lines := strings.Split(output, "\n")
+		filtered := lines[:0]
+		for i, line := range lines {
+			if i >= 3 || !strings.HasPrefix(line, "Fetched at: ") {
+				filtered = append(filtered, line)
+			}
+		}
+		output = strings.Join(filtered, "\n")
+	}
 	if len([]rune(output)) < 40 {
 		g.mu.Lock()
 		g.results = nil

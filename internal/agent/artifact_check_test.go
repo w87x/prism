@@ -54,6 +54,22 @@ func TestMissingSavedArtifactChecksOnlyClaimedToolOutput(t *testing.T) {
 	if meta := h.e.Tasks.MetaOf(ctx, task.ID); meta.CriteriaMet == nil || *meta.CriteriaMet {
 		t.Fatalf("criteria: %+v", meta)
 	}
+	unchecked, err := h.e.Tasks.Create(ctx, tasks.Task{FromKind: "agent", ToAgent: "Scout", Input: "save report without optional review", SessionID: &sess.ID}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked = h.e.checkAcceptance(ctx, RunSpec{Task: &unchecked}, &RunResult{Text: result})
+	if !strings.Contains(checked.Text, "NOT met") || len(h.fake.Recorded()) != before {
+		t.Fatalf("deterministic check without criterion: %q", checked.Text)
+	}
+	if err := os.WriteFile(path, []byte("restored"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_ = h.e.checkAcceptance(ctx, RunSpec{Task: &unchecked}, &RunResult{Text: result})
+	if meta := h.e.Tasks.MetaOf(ctx, unchecked.ID); meta.CriteriaMet != nil || meta.Gap != "" {
+		t.Fatalf("stale failure after retry: %+v", meta)
+	}
+
 	if got, err := h.e.missingSavedArtifact(ctx, sess.ID, "No artifact was requested"); err != nil || got != "" {
 		t.Fatalf("unclaimed: %q %v", got, err)
 	}

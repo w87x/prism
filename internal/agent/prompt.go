@@ -9,6 +9,7 @@ import (
 	"prism/internal/llm"
 	"prism/internal/memory"
 	"prism/internal/settings"
+	"prism/internal/textutil"
 	"prism/internal/tools"
 )
 
@@ -44,7 +45,7 @@ If you are blocked by something only the user can decide, call ask_user with a p
 const coordinatorRules = `
 ## Coordinate specialists
 Own the user's outcome. Choose a domain specialist with the necessary tools and, when relevant, a matching skill; keep each instruction self-contained. Give independent pieces together and wait for prerequisites before assigning dependent work. Do not split a coherent job just to add agents. Search existing specialists by capability before considering a new agent; a one-off task alone is not a reason to create one.
-When a specialist reports MISSING CAPABILITY, route the exact missing step to an agent that holds it; pass relevant evidence and artifact references. Then resume the original task with delegate(task_id, instruction) and the actual result. This is an internal blocker, not a question for the user. If the missing capability does not exist, report what remains unresolved. Review results and follow up when evidence or requested work is missing.
+When a specialist reports MISSING CAPABILITY, route the exact missing step to an agent that holds it; pass relevant evidence and artifact references. Then resume the original task with delegate(task_id, instruction) and the actual result. This is an internal blocker, not a question for the user. If the missing capability does not exist, report what remains unresolved. Review results and follow up when evidence or requested work is missing. Once the requested outcomes are supported and no verification remains, answer the user directly; do not delegate another review merely to confirm an already-supported routine result.
 `
 
 // buildSystem assembles the system prompt: soul, rules, skills index, deferred-tool hint,
@@ -118,9 +119,8 @@ func (e *Engine) buildSystem(ctx context.Context, spec RunSpec, env *tools.Env, 
 	return sb.String()
 }
 
-// catalog lists the specialists for the entry agent as bare names grouped by area: this is in Atlas's
-// prompt on every turn, so descriptions stay out of it — agent_find returns them on demand, and a delegation
-// that names no agent is routed to the best match. Kept short on purpose.
+// catalog gives the entry agent a compact domain roster. Short descriptions let it
+// pick a specialist without an extra lookup; full tools and skills stay in agent_find.
 func (e *Engine) catalog(ctx context.Context) string {
 	ps, err := e.Profiles.List(ctx)
 	if err != nil {
@@ -135,10 +135,14 @@ func (e *Engine) catalog(ctx context.Context) string {
 		if _, ok := groups[p.Group]; !ok {
 			order = append(order, p.Group)
 		}
-		groups[p.Group] = append(groups[p.Group], p.Name)
+		entry := p.Name
+		if desc := strings.TrimSpace(p.Description); desc != "" {
+			entry += " (" + textutil.Brief(desc, 100) + ")"
+		}
+		groups[p.Group] = append(groups[p.Group], entry)
 	}
 	var sb strings.Builder
-	sb.WriteString("\n## Specialists (agent_find shows what each does; delegate with no agent picks the best match)\n")
+	sb.WriteString("\n## Specialists (domain summaries; agent_find shows tools and skills; delegate without an agent picks a match)\n")
 	if len(order) == 0 {
 		sb.WriteString("(none yet — ask Forge to create one)\n")
 	}

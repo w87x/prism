@@ -37,3 +37,13 @@ func TestRepeatedReadResultsWarnWithoutAborting(t *testing.T) {
 		t.Fatalf("short intervening result must reset streak: %s", got)
 	}
 }
+
+func TestRepeatedFetchIgnoresAccessTimestamp(t *testing.T) {
+	g := &loopGuard{}
+	for i := 0; i < 3; i++ {
+		got := g.noteReadResult("web_fetch", fmt.Sprintf("URL: https://example.test/a\nFetched at: 2026-11-05T12:00:0%dZ\nStatus: 200\nThe same page content remains unchanged.", i))
+		if i == 2 && !strings.Contains(got, "identical") {
+			t.Fatalf("missing repeated evidence warning: %q", got)
+		}
+	}
+}

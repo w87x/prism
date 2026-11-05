@@ -8,7 +8,7 @@ import (
 	"prism/internal/testutil"
 )
 
-// The entry agent's prompt carries the roster on every turn, so it is bare names by group (no descriptions),
+// The entry agent's prompt carries a compact roster with descriptions by group,
 // and a delegation naming no agent is routed to the best-matching worker — never maintenance staff or the caller.
 func TestCatalogIsCompactAndBestSpecialistRoutes(t *testing.T) {
 	d := testutil.DB(t)
@@ -19,6 +19,7 @@ func TestCatalogIsCompactAndBestSpecialistRoutes(t *testing.T) {
 		{Name: "Scout", Role: RoleWorker, Enabled: true, Group: "Web", Description: "searches the web for release announcements and prices"},
 		{Name: "Cipher", Role: RoleWorker, Enabled: true, Group: "Home", Description: "uploads and organizes files on the NAS"},
 		{Name: "Oneiros", Role: RoleMaint, System: true, Enabled: true, Group: "Maintenance", Description: "dreams up release announcement briefings"},
+		{Name: "LongDesc", Role: RoleWorker, Enabled: true, Group: "Other", Description: strings.Repeat("z", 200)},
 	} {
 		if _, err := ps.Save(ctx, p, "seed"); err != nil {
 			t.Fatal(err)
@@ -29,8 +30,11 @@ func TestCatalogIsCompactAndBestSpecialistRoutes(t *testing.T) {
 	if !strings.Contains(cat, "- Web: Scout") || !strings.Contains(cat, "- Home: Cipher") {
 		t.Fatalf("catalog not grouped by name: %q", cat)
 	}
-	if strings.Contains(cat, "searches the web") || strings.Contains(cat, "Atlas") {
-		t.Fatalf("catalog must not carry descriptions or the entry agent: %q", cat)
+	if strings.Contains(cat, strings.Repeat("z", 150)) {
+		t.Fatalf("catalog description was not bounded: %q", cat)
+	}
+	if !strings.Contains(cat, "searches the web") || strings.Contains(cat, "Atlas") {
+		t.Fatalf("catalog must carry concise domain descriptions and exclude the entry agent: %q", cat)
 	}
 	got, err := e.bestSpecialist(ctx, "find release announcement prices on the web", "Atlas")
 	if err != nil || got != "Scout" {

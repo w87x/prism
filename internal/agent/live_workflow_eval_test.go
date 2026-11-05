@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 // Opt-in end-to-end evaluation: a real model controls Atlas and a specialist,
 // while the database and all task data are disposable and the catalog is a fixture.
 // Run with PRISM_TEST_DSN, PRISM_EVAL_BASE_URL and PRISM_EVAL_MODEL set.
+// Set PRISM_EVAL_PLANNER_OFF=1 for an isolated comparison without the front-door planner.
 type liveFixture struct {
 	agent, group, description, soul, tool, result, request string
 	expected                                               []string
@@ -62,7 +65,7 @@ func runLiveWorkflowFixture(t *testing.T, f liveFixture) {
 	if err := h.e.Settings.Set(ctx, settings.KeyModelRoles, settings.ModelRoles{Chat: "eval-local", Fast: "eval-local", Embedding: "embed"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.e.Settings.Set(ctx, settings.KeyGeneral, settings.General{RoutingOff: true, ChatHousekeepingOff: true}); err != nil {
+	if err := h.e.Settings.Set(ctx, settings.KeyGeneral, settings.General{RoutingOff: true, ChatHousekeepingOff: true, PlannerOff: os.Getenv("PRISM_EVAL_PLANNER_OFF") == "1"}); err != nil {
 		t.Fatal(err)
 	}
 	// The model may only delegate to the fixture specialist; no real-world
@@ -80,7 +83,49 @@ func runLiveWorkflowFixture(t *testing.T, f liveFixture) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
-	h.e.LLM.OnCall(func(llm.Call) { calls.Add(1) })
+	var callMu sync.Mutex
+	var callRecords []llm.Call
+	h.e.LLM.OnCall(func(c llm.Call) { calls.Add(1); callMu.Lock(); callRecords = append(callRecords, c); callMu.Unlock() })
+	logCalls := func() {
+		callMu.Lock()
+		for _, c := range callRecords {
+			t.Logf("model agent=%s action=%s duration_ms=%d wait_ms=%d input=%d output=%d ok=%v", c.Agent, c.Action, c.MS, c.WaitMS, c.In, c.Out, c.OK)
+		}
+		callMu.Unlock()
+		h.events.mu.Lock()
+		deltas := append([]any(nil), h.events.by["run.delta"]...)
+		h.events.mu.Unlock()
+		type stream struct {
+			chars int
+			tail  string
+		}
+		streams := map[string]*stream{}
+		for _, raw := range deltas {
+			d, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			txt, _ := d["text"].(string)
+			if txt == "" {
+				continue
+			}
+			key := fmt.Sprintf("%v/%v/%v", d["run"], d["agent"], d["kind"])
+			s := streams[key]
+			if s == nil {
+				s = &stream{}
+				streams[key] = s
+			}
+			s.chars += len([]rune(txt))
+			s.tail += txt
+			if len(s.tail) > 4000 {
+				s.tail = s.tail[len(s.tail)-4000:]
+			}
+		}
+		for key, s := range streams {
+			pattern, _ := detectRepeat(s.tail)
+			t.Logf("stream %s chars=%d repeated_tail=%v", key, s.chars, pattern != "")
+		}
+	}
 	err = h.e.UserMessage(ctx, UserMsg{Channel: "web", Text: f.request})
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +145,7 @@ func runLiveWorkflowFixture(t *testing.T, f liveFixture) {
 			for _, task := range taskList {
 				states = append(states, task.ToAgent+":"+task.Status)
 			}
+			logCalls()
 			t.Fatalf("workflow timed out; model calls=%d fixture calls=%d streamed deltas=%d tasks=%s", calls.Load(), searches.Load(), h.events.count("run.delta"), strings.Join(states, ","))
 		case <-ticker.C:
 		}
@@ -114,6 +160,7 @@ func runLiveWorkflowFixture(t *testing.T, f liveFixture) {
 			answer = m.Text
 		}
 	}
+	logCalls()
 	t.Logf("workflow model_calls=%d catalog_calls=%d answer=%q", calls.Load(), searches.Load(), answer)
 	if searches.Load() == 0 {
 		t.Fatalf("workflow did not call the fixture: %q", answer)

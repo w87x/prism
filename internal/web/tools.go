@@ -197,7 +197,7 @@ func (s *Service) RegisterTools(reg *tools.Registry) {
 					r = r[:a.MaxChars]
 					more = fmt.Sprintf("\n…[%d more chars; continue with offset=%d]", total-a.Offset-a.MaxChars, a.Offset+a.MaxChars)
 				}
-				head := fmt.Sprintf("URL: %s\nStatus: %d%s\n", page.FinalURL, page.Status, map[bool]string{true: " (browser-rendered)", false: ""}[page.Rendered])
+				head := fmt.Sprintf("URL: %s\nFetched at: %s\nStatus: %d%s\n", page.FinalURL, time.Now().UTC().Format(time.RFC3339), page.Status, map[bool]string{true: " (browser-rendered)", false: ""}[page.Rendered])
 				if page.Learned {
 					head += "Note: fetched via " + page.Via + " because that worked for this site before.\n"
 				}
