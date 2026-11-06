@@ -167,3 +167,16 @@ If PRISM is useful to you, you can buy me a coffee:
 
 PRISM is released under the [MIT License](LICENSE). Third-party components (Go modules, Svelte/Vite, the embedded
 JetBrains Mono and Font Awesome Free fonts) keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+### Encrypted integration backup and transfer
+
+`cmd/prism-integrations` exports provider/model configuration, MCP servers, mail accounts, tool settings and integration settings. It excludes memory, chats, tasks, skills, schedules and agent profiles. The archive contains credentials encrypted and authenticated with AES-256-GCM using a random salt and PBKDF2-HMAC-SHA-256 (600,000 iterations). Choose a strong unique passphrase and keep it separate from the archive.
+
+Set `INTEGRATION_DATABASE_URL` to the source or destination PostgreSQL URL, and supply `INTEGRATION_ARCHIVE_PASSPHRASE` through your shell or secret manager (do not put it in command arguments). Then run:
+
+```sh
+go run ./cmd/prism-integrations export integrations.enc
+go run ./cmd/prism-integrations import integrations.enc
+```
+
+Import requires an initialized database with the same migrations and empty integration tables and settings. It is transactional and refuses to overwrite an existing integration configuration. Telegram is imported disabled to avoid duplicate bot polling. The encrypted format is shared with Facet. Stop or restart applications as appropriate so they reload imported configuration.
