@@ -1391,10 +1391,10 @@ func (e *Engine) execOne(ctx context.Context, ar *activeRun, env *tools.Env, tc 
 		}()
 		r.out, r.err = tool.Run(runCtx, &tenv, []byte(tc.Arguments))
 	}()
-	// A user message that arrives while a tool is running (a specialist working for minutes, a long command) must
-	// not wait for it: stop waiting, hand control back to the model, and let it read the message. Delegated work
-	// keeps running in the background; other tools are cancelled.
-	if steer == nil || tool.Name == "ask_user" { // a pending question is answered through its own channel, not by chatting
+	// Let ordinary tools finish before applying steering: an interrupted write may already have
+	// changed state, and discarding its result would make the next model turn unsafe. Delegation
+	// is different: its independently tracked task can continue while Atlas reads the update.
+	if steer == nil || (tool.Name != "delegate" && tool.Name != "ask_colleague") {
 		r := <-done
 		out, err = r.out, r.err
 	} else {

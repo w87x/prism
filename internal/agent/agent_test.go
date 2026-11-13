@@ -2040,37 +2040,74 @@ func TestSteeringInterruptsAWaitOnDelegatedWork(t *testing.T) {
 	}
 }
 
-// A non-delegating tool that is still running when a message arrives is cancelled, and the model is told so.
-func TestSteeringCancelsAWaitingTool(t *testing.T) {
+// Steering waits for an ordinary tool's outcome, which may include already-applied changes.
+func TestSteeringWaitsForAnInFlightTool(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	cancelled := make(chan struct{})
-	h.e.Tools.Register(&tools.Tool{Name: "stuck", Description: "blocks", Risk: tools.RiskWrite, Auto: true, Params: tools.Obj(""),
-		Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
-			<-ctx.Done()
-			close(cancelled)
+	started, release := make(chan struct{}), make(chan struct{})
+	var cancelled atomic.Bool
+	h.e.Tools.Register(&tools.Tool{Name: "slow_fixture", Description: "waits", Risk: tools.RiskRead, Params: tools.Obj(""), Run: func(ctx context.Context, env *tools.Env, raw json.RawMessage) (string, error) {
+		close(started)
+		select {
+		case <-release:
+			return "fixture result", nil
+		case <-ctx.Done():
+			cancelled.Store(true)
 			return "", ctx.Err()
-		}})
+		}
+	}})
 	steer := make(chan string, 4)
 	h.fake.Handler = func(req map[string]any, call int) testutil.Reply {
 		for _, m := range req["messages"].([]any) {
-			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "Interrupted: the user sent a new message") {
-				return testutil.Reply{Content: "stopped waiting"}
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "updated direction") {
+				return testutil.Reply{Content: "read update and result"}
 			}
 		}
-		return testutil.Reply{Tools: []llm.ToolCall{tc("s1", "stuck", map[string]any{})}}
+		return testutil.Reply{Tools: []llm.ToolCall{tc("s1", "slow_fixture", map[string]any{})}}
 	}
-	p, _ := h.e.Profiles.Save(ctx, Profile{Name: "Waiter", Soul: "You are Waiter.", Tools: []string{"stuck"}, Enabled: true, MaxIterations: 6}, "")
+	p, _ := h.e.Profiles.Save(ctx, Profile{Name: "Waiter", Soul: "You are Waiter.", Tools: []string{"slow_fixture"}, Enabled: true, MaxIterations: 6}, "")
 	sess, _ := h.e.Sessions.Create(ctx, "Waiter", "task", "", 0)
-	go func() { time.Sleep(600 * time.Millisecond); steer <- "hey, stop that" }()
-	res, err := h.e.Run(ctx, RunSpec{Profile: p, Session: sess, Input: "wait for it", Steer: steer, Interactive: true})
-	if err != nil || res.Text != "stopped waiting" {
-		t.Fatalf("run = %+v err=%v", res, err)
+	type outcome struct {
+		res *RunResult
+		err error
 	}
+	finished := make(chan outcome, 1)
+	go func() {
+		res, err := h.e.Run(ctx, RunSpec{Profile: p, Session: sess, Input: "wait for it", Steer: steer, Interactive: true})
+		finished <- outcome{res, err}
+	}()
 	select {
-	case <-cancelled:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the blocked tool must be cancelled")
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("tool did not start")
+	}
+	steer <- "updated direction"
+	select {
+	case got := <-finished:
+		t.Fatalf("run ended before tool: %+v", got)
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case got := <-finished:
+		if got.err != nil || got.res.Text != "read update and result" || cancelled.Load() {
+			t.Fatalf("run=%+v err=%v cancelled=%v", got.res, got.err, cancelled.Load())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not continue")
+	}
+	msgs, err := h.e.Sessions.Messages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, m := range msgs {
+		if m.Role == "tool" && m.Content == "fixture result" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("tool result was lost")
 	}
 }
 

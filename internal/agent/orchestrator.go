@@ -461,8 +461,16 @@ func (e *Engine) chatLoop(ctx context.Context, m UserMsg, images []int64, key st
 	for {
 		task, terr := e.Tasks.Create(ctx, tasks.Task{FromKind: "user", FromName: "user", ToAgent: atlas.Name, Input: input, SessionID: &sess.ID}, true)
 		if terr == nil && fd.Plan != nil && fd.Plan.Class == "task" {
-			if err := e.Tasks.SaveWorkItems(ctx, task.ID, planWorkItems(fd.Plan)); err != nil {
+			items := planWorkItems(fd.Plan)
+			if err := e.Tasks.SaveWorkItems(ctx, task.ID, items); err != nil {
 				e.Emit("log", map[string]any{"level": "error", "message": "Could not save the request plan: " + err.Error()})
+			}
+			if m.Channel == "web" && len(items) > 1 {
+				var labels []string
+				for _, item := range items {
+					labels = append(labels, "- "+textutil.Brief(item.Title, 160))
+				}
+				e.logChat(ctx, "system", "", "Here's my initial approach:\n"+strings.Join(labels, "\n"), m.Channel, m.Topic, task.ID)
 			}
 			fd.Plan = nil // steering messages become their own request
 		}

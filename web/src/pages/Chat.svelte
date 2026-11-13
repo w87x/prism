@@ -293,6 +293,11 @@
       <button class="worktoggle" onclick={() => (workOpen = !workOpen)} aria-expanded={workOpen}>
         {workOpen ? '▾' : '▸'} Work on this request · {work.filter((t) => t.depth > 0 && (t.status === 'running' || t.status === 'queued')).length} active · {work.filter((t) => t.depth > 0 && (t.status === 'partial' || t.status === 'failed' || t.status === 'waiting_input')).length} incomplete
       </button>
+      {#if busy && !workOpen}
+        {#each work.filter((t) => t.depth > 0 && t.status === 'running').slice(0, 3) as task (task.id)}
+          <div class="workstep"><span>Working on: {task.title}</span><span>{task.to_agent}</span></div>
+        {/each}
+      {/if}
       {#if workOpen}
         {#if workItems.length}<div class="sm mute">Draft plan · linked steps show their task's status</div>{/if}
         {#each workItems as item (item.number)}

@@ -96,6 +96,19 @@ func TestChatPersistsPlannerDraftWithoutClaimingCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 15*time.Second, func() bool { return h.events.count("run.end") > 0 && !h.e.ChatBusy(ChatKey("web", "")) })
+	history, err := h.e.ChatHistory(ctx, "web", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var planSeen bool
+	for _, message := range history {
+		if message.Role == "system" && strings.Contains(message.Text, "initial approach") && strings.Contains(message.Text, "Find first") && strings.Contains(message.Text, "Queue second") && message.TaskID != nil {
+			planSeen = true
+		}
+	}
+	if !planSeen {
+		t.Fatalf("initial plan missing from chat: %+v", history)
+	}
 	all, err := h.e.Tasks.List(ctx, tasks.Filter{Agent: "Atlas"})
 	if err != nil {
 		t.Fatal(err)
